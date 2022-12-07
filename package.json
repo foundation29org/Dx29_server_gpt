@@ -1,0 +1,54 @@
+{
+  "name": "Dx29-server",
+  "version": "1.0.0",
+  "description": "Dx29 server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "serve": "nodemon index.js",
+    "test": "jasmine"
+  },
+  "author": "LOA",
+  "license": "MIT",
+  "dependencies": {
+    "@azure/storage-blob": "^12.2.0-preview.1",
+    "async": "^2.6.0",
+    "azure-sb": "^0.10.6",
+    "azure-storage": "^2.10.3",
+    "bcrypt-nodejs": "0.0.3",
+    "body-parser": "^1.18.2",
+    "express": "^4.16.2",
+    "express-handlebars": "^3.0.0",
+    "fs-extra": "^5.0.0",
+    "jasmine": "^3.5.0",
+    "js-sha512": "^0.7.1",
+    "jwt-simple": "^0.5.1",
+    "moment": "^2.19.1",
+    "mongoose": "^4.13.1",
+    "nodemailer": "^4.4.0",
+    "nodemailer-express-handlebars": "^2.0.0",
+    "openai-api": "^1.3.1",
+    "request": "^2.87.0",
+    "wikijs": "^6.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^1.12.1"
+  },
+  "apidoc": {
+    "name": "Health29",
+    "version": "1.0.0",
+    "description": "API docs",
+    "apidoc": {
+      "title": "API for Health29",
+      "url": "https://health29.org/api"
+    },
+    "header": {
+      "title": "Introduction",
+      "filename": "apidoc/header.md"
+    },
+    "footer": {
+      "title": "About Dx29",
+      "filename": "apidoc/footer.md"
+    }
+  }
+}

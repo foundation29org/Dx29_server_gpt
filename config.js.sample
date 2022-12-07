@@ -1,0 +1,21 @@
+// All the keys with values from procces.env must be configured in Azure App service: Configuration/Aplication settings
+module.exports = {
+ client_server: process.env.CLIENT_SERVER, // If you are developing, add a second parameter with "||" and the url for localhost, in prod the first
+ port: process.env.PORT,
+ dbaccounts: process.env.MONGODBACCOUNTS, // If you are developing, add a second parameter with "||" and mongodb data, in prod the first
+ TRANSPORTER_OPTIONS : { // configure the secret keys fot the transporter options, we use nodemailer as transporter
+   host: undefined,
+   port: undefined,
+   secureConnection: undefined,
+    tls: { ciphers: undefined },
+    auth: {
+        user: undefined,
+        pass: undefined
+    }
+ },
+ blobAccessToken:{ // Blob access information: {sasToken:<token>,blobAccountUrl: 'https://<blob_name>.blob.core.windows.net/'}
+    sasToken: undefined,
+    blobAccountUrl: undefined,
+  },
+  OPENAI_API_KEY: undefined, // OPENAI_API_KEY sevice key
+}
