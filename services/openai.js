@@ -1,6 +1,7 @@
 const OpenAI = require('openai-api');
 const config = require('../config')
 const request = require('request')
+const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 
 // Load your key from an environment variable or secret management service
 // (do not include your key directly in your code)
@@ -26,6 +27,7 @@ function callOpenAi (req, res){
         n: 1,
         stream: false
     });
+    blobOpenDx29Ctrl.createBlobOpenDx29(req.body, gptResponse.data);
     res.status(200).send(gptResponse.data)
 })();
 }
