@@ -17,7 +17,7 @@ var options = {
  var transporter = nodemailer.createTransport(TRANSPORTER_OPTIONS);
  transporter.use('compile', hbs(options));
 
-function sendMailSupport (email, lang, role, supportStored){
+function sendMailSupport (email, lang, supportStored){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -52,7 +52,43 @@ function sendMailSupport (email, lang, role, supportStored){
   return decoded
 }
 
+function sendMailErrorGPT (lang, req, response){
+  const decoded = new Promise((resolve, reject) => {
+    var maillistbcc = [
+      TRANSPORTER_OPTIONS.auth.user
+    ];
+
+    var mailOptions = {
+      to: TRANSPORTER_OPTIONS.auth.user,
+      from: TRANSPORTER_OPTIONS.auth.user,
+      bcc: maillistbcc,
+      subject: 'Mensaje para soporte de DX29 GPT - Error GPT',
+      template: 'mail_error_gpt/_es',
+      context: {
+        lang : lang,
+        info: JSON.stringify(req), 
+        response: JSON.stringify(response)
+      }
+    };
+
+    transporter.sendMail(mailOptions, function(error, info){
+      if (error) {
+        console.log(error);
+        reject({
+          status: 401,
+          message: 'Fail sending email'
+        })
+      } else {
+        resolve("ok")
+      }
+    });
+
+  });
+  return decoded
+}
+
 
 module.exports = {
-  sendMailSupport
+  sendMailSupport,
+  sendMailErrorGPT
 }
