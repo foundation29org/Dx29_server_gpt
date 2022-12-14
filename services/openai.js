@@ -51,6 +51,30 @@ function callOpenAi (req, res){
   })();
 }
 
+function opinion (req, res){
+
+  (async () => {
+    try {
+      blobOpenDx29Ctrl.createBlobOpenVote(req.body);
+      res.status(200).send({send: true})
+    }catch(e){
+      console.error("[ERROR] OpenAI responded with status: " + e)
+      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
+					.then(response => {
+						console.log('Email sent')
+					})
+					.catch(response => {
+						//create user, but Failed sending email.
+						console.log('Fail sending email');
+					})
+
+      res.status(500).send(e)
+    }
+    
+  })();
+}
+
 module.exports = {
-	callOpenAi
+	callOpenAi,
+  opinion
 }
