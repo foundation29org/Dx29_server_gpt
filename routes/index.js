@@ -18,4 +18,7 @@ api.post('/homesupport/', supportCtrl.sendMsgLogoutSupport)
 //services OPENAI
 api.post('/callopenai', openAIserviceCtrl.callOpenAi)
 
+//services OPENAI
+api.post('/opinion', openAIserviceCtrl.opinion)
+
 module.exports = api
