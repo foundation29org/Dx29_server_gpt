@@ -9,8 +9,8 @@ const serviceEmail = require('../../services/email')
 function sendMsgLogoutSupport(req, res){
 			let support = new Support()
 			//support.type = 'Home form'
-			support.subject = 'Dx29 GPT support'
-			support.platform = 'Dx29 GPT'
+			support.subject = 'DxGPT support'
+			support.platform = 'DxGPT'
 			support.description = 'Name: '+req.body.userName+', Email: '+ req.body.email+ ', Description: ' +req.body.description
 			support.createdBy = "5c77d0492f45d6006c142ab3";
 			// enviamos Email
