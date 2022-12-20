@@ -27,7 +27,7 @@ function sendMailSupport (email, lang, supportStored){
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DX29 GPT',
+      subject: 'Mensaje para soporte de DxGPT',
       template: 'mail_support/_es',
       context: {
         email : email,
@@ -62,7 +62,7 @@ function sendMailErrorGPT (lang, req, response){
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DX29 GPT - Error GPT',
+      subject: 'Mensaje para soporte de DxGPT - Error GPT',
       template: 'mail_error_gpt/_es',
       context: {
         lang : lang,
