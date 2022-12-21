@@ -2,6 +2,7 @@ const OpenAI = require('openai-api');
 const config = require('../config')
 const request = require('request')
 const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
+const serviceEmail = require('../services/email')
 
 // Load your key from an environment variable or secret management service
 // (do not include your key directly in your code)
@@ -38,7 +39,7 @@ function callOpenAi (req, res){
       }
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e.response)
 					.then(response => {
-						console.log('Email sent')
+            
 					})
 					.catch(response => {
 						//create user, but Failed sending email.
@@ -61,7 +62,38 @@ function opinion (req, res){
       console.error("[ERROR] OpenAI responded with status: " + e)
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
 					.then(response => {
-						console.log('Email sent')
+            
+					})
+					.catch(response => {
+						//create user, but Failed sending email.
+						console.log('Fail sending email');
+					})
+
+      res.status(500).send(e)
+    }
+    
+  })();
+}
+
+function sendFeedback (req, res){
+
+  (async () => {
+    try {
+      blobOpenDx29Ctrl.createBlobFeedbackVoteDown(req.body);
+      serviceEmail.sendMailFeedback(req.body.email, req.body.lang, req.body.info)
+					.then(response => {
+            
+					})
+					.catch(response => {
+						//create user, but Failed sending email.
+						console.log('Fail sending email');
+					})
+      res.status(200).send({send: true})
+    }catch(e){
+      console.error("[ERROR] OpenAI responded with status: " + e)
+      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
+					.then(response => {
+            
 					})
 					.catch(response => {
 						//create user, but Failed sending email.
@@ -76,5 +108,6 @@ function opinion (req, res){
 
 module.exports = {
 	callOpenAi,
-  opinion
+  opinion,
+  sendFeedback
 }
