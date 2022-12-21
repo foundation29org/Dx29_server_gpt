@@ -21,4 +21,6 @@ api.post('/callopenai', openAIserviceCtrl.callOpenAi)
 //services OPENAI
 api.post('/opinion', openAIserviceCtrl.opinion)
 
+api.post('/feedback', openAIserviceCtrl.sendFeedback)
+
 module.exports = api
