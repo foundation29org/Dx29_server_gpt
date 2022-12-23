@@ -6,6 +6,7 @@ const express = require('express')
 const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
 const openAIserviceCtrl = require('../services/openai')
+const translationCtrl = require('../services/translation')
 
 const api = express.Router()
 
@@ -22,5 +23,11 @@ api.post('/callopenai', openAIserviceCtrl.callOpenAi)
 api.post('/opinion', openAIserviceCtrl.opinion)
 
 api.post('/feedback', openAIserviceCtrl.sendFeedback)
+
+
+api.post('/getDetectLanguage', translationCtrl.getDetectLanguage)
+api.post('/translation', translationCtrl.getTranslationDictionary)
+api.post('/translation', translationCtrl.getTranslationDictionary)
+api.post('/translation/segments', translationCtrl.getTranslationSegments)
 
 module.exports = api
