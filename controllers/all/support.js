@@ -24,6 +24,19 @@ function sendMsgLogoutSupport(req, res){
 					})
 }
 
+function sendError(req, res){
+	// enviamos Email
+	serviceEmail.sendMailError(req.body.value,req.body.lang)
+			.then(response => {
+				return res.status(200).send({ message: 'Email sent'})
+			})
+			.catch(response => {
+				//create user, but Failed sending email.
+				res.status(500).send({ message: 'Fail sending email'})
+			})
+}
+
 module.exports = {
-	sendMsgLogoutSupport
+	sendMsgLogoutSupport,
+	sendError
 }
