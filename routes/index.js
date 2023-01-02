@@ -16,6 +16,8 @@ api.get('/langs/',  langCtrl.getLangs)
 //Support
 api.post('/homesupport/', supportCtrl.sendMsgLogoutSupport)
 
+api.post('/senderror', supportCtrl.sendError)
+
 //services OPENAI
 api.post('/callopenai', openAIserviceCtrl.callOpenAi)
 

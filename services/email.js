@@ -122,9 +122,44 @@ function sendMailFeedback (email, lang, info){
   return decoded
 }
 
+function sendMailError (error, lang){
+  const decoded = new Promise((resolve, reject) => {
+    var maillistbcc = [
+      TRANSPORTER_OPTIONS.auth.user
+    ];
+
+    var mailOptions = {
+      to: TRANSPORTER_OPTIONS.auth.user,
+      from: TRANSPORTER_OPTIONS.auth.user,
+      bcc: maillistbcc,
+      subject: 'Mensaje de error para soporte de DxGPT',
+      template: 'mail_error/_es',
+      context: {
+        error : error,
+        lang : lang
+      }
+    };
+
+    transporter.sendMail(mailOptions, function(error, info){
+      if (error) {
+        console.log(error);
+        reject({
+          status: 401,
+          message: 'Fail sending email'
+        })
+      } else {
+        resolve("ok")
+      }
+    });
+
+  });
+  return decoded
+}
+
 
 module.exports = {
   sendMailSupport,
   sendMailErrorGPT,
-  sendMailFeedback
+  sendMailFeedback,
+  sendMailError
 }
