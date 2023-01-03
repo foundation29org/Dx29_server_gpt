@@ -29,7 +29,7 @@ api.post('/feedback', openAIserviceCtrl.sendFeedback)
 
 api.post('/getDetectLanguage', translationCtrl.getDetectLanguage)
 api.post('/translation', translationCtrl.getTranslationDictionary)
-api.post('/translation', translationCtrl.getTranslationDictionary)
+api.post('/translationinvert', translationCtrl.getTranslationDictionaryInvert)
 api.post('/translation/segments', translationCtrl.getTranslationSegments)
 
 module.exports = api
