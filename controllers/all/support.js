@@ -10,9 +10,10 @@ function sendMsgLogoutSupport(req, res){
 			let support = new Support()
 			//support.type = 'Home form'
 			support.subject = 'DxGPT support'
-			support.platform = 'DxGPT'
+			support.email = req.body.email
 			support.description = 'Name: '+req.body.userName+', Email: '+ req.body.email+ ', Description: ' +req.body.description
-			support.createdBy = "5c77d0492f45d6006c142ab3";
+			support.save((err, supportStored) => {
+			})
 			// enviamos Email
 			serviceEmail.sendMailSupport(req.body.email,req.body.lang, support)
 					.then(response => {

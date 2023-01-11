@@ -7,13 +7,11 @@ const Schema = mongoose.Schema
 const { conndbaccounts } = require('../db_connect')
 
 const SupportSchema = Schema({
-	platform: String,
 	subject: String,
 	description: String,
-	type: String,
 	status: {type: String, default: 'unread'},
 	statusDate: {type: Date, default: Date.now},
-	files: Object,
+	email: String,
 	date: {type: Date, default: Date.now}
 })
 
