@@ -3,6 +3,7 @@ const config = require('../config')
 const request = require('request')
 const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
+const Support = require('../models/support')
 
 // Load your key from an environment variable or secret management service
 // (do not include your key directly in your code)
@@ -88,6 +89,17 @@ function sendFeedback (req, res){
 						//create user, but Failed sending email.
 						console.log('Fail sending email');
 					})
+
+
+          let support = new Support()
+          //support.type = 'Home form'
+          support.subject = 'DxGPT vote down'
+          support.subscribe= req.body.subscribe
+          support.email = req.body.email
+          support.description = req.body.info
+          support.save((err, supportStored) => {
+          })
+
       res.status(200).send({send: true})
     }catch(e){
       console.error("[ERROR] OpenAI responded with status: " + e)
