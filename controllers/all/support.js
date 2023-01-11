@@ -25,6 +25,26 @@ function sendMsgLogoutSupport(req, res){
 					})
 }
 
+function sendMsSubscribe(req, res){
+	let support = new Support()
+	//support.type = 'Home form'
+	support.subject = 'DxGPT msg'
+	support.subscribe= req.body.subscribe
+	support.email = req.body.email
+	support.description = req.body.description
+	support.save((err, supportStored) => {
+	})
+	// enviamos Email
+	serviceEmail.sendMailSupport(req.body.email,req.body.lang, support)
+			.then(response => {
+				return res.status(200).send({ message: 'Email sent'})
+			})
+			.catch(response => {
+				//create user, but Failed sending email.
+				res.status(500).send({ message: 'Fail sending email'})
+			})
+}
+
 function sendError(req, res){
 	// enviamos Email
 	serviceEmail.sendMailError(req.body.value,req.body.lang)
@@ -39,5 +59,6 @@ function sendError(req, res){
 
 module.exports = {
 	sendMsgLogoutSupport,
+	sendMsSubscribe,
 	sendError
 }

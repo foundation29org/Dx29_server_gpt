@@ -16,6 +16,7 @@ api.get('/langs/',  langCtrl.getLangs)
 
 //Support
 api.post('/homesupport/', supportCtrl.sendMsgLogoutSupport)
+api.post('/subscribe/', supportCtrl.sendMsSubscribe)
 
 api.post('/senderror', supportCtrl.sendError)
 
