@@ -33,12 +33,13 @@ function callOpenAi (req, res){
       blobOpenDx29Ctrl.createBlobOpenDx29(req.body, gptResponse.data);
       res.status(200).send(gptResponse.data)
     }catch(e){
-      console.error("[ERROR] OpenAI responded with status: " + e.response.status)
+      console.error("[ERROR]: " + e)
       if (e.response.status === 429) {
+        console.error("[ERROR] OpenAI responded with status: " + e.response.status)
           console.log("OpenAI Quota exceeded")
           //handle this case
       }
-      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e.response)
+      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
 					.then(response => {
             
 					})
