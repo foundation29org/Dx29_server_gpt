@@ -34,11 +34,11 @@ function callOpenAi (req, res){
       res.status(200).send(gptResponse.data)
     }catch(e){
       console.error("[ERROR]: " + e)
-      if (e.response.status === 429) {
+      /*if (e.response.status === 429) {
         console.error("[ERROR] OpenAI responded with status: " + e.response.status)
           console.log("OpenAI Quota exceeded")
           //handle this case
-      }
+      }*/
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
 					.then(response => {
             
