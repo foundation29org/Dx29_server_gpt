@@ -21,7 +21,7 @@ function callOpenAi (req, res){
         const gptResponse = await openai.complete({
           engine: 'text-davinci-003',//davinci-instruct-beta-v3
           prompt: jsonText,
-          maxTokens: 300,
+          maxTokens: 400,
           temperature: 0,
           topP: 1,
           presencePenalty: 0,
