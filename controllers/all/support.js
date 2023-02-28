@@ -9,7 +9,7 @@ const serviceEmail = require('../../services/email')
 function sendMsgLogoutSupport(req, res){
 			let support = new Support()
 			//support.type = 'Home form'
-			support.subject = 'DxGPT support'
+			support.subject = 'dxGPT support'
 			support.email = req.body.email
 			support.description = 'Name: '+req.body.userName+', Email: '+ req.body.email+ ', Description: ' +req.body.description
 			support.save((err, supportStored) => {
@@ -28,7 +28,7 @@ function sendMsgLogoutSupport(req, res){
 function sendMsSubscribe(req, res){
 	let support = new Support()
 	//support.type = 'Home form'
-	support.subject = 'DxGPT msg'
+	support.subject = 'dxGPT msg'
 	support.subscribe= req.body.subscribe
 	support.email = req.body.email
 	support.description = req.body.description
