@@ -5,7 +5,7 @@ const express = require('express')
 
 const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
-const openAIserviceCtrl = require('../services/openai')
+const openAIserviceCtrl = require('../services/openai2')
 const translationCtrl = require('../services/translation')
 const ta4hserviceCtrl = require('../services/ta4h')
 
