@@ -21,7 +21,7 @@ function callOpenAi (req, res){
   (async () => {
     try {
       const gptResponse = await openai.createChatCompletion({
-        model: "gpt-3.5-turbo",
+        model: "gpt-3.5-turbo-0613",
         messages: [{role: "user", content:jsonText}],
         //prompt: jsonText,
         temperature: 0,
