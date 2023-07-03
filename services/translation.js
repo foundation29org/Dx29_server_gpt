@@ -5,7 +5,6 @@ const request = require('request')
 
 function getDetectLanguage(req, res) {
     var jsonText = req.body;
-    var category = config.translationCategory;
     var translationKey = config.translationKey;
     request.post({ url: 'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0', json: true, headers: { 'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' }, body: jsonText }, (error, response, body) => {
       if (error) {
@@ -23,10 +22,9 @@ function getDetectLanguage(req, res) {
 
 function getTranslationDictionary (req, res){
   var lang = req.body.lang;
-  var category = config.translationCategory;
   var info = req.body.info;
   var translationKey = config.translationKey;
-  request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from='+lang+'&to=en&category='+category,json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:info}, (error, response, body) => {
+  request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from='+lang+'&to=en',json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:info}, (error, response, body) => {
     if (error) {
       console.error(error)
       res.status(500).send(error)
@@ -42,10 +40,9 @@ function getTranslationDictionary (req, res){
 
 function getTranslationDictionaryInvert (req, res){
   var lang = req.body.lang;
-  var category = config.translationCategory;
   var info = req.body.info;
   var translationKey = config.translationKey;
-  request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from=en&to='+lang+'&category='+category,json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:info}, (error, response, body) => {
+  request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from=en&to='+lang,json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:info}, (error, response, body) => {
     if (error) {
       console.error(error)
       res.status(500).send(error)
@@ -61,10 +58,9 @@ function getTranslationDictionaryInvert (req, res){
 
 function getTranslationSegments(req, res){
     var lang = req.body.lang;
-    var category = config.translationCategory;
     var segments = req.body.info;
     var translationKey = config.translationKey;
-    request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from=en&to='+lang+'&category='+category+'&textType=html',json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:segments}, (error, response, body) => {
+    request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from=en&to='+lang+'&textType=html',json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:segments}, (error, response, body) => {
       if (error) {
         console.error(error)
         res.status(500).send(error)
