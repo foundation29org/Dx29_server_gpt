@@ -18,18 +18,18 @@ function callOpenAi (req, res){
   var jsonText = req.body.value;
   (async () => {
     try {
-      var tempContext = [{ role: "user", content: req.body.value }]
-      const gptResponse = await openai.createChatCompletion({
-        model: "gpt-3.5-turbo-0613",
-        messages: tempContext,
-        //prompt: jsonText,
-        temperature: 0,
-        max_tokens: 800,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
+        const gptResponse = await openai.complete({
+          engine: 'text-davinci-003',//davinci-instruct-beta-v3
+          prompt: jsonText,
+          maxTokens: 400,
+          temperature: 0,
+          topP: 1,
+          presencePenalty: 0,
+          frequencyPenalty: 0,
+          bestOf: 1,
+          n: 1,
+          stream: false
       });
-
       blobOpenDx29Ctrl.createBlobOpenDx29(req.body, gptResponse.data);
       res.status(200).send(gptResponse.data)
     }catch(e){
