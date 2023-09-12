@@ -23,18 +23,19 @@ async function callOpenAi (req, res){
 
       const client = new OpenAIClient(endpoint, new AzureKeyCredential(azureApiKey));
     const deploymentId = "nav29";
-    console.log(jsonText)
     const messages = [
       { role: "user", content: jsonText}
     ];
-    const messages2 = [
-      { role: "system", content: "You are a helpful assistant. You will talk like a pirate." },
-      { role: "user", content: "Can you help me?" },
-      { role: "assistant", content: "Arrrr! Of course, me hearty! What can I do for ye?" },
-      { role: "user", content: "What's the best way to train a parrot?" },
-    ];
-    const result = await client.getChatCompletions(deploymentId, messages);
-    console.log(result);
+
+    const configCall = {
+      temperature: 0,
+      max_tokens: 800,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0
+    }
+
+    const result = await client.getChatCompletions(deploymentId, messages, configCall);
     for (const choice of result.choices) {
       console.log(choice.message);
     }
