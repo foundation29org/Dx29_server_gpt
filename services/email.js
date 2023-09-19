@@ -1,6 +1,7 @@
 'use strict'
 
 const { TRANSPORTER_OPTIONS, client_server } = require('../config')
+const insights = require('../services/insights')
 const nodemailer = require('nodemailer')
 var hbs = require('nodemailer-express-handlebars')
 
@@ -38,6 +39,7 @@ function sendMailSupport (email, lang, supportStored){
 
     transporter.sendMail(mailOptions, function(error, info){
       if (error) {
+        insights.error(error);
         console.log(error);
         reject({
           status: 401,
@@ -73,6 +75,7 @@ function sendMailErrorGPT (lang, req, response){
 
     transporter.sendMail(mailOptions, function(error, info){
       if (error) {
+        insights.error(error);
         console.log(error);
         reject({
           status: 401,
@@ -108,6 +111,7 @@ function sendMailFeedback (email, lang, info){
 
     transporter.sendMail(mailOptions, function(error, info){
       if (error) {
+        insights.error(error);
         console.log(error);
         reject({
           status: 401,
@@ -142,6 +146,7 @@ function sendMailError (error, lang){
 
     transporter.sendMail(mailOptions, function(error, info){
       if (error) {
+        insights.error(error);
         console.log(error);
         reject({
           status: 401,

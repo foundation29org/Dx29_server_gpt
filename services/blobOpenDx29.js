@@ -3,6 +3,7 @@
 const config = require('../config')
 const request = require('request')
 const storage = require("@azure/storage-blob")
+const insights = require('../services/insights')
 const accountnameOpenDx =config.openDxAccessToken.blobAccount;
 const keyOpenDx = config.openDxAccessToken.key;
 const sharedKeyCredentialOpenDx = new storage.StorageSharedKeyCredential(accountnameOpenDx,keyOpenDx);
@@ -13,10 +14,15 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
   );
 
   async function createBlob(containerName, data, fileNameToSave){
-    const containerClient = blobServiceOpenDx.getContainerClient(containerName);
-    const content = data;
-    const blockBlobClient = containerClient.getBlockBlobClient(fileNameToSave);
-    const uploadBlobResponse = await blockBlobClient.upload(content, content.length);
+    try {
+      const containerClient = blobServiceOpenDx.getContainerClient(containerName);
+      const content = data;
+      const blockBlobClient = containerClient.getBlockBlobClient(fileNameToSave);
+      const uploadBlobResponse = await blockBlobClient.upload(content, content.length);
+    } catch (error) {
+      insights.error(error);
+    }
+    
   }
 
   async function createBlobOpenDx29(body, response){

@@ -5,6 +5,7 @@
 // add the user model
 const Support = require('../../models/support')
 const serviceEmail = require('../../services/email')
+const insights = require('../../services/insights')
 
 function sendMsgLogoutSupport(req, res){
 			let support = new Support()
@@ -21,6 +22,7 @@ function sendMsgLogoutSupport(req, res){
 					})
 					.catch(response => {
 						//create user, but Failed sending email.
+						insights.error(response);
 						res.status(500).send({ message: 'Fail sending email'})
 					})
 }
@@ -41,6 +43,7 @@ function sendMsSubscribe(req, res){
 			})
 			.catch(response => {
 				//create user, but Failed sending email.
+				insights.error(response);
 				res.status(500).send({ message: 'Fail sending email'})
 			})
 }
@@ -53,6 +56,7 @@ function sendError(req, res){
 			})
 			.catch(response => {
 				//create user, but Failed sending email.
+				insights.error(response);
 				res.status(500).send({ message: 'Fail sending email'})
 			})
 }
