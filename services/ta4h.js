@@ -36,29 +36,26 @@ async function callTextAnalytics (req, res){
 
     const results = await poller.pollUntilDone();
     
+    let responseResults = [];
+    let hasErrors = false;
+
     for await (const result of results) {
         console.log(`- Document ${result.id}`);
         if (!result.error) {
             console.log("\tRecognized Entities:");
-            res.status(200).send(result)
-            /*for (const entity of result.entities) {
-                console.log(`\t- Entity "${entity.text}" of type ${entity.category}`);
-            }
-            if (result.entityRelations && (result.entityRelations.length > 0)) {
-                console.log(`\tRecognized relations between entities:`);
-                for (const relation of result.entityRelations) {
-                    console.log(
-                        `\t\t- Relation of type ${relation.relationType} found between the following entities:`
-                    );
-                    for (const role of relation.roles) {
-                        console.log(`\t\t\t- "${role.entity.text}" with the role ${role.name}`);
-                    }
-                }
-            }*/
-        } else{
-            insights.error(result.error)
-            res.status(500).send(result.error)
-        } 
+            responseResults.push(result);
+        } else {
+            insights.error(result.error);
+            hasErrors = true;
+            responseResults.push({ error: result.error });
+        }
+    }
+
+    // Send a single response based on the gathered results
+    if (hasErrors) {
+        res.status(500).send(responseResults);
+    } else {
+        res.status(200).send(responseResults);
     }
 }
 

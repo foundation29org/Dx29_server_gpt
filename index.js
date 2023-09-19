@@ -4,10 +4,23 @@
 */
 
 'use strict'
-
+let appInsights = require('applicationinsights');
+const config = require('./config')
+if(config.client_server!='http://localhost:4200'){
+	appInsights.setup(config.INSIGHTS)
+	.setAutoDependencyCorrelation(true)
+    .setAutoCollectRequests(false)
+    .setAutoCollectPerformance(true, true)
+    .setAutoCollectExceptions(true)
+    .setAutoCollectDependencies(false)
+    .setAutoCollectConsole(true)
+    .setUseDiskRetryCaching(true)
+    .setSendLiveMetrics(false)
+    .setDistributedTracingMode(appInsights.DistributedTracingModes.AI)
+    .start();
+}
 const mongoose = require('mongoose');
 const app = require('./app')
-const config = require('./config')
 mongoose.Promise = global.Promise
 
 app.listen(config.port, () => {
