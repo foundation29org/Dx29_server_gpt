@@ -33,7 +33,7 @@ function sendMailSupport (email, lang, supportStored){
       context: {
         email : email,
         lang : lang,
-        info: supportStored
+        info: supportStored.toObject()
       }
     };
 
