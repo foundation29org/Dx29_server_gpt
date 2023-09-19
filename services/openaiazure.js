@@ -1,6 +1,7 @@
 
 const { OpenAIClient, AzureKeyCredential } = require("@azure/openai");
 const config = require('../config')
+const insights = require('../services/insights')
 const request = require('request')
 const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
@@ -8,10 +9,6 @@ const Support = require('../models/support')
 
 const endpoint = config.AZURE_OPENAI_ENDPOINT;
 const azureApiKey = config.AZURE_OPENAI_KEY;
-
-
-
-
 
 async function callOpenAi (req, res){
   //comprobar créditos del usuario
@@ -36,12 +33,13 @@ async function callOpenAi (req, res){
     }
 
     const result = await client.getChatCompletions(deploymentId, messages, configCall);
-    for (const choice of result.choices) {
+    /*for (const choice of result.choices) {
       console.log(choice.message);
-    }
+    }*/
       blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
       res.status(200).send(result)
     }catch(e){
+      insights.error(e);
       console.log(e)
       if (e.response) {
         console.log(e.response.status);
@@ -61,6 +59,7 @@ async function callOpenAi (req, res){
 					})
 					.catch(response => {
 						//create user, but Failed sending email.
+            insights.error(response);
 						console.log('Fail sending email');
 					})
 
@@ -77,12 +76,14 @@ function opinion (req, res){
       blobOpenDx29Ctrl.createBlobOpenVote(req.body);
       res.status(200).send({send: true})
     }catch(e){
+      insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
 					.then(response => {
             
 					})
 					.catch(response => {
+            insights.error(response);
 						//create user, but Failed sending email.
 						console.log('Fail sending email');
 					})
@@ -104,6 +105,7 @@ function sendFeedback (req, res){
 					})
 					.catch(response => {
 						//create user, but Failed sending email.
+            insights.error(response);
 						console.log('Fail sending email');
 					})
 
@@ -119,12 +121,14 @@ function sendFeedback (req, res){
 
       res.status(200).send({send: true})
     }catch(e){
+      insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
 					.then(response => {
             
 					})
 					.catch(response => {
+            insights.error(response);
 						//create user, but Failed sending email.
 						console.log('Fail sending email');
 					})

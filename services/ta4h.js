@@ -5,6 +5,7 @@ const request = require('request')
 const { TextAnalyticsClient, AzureKeyCredential } = require("@azure/ai-text-analytics");
 const key = config.TA_KEY;
 const endpoint = config.TA_ENDPOINT;
+const insights = require('../services/insights')
 const textAnalyticsClient = new TextAnalyticsClient(endpoint, new AzureKeyCredential(key));
 
 async function callTextAnalytics (req, res){
@@ -54,7 +55,10 @@ async function callTextAnalytics (req, res){
                     }
                 }
             }*/
-        } else res.status(500).send(result.error)
+        } else{
+            insights.error(result.error)
+            res.status(500).send(result.error)
+        } 
     }
 }
 
