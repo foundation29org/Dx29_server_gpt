@@ -36,26 +36,15 @@ async function callTextAnalytics (req, res){
 
     const results = await poller.pollUntilDone();
     
-    let responseResults = [];
-    let hasErrors = false;
-
     for await (const result of results) {
         console.log(`- Document ${result.id}`);
         if (!result.error) {
             console.log("\tRecognized Entities:");
-            responseResults.push(result);
-        } else {
-            insights.error(result.error);
-            hasErrors = true;
-            responseResults.push({ error: result.error });
-        }
-    }
-
-    // Send a single response based on the gathered results
-    if (hasErrors) {
-        res.status(500).send(responseResults);
-    } else {
-        res.status(200).send(responseResults);
+            res.status(200).send(result)
+        } else{
+            insights.error(result.error)
+            res.status(500).send(result.error)
+        } 
     }
 }
 
