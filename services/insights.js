@@ -1,11 +1,12 @@
 const config = require('../config')
-let appInsights = require("applicationinsights");
+/*let appInsights = require("applicationinsights");
 appInsights.setup(config.INSIGHTS)
 .setSendLiveMetrics(false)
 .setAutoCollectRequests(false)
 .setAutoCollectDependencies(false)
 .start(); 
-let client = appInsights.defaultClient;
+let client = appInsights.defaultClient;*/
+const insightsClient = require('../index')
 
 function error(message) {
   //client.trackTrace({message: message});
@@ -21,7 +22,7 @@ function error(message) {
     } else {
       stringException = message.toString();
     }
-    client.trackException({exception: new Error(stringException)});
+    insightsClient.client.trackException({exception: new Error(stringException)});
   }
   
 }
