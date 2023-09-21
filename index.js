@@ -6,21 +6,9 @@
 'use strict'
 let appInsights = require('applicationinsights');
 const config = require('./config')
-/*if(config.client_server!='http://localhost:4200'){
+if(config.client_server!='http://localhost:4200'){
     appInsights.setup(config.INSIGHTS)
     .setAutoDependencyCorrelation(true)
-    .setAutoCollectRequests(false)
-    .setAutoCollectPerformance(true, true)
-    .setAutoCollectExceptions(true)
-    .setAutoCollectDependencies(false)
-    .setAutoCollectConsole(true)
-    .setUseDiskRetryCaching(true)
-    .setSendLiveMetrics(false)
-    .setDistributedTracingMode(appInsights.DistributedTracingModes.AI)
-    .start();
-}*/
-appInsights.setup(config.INSIGHTS)
-.setAutoDependencyCorrelation(true)
     .setAutoCollectRequests(true)
     .setAutoCollectPerformance(true, true)
     .setAutoCollectExceptions(true)
@@ -30,6 +18,8 @@ appInsights.setup(config.INSIGHTS)
     .setSendLiveMetrics(true)
     .setDistributedTracingMode(appInsights.DistributedTracingModes.AI)
     .start();
+}
+
 let insightsClient = appInsights.defaultClient;
 const mongoose = require('mongoose');
 const app = require('./app')
@@ -38,8 +28,6 @@ mongoose.Promise = global.Promise
 app.listen(config.port, () => {
     console.log(`API REST corriendo en http://localhost:${config.port}`)
 })
-
-
 
 module.exports = {
     insightsClient

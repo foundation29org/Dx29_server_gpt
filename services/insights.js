@@ -1,11 +1,4 @@
 const config = require('../config')
-/*let appInsights = require("applicationinsights");
-appInsights.setup(config.INSIGHTS)
-.setSendLiveMetrics(false)
-.setAutoCollectRequests(false)
-.setAutoCollectDependencies(false)
-.start(); 
-let client = appInsights.defaultClient;*/
 const insightsClient = require('../index')
 
 function error(message) {
