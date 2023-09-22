@@ -28,7 +28,7 @@ function sendMailSupport (email, lang, supportStored){
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de dxGPT',
+      subject: 'Mensaje para soporte de DxGPT',
       template: 'mail_support/_es',
       context: {
         email : email,
@@ -64,7 +64,7 @@ function sendMailErrorGPT (lang, req, response){
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de dxGPT - Error GPT',
+      subject: 'Mensaje para soporte de DxGPT - Error GPT',
       template: 'mail_error_gpt/_es',
       context: {
         lang : lang,
@@ -100,7 +100,7 @@ function sendMailFeedback (email, lang, info){
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de dxGPT - Feedback Down',
+      subject: 'Mensaje para soporte de DxGPT - Feedback Down',
       template: 'mail_feedback/_es',
       context: {
         email : email,
@@ -136,7 +136,7 @@ function sendMailError (msg, lang){
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje de error para soporte de dxGPT',
+      subject: 'Mensaje de error para soporte de DxGPT',
       template: 'mail_error/_es',
       context: {
         error : msg,
