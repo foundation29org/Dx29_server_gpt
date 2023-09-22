@@ -10,7 +10,7 @@ const insights = require('../../services/insights')
 function sendMsgLogoutSupport(req, res){
 			let support = new Support()
 			//support.type = 'Home form'
-			support.subject = 'dxGPT support'
+			support.subject = 'DxGPT support'
 			support.email = req.body.email
 			support.description = 'Name: '+req.body.userName+', Email: '+ req.body.email+ ', Description: ' +req.body.description
 			support.save((err, supportStored) => {
@@ -30,7 +30,7 @@ function sendMsgLogoutSupport(req, res){
 function sendMsSubscribe(req, res){
 	let support = new Support()
 	//support.type = 'Home form'
-	support.subject = 'dxGPT msg'
+	support.subject = 'DxGPT msg'
 	support.subscribe= req.body.subscribe
 	support.email = req.body.email
 	support.description = req.body.description

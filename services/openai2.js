@@ -100,7 +100,7 @@ function sendFeedback (req, res){
 
           let support = new Support()
           //support.type = 'Home form'
-          support.subject = 'dxGPT vote down'
+          support.subject = 'DxGPT vote down'
           support.subscribe= req.body.subscribe
           support.email = req.body.email
           support.description = req.body.info
