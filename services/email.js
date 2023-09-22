@@ -126,7 +126,7 @@ function sendMailFeedback (email, lang, info){
   return decoded
 }
 
-function sendMailError (error, lang){
+function sendMailError (msg, lang){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -139,7 +139,7 @@ function sendMailError (error, lang){
       subject: 'Mensaje de error para soporte de dxGPT',
       template: 'mail_error/_es',
       context: {
-        error : error,
+        error : msg,
         lang : lang
       }
     };
