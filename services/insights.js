@@ -1,5 +1,5 @@
 const config = require('../config')
-const insightsClient = require('../index')
+const insightsClient = require('./initinsights');
 
 function error(message) {
   //client.trackTrace({message: message});
@@ -15,7 +15,7 @@ function error(message) {
     } else {
       stringException = message.toString();
     }
-    insightsClient.client.trackException({exception: new Error(stringException)});
+    insightsClient.trackException({exception: new Error(stringException)});
   }
   
 }
