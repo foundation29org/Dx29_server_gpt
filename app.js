@@ -4,8 +4,11 @@
 'use strict'
 
 const express = require('express')
+const compression = require('compression');
 const bodyParser = require('body-parser');
 const app = express()
+// habilitar compresión 
+app.use(compression());
 const api = require ('./routes')
 const path = require('path')
 //CORS middleware
