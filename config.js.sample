@@ -16,6 +16,5 @@ module.exports = {
  openDxAccessToken:{ // Blob access information: {sasToken:<token>,blobAccountUrl: 'https://<blob_name>.blob.core.windows.net/'}
     key: undefined,
     blobAccount: undefined,
-  },
-  OPENAI_API_KEY: undefined, // OPENAI_API_KEY sevice key
+  }
 }
