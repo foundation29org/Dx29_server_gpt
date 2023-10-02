@@ -22,11 +22,14 @@ api.post('/senderror', supportCtrl.sendError)
 
 //services OPENAI
 api.post('/callopenai', openAIserviceCtrl.callOpenAi)
+api.post('/callanonymized', openAIserviceCtrl.callOpenAiAnonymized)
 
 //services OPENAI
 api.post('/opinion', openAIserviceCtrl.opinion)
 
 api.post('/feedback', openAIserviceCtrl.sendFeedback)
+
+api.post('/generalfeedback', openAIserviceCtrl.sendGeneralFeedback)
 
 
 api.post('/getDetectLanguage', translationCtrl.getDetectLanguage)
