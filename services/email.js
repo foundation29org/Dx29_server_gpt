@@ -127,7 +127,6 @@ function sendMailFeedback (email, lang, info){
 }
 
 function sendMailGeneralFeedback (info, myuuid){
-  console.log(info)
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user

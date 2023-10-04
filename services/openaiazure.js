@@ -38,6 +38,10 @@ async function callOpenAi (req, res){
       console.log(choice.message);
     }*/
       //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
+      if(result.choices[0].message.content == undefined){
+        //send email
+        serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, result.choices)
+      }
       res.status(200).send(result)
     }catch(e){
       insights.error(e);
