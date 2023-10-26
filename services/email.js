@@ -90,6 +90,43 @@ function sendMailErrorGPT (lang, req, response){
   return decoded
 }
 
+function sendMailErrorGPTIP (lang, req, response, ip){
+  const decoded = new Promise((resolve, reject) => {
+    var maillistbcc = [
+      TRANSPORTER_OPTIONS.auth.user
+    ];
+
+    var mailOptions = {
+      to: TRANSPORTER_OPTIONS.auth.user,
+      from: TRANSPORTER_OPTIONS.auth.user,
+      bcc: maillistbcc,
+      subject: 'Mensaje para soporte de DxGPT - Error GPT',
+      template: 'mail_error_gpt_ip/_es',
+      context: {
+        lang : lang,
+        info: JSON.stringify(req), 
+        response: JSON.stringify(response),
+        ip: ip
+      }
+    };
+
+    transporter.sendMail(mailOptions, function(error, info){
+      if (error) {
+        insights.error(error);
+        console.log(error);
+        reject({
+          status: 401,
+          message: 'Fail sending email'
+        })
+      } else {
+        resolve("ok")
+      }
+    });
+
+  });
+  return decoded
+}
+
 function sendMailFeedback (email, lang, info){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
@@ -203,6 +240,7 @@ function sendMailError (msg, lang){
 module.exports = {
   sendMailSupport,
   sendMailErrorGPT,
+  sendMailErrorGPTIP,
   sendMailFeedback,
   sendMailGeneralFeedback,
   sendMailError
