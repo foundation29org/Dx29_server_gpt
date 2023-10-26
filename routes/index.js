@@ -30,6 +30,7 @@ api.post('/opinion', openAIserviceCtrl.opinion)
 api.post('/feedback', openAIserviceCtrl.sendFeedback)
 
 api.post('/generalfeedback', openAIserviceCtrl.sendGeneralFeedback)
+//api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
 
 api.post('/getDetectLanguage', translationCtrl.getDetectLanguage)

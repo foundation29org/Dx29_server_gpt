@@ -40,7 +40,7 @@ async function callOpenAi (req, res){
       //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
       if(result.choices[0].message.content == undefined){
         //send email
-        serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, result.choices)
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip)
       }
       res.status(200).send(result)
     }catch(e){
@@ -58,7 +58,7 @@ async function callOpenAi (req, res){
           console.log("OpenAI Quota exceeded")
           //handle this case
       }*/
-      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip)
 					.then(response => {
             
 					})
@@ -245,10 +245,81 @@ function sendGeneralFeedback (req, res){
   })();
 }
 
+function getFeedBack(req, res){
+  /*Generalfeedback.aggregate([
+    {
+        $group: {
+            _id: { pregunta1: "$pregunta1", pregunta2: "$pregunta2" },
+            countPregunta1: { $sum: { $cond: [{ $eq: ["$pregunta1", "$pregunta1"] }, 1, 0] } },
+            countPregunta2: { $sum: { $cond: [{ $eq: ["$pregunta2", "$pregunta2"] }, 1, 0] } }
+        }
+    }
+], function(err, results) {
+    if (err) {
+        // Manejar el error como desees, por ejemplo:
+        return res.status(500).send(err);
+    }
+
+    // Procesar los resultados para obtener un formato más amigable
+    let countPregunta1 = {};
+    let countPregunta2 = {};
+
+    results.forEach(result => {
+        countPregunta1[result._id.pregunta1] = result.countPregunta1;
+        countPregunta2[result._id.pregunta2] = result.countPregunta2;
+    });
+
+    // Enviar los resultados
+    res.status(200).send({
+        pregunta1: countPregunta1,
+        pregunta2: countPregunta2
+    });
+});*/
+
+  /*Generalfeedback.find({}, function(err, generalfeedbackList) {
+    var listPregunta1= [];
+    var listPregunta2= [];
+
+		generalfeedbackList.forEach(function(generalfeedback) {
+      listPregunta1.push({name:generalfeedback.pregunta1});
+      listPregunta2.push({name:generalfeedback.pregunta2});
+    });
+    res.status(200).send(listPregunta1)
+  });*/
+
+  Generalfeedback.find({}, function(err, generalfeedbackList) {
+    let frecuenciasP1 = {}; 
+    let frecuenciasP2 = {};
+    generalfeedbackList.forEach(function(doc) {
+      let p1 = doc.pregunta1;
+    let p2 = doc.pregunta2;
+  
+    if (frecuenciasP1[p1]) {
+      frecuenciasP1[p1]++;
+    } else {
+      frecuenciasP1[p1] = 1;
+    }
+  
+    if (frecuenciasP2[p2]) {
+      frecuenciasP2[p2]++;
+    } else {
+      frecuenciasP2[p2] = 1; 
+    }
+    });
+    
+    res.status(200).send({
+      pregunta1: frecuenciasP1,
+      pregunta2: frecuenciasP2
+  });
+  })
+
+}
+
 module.exports = {
 	callOpenAi,
   callOpenAiAnonymized,
   opinion,
   sendFeedback,
-  sendGeneralFeedback
+  sendGeneralFeedback,
+  getFeedBack
 }
