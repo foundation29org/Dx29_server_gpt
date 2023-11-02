@@ -19,7 +19,7 @@ async function callOpenAi(req, res) {
   (async () => {
     try {
       //if req.body.value contains orvosi, orvosok, or orvoshoz
-      let pattern = /orvosi|orvosok|orvoshoz/i;
+      let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
        let containsWord = pattern.test(req.body.value);
       if(containsWord || req.body.ip == ''){
         serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip)
