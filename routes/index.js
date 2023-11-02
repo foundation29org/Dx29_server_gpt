@@ -8,37 +8,51 @@ const supportCtrl = require('../controllers/all/support')
 const openAIserviceCtrl = require('../services/openaiazure')
 const translationCtrl = require('../services/translation')
 const ta4hserviceCtrl = require('../services/ta4h')
+const cors = require('cors');
 
 const api = express.Router()
 
+// Lista de dominios permitidos
+const whitelist = ['https://dxgpt.app'];
+const corsOptions = {
+    origin: function (origin, callback) {
+        console.log(origin)
+      if (whitelist.indexOf(origin) !== -1 || !origin) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  };
+
 // lang routes, using the controller lang, this controller has methods
-api.get('/langs/',  langCtrl.getLangs)
+api.get('/langs/', cors(corsOptions),  langCtrl.getLangs)
 
 //Support
-api.post('/homesupport/', supportCtrl.sendMsgLogoutSupport)
-api.post('/subscribe/', supportCtrl.sendMsSubscribe)
+api.post('/homesupport/', cors(corsOptions), supportCtrl.sendMsgLogoutSupport)
+api.post('/subscribe/', cors(corsOptions), supportCtrl.sendMsSubscribe)
 
-api.post('/senderror', supportCtrl.sendError)
-
-//services OPENAI
-api.post('/callopenai', openAIserviceCtrl.callOpenAi)
-api.post('/callanonymized', openAIserviceCtrl.callOpenAiAnonymized)
+api.post('/senderror', cors(corsOptions), supportCtrl.sendError)
 
 //services OPENAI
-api.post('/opinion', openAIserviceCtrl.opinion)
+api.post('/callopenai', cors(corsOptions), openAIserviceCtrl.callOpenAi)
+api.post('/callanonymized', cors(corsOptions), openAIserviceCtrl.callOpenAiAnonymized)
 
-api.post('/feedback', openAIserviceCtrl.sendFeedback)
+//services OPENAI
+api.post('/opinion', cors(corsOptions), openAIserviceCtrl.opinion)
 
-api.post('/generalfeedback', openAIserviceCtrl.sendGeneralFeedback)
+api.post('/feedback', cors(corsOptions), openAIserviceCtrl.sendFeedback)
+
+api.post('/generalfeedback', cors(corsOptions), openAIserviceCtrl.sendGeneralFeedback)
 //api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
 
-api.post('/getDetectLanguage', translationCtrl.getDetectLanguage)
-api.post('/translation', translationCtrl.getTranslationDictionary)
-api.post('/translationinvert', translationCtrl.getTranslationDictionaryInvert)
-api.post('/translation/segments', translationCtrl.getTranslationSegments)
+api.post('/getDetectLanguage', cors(corsOptions), translationCtrl.getDetectLanguage)
+api.post('/translation', cors(corsOptions), translationCtrl.getTranslationDictionary)
+api.post('/translationinvert', cors(corsOptions), translationCtrl.getTranslationDictionaryInvert)
+api.post('/translation/segments', cors(corsOptions), translationCtrl.getTranslationSegments)
 
 //services ta4h
-api.post('/callTextAnalytics', ta4hserviceCtrl.callTextAnalytics)
+api.post('/callTextAnalytics', cors(corsOptions), ta4hserviceCtrl.callTextAnalytics)
 
 module.exports = api
