@@ -7,7 +7,7 @@ const insights = require('../services/insights')
 function getDetectLanguage(req, res) {
     var jsonText = req.body;
     var translationKey = config.translationKey;
-    let pattern = /orvosi|orvosok|orvoshoz/i;
+    let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
     let containsWord = pattern.test(jsonText[0].text);
     if(containsWord){
       let resp = [
