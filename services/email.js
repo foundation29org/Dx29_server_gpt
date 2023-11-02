@@ -236,6 +236,40 @@ function sendMailError (msg, lang){
   return decoded
 }
 
+function sendMailControlCall (req){
+  const decoded = new Promise((resolve, reject) => {
+    var maillistbcc = [
+      TRANSPORTER_OPTIONS.auth.user
+    ];
+
+    var mailOptions = {
+      to: TRANSPORTER_OPTIONS.auth.user,
+      from: TRANSPORTER_OPTIONS.auth.user,
+      bcc: maillistbcc,
+      subject: 'Mensaje para soporte de DxGPT - ControlCall',
+      template: 'mail_error_control_call/_es',
+      context: {
+        info: JSON.stringify(req)
+      }
+    };
+
+    transporter.sendMail(mailOptions, function(error, info){
+      if (error) {
+        insights.error(error);
+        console.log(error);
+        reject({
+          status: 401,
+          message: 'Fail sending email'
+        })
+      } else {
+        resolve("ok")
+      }
+    });
+
+  });
+  return decoded
+}
+
 
 module.exports = {
   sendMailSupport,
@@ -243,5 +277,6 @@ module.exports = {
   sendMailErrorGPTIP,
   sendMailFeedback,
   sendMailGeneralFeedback,
-  sendMailError
+  sendMailError,
+  sendMailControlCall
 }
