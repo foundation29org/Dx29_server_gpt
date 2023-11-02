@@ -11,39 +11,51 @@ const Generalfeedback = require('../models/generalfeedback')
 const endpoint = config.AZURE_OPENAI_ENDPOINT;
 const azureApiKey = config.AZURE_OPENAI_KEY;
 
-async function callOpenAi (req, res){
+async function callOpenAi(req, res) {
   //comprobar créditos del usuario
-  
+
 
   var jsonText = req.body.value;
   (async () => {
     try {
-
-      const client = new OpenAIClient(endpoint, new AzureKeyCredential(azureApiKey));
-    const deploymentId = "normalcalls";
-    const messages = [
-      { role: "user", content: jsonText}
-    ];
-
-    const configCall = {
-      temperature: 0,
-      max_tokens: 800,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0
-    }
-
-    const result = await client.getChatCompletions(deploymentId, messages, configCall);
-    /*for (const choice of result.choices) {
-      console.log(choice.message);
-    }*/
-      //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
-      if(result.choices[0].message.content == undefined){
-        //send email
-        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip)
+      //if req.body.value contains orvosi, orvosok, or orvoshoz
+      let pattern = /orvosi|orvosok|orvoshoz/i;
+       let containsWord = pattern.test(req.body.value);
+      if(containsWord || req.body.ip == ''){
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip)
+        let result = 
+          {
+            "result": "bloqued"
+          };
+        res.status(200).send(result)
+      }else{
+        const client = new OpenAIClient(endpoint, new AzureKeyCredential(azureApiKey));
+        const deploymentId = "normalcalls";
+        const messages = [
+          { role: "user", content: jsonText }
+        ];
+  
+        const configCall = {
+          temperature: 0,
+          max_tokens: 800,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0
+        }
+  
+        const result = await client.getChatCompletions(deploymentId, messages, configCall);
+        /*for (const choice of result.choices) {
+          console.log(choice.message);
+        }*/
+        //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
+        if (result.choices[0].message.content == undefined) {
+          //send email
+          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip)
+        }
+        res.status(200).send(result)
       }
-      res.status(200).send(result)
-    }catch(e){
+      
+    } catch (e) {
       insights.error(e);
       console.log(e)
       if (e.response) {
@@ -59,18 +71,18 @@ async function callOpenAi (req, res){
           //handle this case
       }*/
       serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip)
-					.then(response => {
-            
-					})
-					.catch(response => {
-						//create user, but Failed sending email.
-            insights.error(response);
-						console.log('Fail sending email');
-					})
+        .then(response => {
+
+        })
+        .catch(response => {
+          //create user, but Failed sending email.
+          insights.error(response);
+          console.log('Fail sending email');
+        })
 
       res.status(500).send(e)
     }
-    
+
   })();
 }
 
@@ -98,7 +110,7 @@ async function callOpenAiAnonymized(req, res) {
     const deploymentId = "anonymized";
 
     const messages = [
-      { role: "user", content: anonymizationPrompt}
+      { role: "user", content: anonymizationPrompt }
     ];
 
     const configCall = {
@@ -119,7 +131,7 @@ async function callOpenAiAnonymized(req, res) {
     }
     blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
     res.status(200).send(result)
-  } catch(e) {
+  } catch (e) {
     insights.error(e);
     console.log(e)
     if (e.response) {
@@ -133,119 +145,119 @@ async function callOpenAiAnonymized(req, res) {
   }
 }
 
-function opinion (req, res){
+function opinion(req, res) {
 
   (async () => {
     try {
       blobOpenDx29Ctrl.createBlobOpenVote(req.body);
-      res.status(200).send({send: true})
-    }catch(e){
+      res.status(200).send({ send: true })
+    } catch (e) {
       insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
-					.then(response => {
-            
-					})
-					.catch(response => {
-            insights.error(response);
-						//create user, but Failed sending email.
-						console.log('Fail sending email');
-					})
+        .then(response => {
+
+        })
+        .catch(response => {
+          insights.error(response);
+          //create user, but Failed sending email.
+          console.log('Fail sending email');
+        })
 
       res.status(500).send(e)
     }
-    
+
   })();
 }
 
-function sendFeedback (req, res){
+function sendFeedback(req, res) {
 
   (async () => {
     try {
       blobOpenDx29Ctrl.createBlobFeedbackVoteDown(req.body);
       serviceEmail.sendMailFeedback(req.body.email, req.body.lang, req.body.info)
-					.then(response => {
-            
-					})
-					.catch(response => {
-						//create user, but Failed sending email.
-            insights.error(response);
-						console.log('Fail sending email');
-					})
+        .then(response => {
+
+        })
+        .catch(response => {
+          //create user, but Failed sending email.
+          insights.error(response);
+          console.log('Fail sending email');
+        })
 
 
-          let support = new Support()
-          //support.type = 'Home form'
-          support.subject = 'DxGPT vote down'
-          support.subscribe= req.body.subscribe
-          support.email = req.body.email
-          support.description = req.body.info
-          support.save((err, supportStored) => {
-          })
+      let support = new Support()
+      //support.type = 'Home form'
+      support.subject = 'DxGPT vote down'
+      support.subscribe = req.body.subscribe
+      support.email = req.body.email
+      support.description = req.body.info
+      support.save((err, supportStored) => {
+      })
 
-      res.status(200).send({send: true})
-    }catch(e){
+      res.status(200).send({ send: true })
+    } catch (e) {
       insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
-					.then(response => {
-            
-					})
-					.catch(response => {
-            insights.error(response);
-						//create user, but Failed sending email.
-						console.log('Fail sending email');
-					})
+        .then(response => {
+
+        })
+        .catch(response => {
+          insights.error(response);
+          //create user, but Failed sending email.
+          console.log('Fail sending email');
+        })
 
       res.status(500).send(e)
     }
-    
+
   })();
 }
 
-function sendGeneralFeedback (req, res){
+function sendGeneralFeedback(req, res) {
 
   (async () => {
     try {
       let generalfeedback = new Generalfeedback()
-			generalfeedback.myuuid = req.body.myuuid
-			generalfeedback.pregunta1 = req.body.value.pregunta1
+      generalfeedback.myuuid = req.body.myuuid
+      generalfeedback.pregunta1 = req.body.value.pregunta1
       generalfeedback.pregunta2 = req.body.value.pregunta2
       generalfeedback.moreFunct = req.body.value.moreFunct
       generalfeedback.freeText = req.body.value.freeText
-			generalfeedback.save((err, generalfeedbackStored) => {
-			})
+      generalfeedback.save((err, generalfeedbackStored) => {
+      })
       serviceEmail.sendMailGeneralFeedback(req.body.value, req.body.myuuid)
-					.then(response => {
-            
-					})
-					.catch(response => {
-            insights.error(response);
-						//create user, but Failed sending email.
-						console.log('Fail sending email');
-					})
+        .then(response => {
 
-      res.status(200).send({send: true})
-    }catch(e){
+        })
+        .catch(response => {
+          insights.error(response);
+          //create user, but Failed sending email.
+          console.log('Fail sending email');
+        })
+
+      res.status(200).send({ send: true })
+    } catch (e) {
       insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
       serviceEmail.sendMailErrorGPT(req.body.lang, req.body, e)
-					.then(response => {
-            
-					})
-					.catch(response => {
-            insights.error(response);
-						//create user, but Failed sending email.
-						console.log('Fail sending email');
-					})
+        .then(response => {
+
+        })
+        .catch(response => {
+          insights.error(response);
+          //create user, but Failed sending email.
+          console.log('Fail sending email');
+        })
 
       res.status(500).send(e)
     }
-    
+
   })();
 }
 
-function getFeedBack(req, res){
+function getFeedBack(req, res) {
   /*Generalfeedback.aggregate([
     {
         $group: {
@@ -280,43 +292,43 @@ function getFeedBack(req, res){
     var listPregunta1= [];
     var listPregunta2= [];
 
-		generalfeedbackList.forEach(function(generalfeedback) {
+    generalfeedbackList.forEach(function(generalfeedback) {
       listPregunta1.push({name:generalfeedback.pregunta1});
       listPregunta2.push({name:generalfeedback.pregunta2});
     });
     res.status(200).send(listPregunta1)
   });*/
 
-  Generalfeedback.find({}, function(err, generalfeedbackList) {
-    let frecuenciasP1 = {}; 
+  Generalfeedback.find({}, function (err, generalfeedbackList) {
+    let frecuenciasP1 = {};
     let frecuenciasP2 = {};
-    generalfeedbackList.forEach(function(doc) {
+    generalfeedbackList.forEach(function (doc) {
       let p1 = doc.pregunta1;
-    let p2 = doc.pregunta2;
-  
-    if (frecuenciasP1[p1]) {
-      frecuenciasP1[p1]++;
-    } else {
-      frecuenciasP1[p1] = 1;
-    }
-  
-    if (frecuenciasP2[p2]) {
-      frecuenciasP2[p2]++;
-    } else {
-      frecuenciasP2[p2] = 1; 
-    }
+      let p2 = doc.pregunta2;
+
+      if (frecuenciasP1[p1]) {
+        frecuenciasP1[p1]++;
+      } else {
+        frecuenciasP1[p1] = 1;
+      }
+
+      if (frecuenciasP2[p2]) {
+        frecuenciasP2[p2]++;
+      } else {
+        frecuenciasP2[p2] = 1;
+      }
     });
-    
+
     res.status(200).send({
       pregunta1: frecuenciasP1,
       pregunta2: frecuenciasP2
-  });
+    });
   })
 
 }
 
 module.exports = {
-	callOpenAi,
+  callOpenAi,
   callOpenAiAnonymized,
   opinion,
   sendFeedback,
