@@ -13,8 +13,8 @@ const cors = require('cors');
 const api = express.Router()
 
 // Lista de dominios permitidos
-//const whitelist = ['https://dxgpt.app'];
-const whitelist = ['https://dxgpt.app', 'http://localhost:4200'];
+const whitelist = ['https://dxgpt.app'];
+//const whitelist = ['https://dxgpt.app', 'http://localhost:4200'];
 const corsOptions = {
     origin: function (origin, callback) {
         console.log(origin)
