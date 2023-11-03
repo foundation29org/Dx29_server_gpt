@@ -22,7 +22,19 @@ async function callOpenAi(req, res) {
       let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
        let containsWord = pattern.test(req.body.value);
       if(containsWord || req.body.ip == ''){
-        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip)
+        // La IP del cliente
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo)
         let result = 
           {
             "result": "bloqued"
@@ -50,7 +62,19 @@ async function callOpenAi(req, res) {
         //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
         if (result.choices[0].message.content == undefined) {
           //send email
-          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip)
+          // La IP del cliente
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip, requestInfo)
         }
         res.status(200).send(result)
       }
@@ -70,7 +94,19 @@ async function callOpenAi(req, res) {
           console.log("OpenAI Quota exceeded")
           //handle this case
       }*/
-      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip)
+       // La IP del cliente
+       const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+       const requestInfo = {
+           method: req.method,
+           url: req.url,
+           headers: req.headers,
+           origin: origin,
+           body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+           ip: clientIp,
+           params: req.params,
+           query: req.query,
+         };
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo)
         .then(response => {
 
         })

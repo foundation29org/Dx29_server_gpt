@@ -90,7 +90,8 @@ function sendMailErrorGPT (lang, req, response){
   return decoded
 }
 
-function sendMailErrorGPTIP (lang, req, response, ip){
+function sendMailErrorGPTIP (lang, req, response, ip, requestInfo){
+  
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -106,7 +107,8 @@ function sendMailErrorGPTIP (lang, req, response, ip){
         lang : lang,
         info: JSON.stringify(req), 
         response: JSON.stringify(response),
-        ip: ip
+        ip: ip,
+        requestInfo: JSON.stringify(requestInfo),
       }
     };
 
