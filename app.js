@@ -6,12 +6,9 @@
 const express = require('express')
 const compression = require('compression');
 const bodyParser = require('body-parser');
-const config= require('./config')
 const app = express()
 // habilitar compresión 
 app.use(compression());
-
-const myApiKey = config.Server_Key;
 
 
 const api = require ('./routes')
@@ -37,21 +34,6 @@ app.use(bodyParser.urlencoded({limit: '50mb', extended: false}))
 app.use(bodyParser.json({limit: '50mb'}))
 app.use(setCrossDomain);
 
-const checkApiKey = (req, res, next) => {
-  // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
-  if (req.method === 'OPTIONS') {
-    next();
-  } else {
-    const apiKey = req.get('x-api-key');
-    if (apiKey && apiKey === myApiKey) {
-      next();
-    } else {
-      res.status(401).json({ error: 'API Key no válida o ausente' });
-    }
-  }
-};
-
-app.use(checkApiKey);
 
 // use the forward slash with the module api api folder created routes
 app.use('/api',api)
