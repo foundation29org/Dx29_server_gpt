@@ -44,8 +44,18 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
       var result = await createBlob(tempUrl, info, fileNameNcr);
   }
 
-  async function createBlobCallsOpenDx29(body, response){
+  function replacer(key, value) {
+    // Suponemos que la propiedad que causa la referencia circular se llama 'body'
+    if (key === 'body' && typeof value === 'object' && value !== null) {
+      // Se podría devolver una versión reducida del 'body' o simplemente omitirlo
+      return; // undefined omite la propiedad del objeto serializado
+    }
+    return value;
+  }
+  
+  async function createBlobCallsOpenDx29(body, response, requestInfo){
     body.response = response
+    body.requestInfo = requestInfo
     var info = JSON.stringify(body);
     var now = new Date();
       var y = now.getFullYear();

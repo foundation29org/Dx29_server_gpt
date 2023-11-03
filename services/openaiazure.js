@@ -69,17 +69,14 @@ async function callOpenAi(req, res) {
             url: req.url,
             headers: req.headers,
             origin: origin,
-            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
             ip: clientIp,
             params: req.params,
             query: req.query,
           };
-          if(result.data){
-            result.data.requestInfo = requestInfo;
-          }
           
-        blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data);
+        blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data, requestInfo);
         if (result.data.choices[0].message.content == undefined) {
+            requestInfo.body = req.body;
             serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
           }
         res.status(200).send(result.data)
