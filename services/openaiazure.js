@@ -62,11 +62,6 @@ async function callOpenAi(req, res) {
                 'Ocp-Apim-Subscription-Key': ApiManagementKey,
             }
         }); 
-        
-        //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
-        if (result.data.choices[0].message.content == undefined) {
-          //send email
-          // La IP del cliente
         const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
         const origin = req.get('origin');
         const requestInfo = {
@@ -79,8 +74,14 @@ async function callOpenAi(req, res) {
             params: req.params,
             query: req.query,
           };
-          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
-        }
+          if(result.data){
+            result.data.requestInfo = requestInfo;
+          }
+          
+        blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data);
+        if (result.data.choices[0].message.content == undefined) {
+            serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
+          }
         res.status(200).send(result.data)
       }
       
