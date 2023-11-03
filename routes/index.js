@@ -13,8 +13,8 @@ const serviceEmail = require('../services/email')
 const api = express.Router()
 
 // Lista de dominios permitidos
-const whitelist = ['https://dxgpt.app'];
-//const whitelist = ['https://dxgpt.app', 'http://localhost:4200'];
+//const whitelist = ['https://dxgpt.app'];
+const whitelist = ['https://dxgpt.app', 'http://localhost:4200'];
 
   // Middleware personalizado para CORS
 function corsWithOptions(req, res, next) {
