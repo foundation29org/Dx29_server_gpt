@@ -11,7 +11,8 @@ const ta4hserviceCtrl = require('../services/ta4h')
 const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
-
+const config= require('../config')
+const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
 //const whitelist = ['https://dxgpt.app'];
 const whitelist = ['https://dxgpt.app', 'http://localhost:4200'];
@@ -45,34 +46,48 @@ function corsWithOptions(req, res, next) {
     cors(corsOptions)(req, res, next);
   }
 
+  const checkApiKey = (req, res, next) => {
+    // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
+    if (req.method === 'OPTIONS') {
+      return next();
+    } else {
+      const apiKey = req.get('x-api-key');
+      if (apiKey && apiKey === myApiKey) {
+        return next();
+      } else {
+        return res.status(401).json({ error: 'API Key no válida o ausente' });
+      }
+    }
+  };
+
 // lang routes, using the controller lang, this controller has methods
 api.get('/langs/',  langCtrl.getLangs)
 
 //Support
-api.post('/homesupport/', corsWithOptions, supportCtrl.sendMsgLogoutSupport)
-api.post('/subscribe/', corsWithOptions, supportCtrl.sendMsSubscribe)
+api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogoutSupport)
+api.post('/subscribe/', corsWithOptions, checkApiKey, supportCtrl.sendMsSubscribe)
 
-api.post('/senderror', corsWithOptions, supportCtrl.sendError)
-
-//services OPENAI
-api.post('/callopenai', corsWithOptions, openAIserviceCtrl.callOpenAi)
-api.post('/callanonymized', corsWithOptions, openAIserviceCtrl.callOpenAiAnonymized)
+api.post('/senderror', corsWithOptions, checkApiKey, supportCtrl.sendError)
 
 //services OPENAI
-api.post('/opinion', corsWithOptions, openAIserviceCtrl.opinion)
+api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
+api.post('/callanonymized', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiAnonymized)
 
-api.post('/feedback', corsWithOptions, openAIserviceCtrl.sendFeedback)
+//services OPENAI
+api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
 
-api.post('/generalfeedback', corsWithOptions, openAIserviceCtrl.sendGeneralFeedback)
+api.post('/feedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendFeedback)
+
+api.post('/generalfeedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendGeneralFeedback)
 //api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
 
-api.post('/getDetectLanguage', corsWithOptions, translationCtrl.getDetectLanguage)
-api.post('/translation', corsWithOptions, translationCtrl.getTranslationDictionary)
-api.post('/translationinvert', corsWithOptions, translationCtrl.getTranslationDictionaryInvert)
-api.post('/translation/segments', corsWithOptions, translationCtrl.getTranslationSegments)
+api.post('/getDetectLanguage', corsWithOptions, checkApiKey, translationCtrl.getDetectLanguage)
+api.post('/translation', corsWithOptions, checkApiKey, translationCtrl.getTranslationDictionary)
+api.post('/translationinvert', corsWithOptions, checkApiKey, translationCtrl.getTranslationDictionaryInvert)
+api.post('/translation/segments', corsWithOptions, checkApiKey, translationCtrl.getTranslationSegments)
 
 //services ta4h
-api.post('/callTextAnalytics', corsWithOptions, ta4hserviceCtrl.callTextAnalytics)
+api.post('/callTextAnalytics', corsWithOptions, checkApiKey, ta4hserviceCtrl.callTextAnalytics)
 
 module.exports = api
