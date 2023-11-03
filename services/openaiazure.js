@@ -7,9 +7,8 @@ const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
 const Support = require('../models/support')
 const Generalfeedback = require('../models/generalfeedback')
-
-const endpoint = config.AZURE_OPENAI_ENDPOINT;
-const azureApiKey = config.AZURE_OPENAI_KEY;
+const axios = require('axios');
+const ApiManagementKey = config.API_MANAGEMENT_KEY;
 
 async function callOpenAi(req, res) {
   //comprobar créditos del usuario
@@ -24,6 +23,7 @@ async function callOpenAi(req, res) {
       if(containsWord || req.body.ip == ''){
         // La IP del cliente
         const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
         const requestInfo = {
             method: req.method,
             url: req.url,
@@ -40,30 +40,35 @@ async function callOpenAi(req, res) {
             "result": "bloqued"
           };
         res.status(200).send(result)
-      }else{
-        const client = new OpenAIClient(endpoint, new AzureKeyCredential(azureApiKey));
-        const deploymentId = "normalcalls";
+      }else{  
         const messages = [
-          { role: "user", content: jsonText }
+          { role: "user", content: jsonText}
         ];
-  
-        const configCall = {
+
+        const requestBody = {
+          messages: messages,
           temperature: 0,
           max_tokens: 800,
           top_p: 1,
           frequency_penalty: 0,
-          presence_penalty: 0
-        }
+          presence_penalty: 0,
+        };
+
   
-        const result = await client.getChatCompletions(deploymentId, messages, configCall);
-        /*for (const choice of result.choices) {
-          console.log(choice.message);
-        }*/
+        //const result = await client.getChatCompletions(deploymentId, messages, configCall);
+        const result = await axios.post('https://sermasapiopenai.azure-api.net/dxgpt/deployments', requestBody,{
+            headers: {
+                'Content-Type': 'application/json',
+                'Ocp-Apim-Subscription-Key': ApiManagementKey,
+            }
+        }); 
+        
         //blobOpenDx29Ctrl.createBlobOpenDx29(req.body, result);
-        if (result.choices[0].message.content == undefined) {
+        if (result.data.choices[0].message.content == undefined) {
           //send email
           // La IP del cliente
         const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
         const requestInfo = {
             method: req.method,
             url: req.url,
@@ -74,9 +79,9 @@ async function callOpenAi(req, res) {
             params: req.params,
             query: req.query,
           };
-          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip, requestInfo)
+          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
         }
-        res.status(200).send(result)
+        res.status(200).send(result.data)
       }
       
     } catch (e) {
@@ -96,6 +101,7 @@ async function callOpenAi(req, res) {
       }*/
        // La IP del cliente
        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+       const origin = req.get('origin');
        const requestInfo = {
            method: req.method,
            url: req.url,
@@ -142,31 +148,35 @@ async function callOpenAiAnonymized(req, res) {
 
   try {
 
-    const client = new OpenAIClient(endpoint, new AzureKeyCredential(azureApiKey));
-    const deploymentId = "anonymized";
-
     const messages = [
       { role: "user", content: anonymizationPrompt }
     ];
 
-    const configCall = {
+    const requestBody = {
+      messages: messages,
       temperature: 0,
       max_tokens: 2000,
       top_p: 1,
       frequency_penalty: 0,
-      presence_penalty: 0
-    }
+      presence_penalty: 0,
+    };
 
-    const result = await client.getChatCompletions(deploymentId, messages, configCall);
+    const result = await axios.post('https://sermasapiopenai.azure-api.net/dxgpt/anonymized', requestBody,{
+        headers: {
+            'Content-Type': 'application/json',
+            'Ocp-Apim-Subscription-Key': ApiManagementKey,
+        }
+    }); 
+
     let infoTrack = {
-      value: result,
+      value: result.data,
       myuuid: req.body.myuuid,
       operation: req.body.operation,
       lang: req.body.lang,
       response: req.body.response
     }
     blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
-    res.status(200).send(result)
+    res.status(200).send(result.data)
   } catch (e) {
     insights.error(e);
     console.log(e)
