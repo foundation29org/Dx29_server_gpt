@@ -44,6 +44,35 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
       var result = await createBlob(tempUrl, info, fileNameNcr);
   }
 
+  function replacer(key, value) {
+    // Suponemos que la propiedad que causa la referencia circular se llama 'body'
+    if (key === 'body' && typeof value === 'object' && value !== null) {
+      // Se podría devolver una versión reducida del 'body' o simplemente omitirlo
+      return; // undefined omite la propiedad del objeto serializado
+    }
+    return value;
+  }
+  
+  async function createBlobCallsOpenDx29(body, response, requestInfo){
+    body.response = response
+    body.requestInfo = requestInfo
+    var info = JSON.stringify(body);
+    var now = new Date();
+      var y = now.getFullYear();
+      var m = now.getMonth() + 1;
+      var d = now.getDate();
+      var h = now.getHours();
+      var mm = now.getMinutes();
+      var ss = now.getSeconds();
+      var ff = Math.round(now.getMilliseconds()/10);
+      var date='' + y.toString().substr(-2) + (m < 10 ? '0' : '') + m + (d < 10 ? '0' : '') + d + (h < 10 ? '0' : '') + h + (mm < 10 ? '0' : '') + mm + (ss < 10 ? '0' : '') + ss + (ff < 10 ? '0' : '') + ff;
+      var fileNameNcr = 'info.json';
+      var name = body.myuuid+'/'+date;
+      var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
+      var tempUrl = 'calls'+'/'+url;
+      var result = await createBlob(tempUrl, info, fileNameNcr);
+  }
+
   async function createBlobOpenVote(body){
     var info = JSON.stringify(body);
     var now = new Date();
@@ -82,6 +111,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
 
 module.exports = {
   createBlobOpenDx29,
+  createBlobCallsOpenDx29,
   createBlobOpenVote,
   createBlobFeedbackVoteDown
 }
