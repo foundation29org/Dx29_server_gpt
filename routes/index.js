@@ -51,14 +51,7 @@ function corsWithOptions(req, res, next) {
     if (req.method === 'OPTIONS') {
       return next();
     } else {
-      console.log('REQ:')
-      console.log(req)
       const apiKey = req.get('x-api-key');
-      console.log('API REQ:-------------------------------------------------')
-      console.log(apiKey)
-      console.log(myApiKey)
-      const myApiKey2 = config.Server_Key;
-      console.log(myApiKey2)
       if (apiKey && apiKey === myApiKey) {
         return next();
       } else {
