@@ -20,7 +20,8 @@ async function callOpenAi(req, res) {
       //if req.body.value contains orvosi, orvosok, or orvoshoz
       let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
        let containsWord = pattern.test(req.body.value);
-      if(containsWord || req.body.ip == ''){
+       let header_language = req.headers['accept-language']       
+      if(containsWord || req.body.ip == '' || header_language.includes('hu-HU')){
         // La IP del cliente
         const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
         const origin = req.get('origin');
