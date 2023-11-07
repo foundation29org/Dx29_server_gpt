@@ -22,7 +22,7 @@ function setCrossDomain(req, res, next) {
   //instead of * you can define ONLY the sources that we allow.
   //res.header('Access-Control-Allow-Origin', '*');
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
+  if (allowedOrigins.includes(origin) || (req.method === 'GET' && req.url === '/robots933456.txt' && req.headers.user-agent =='HealthCheck/1.0')) {
     res.header('Access-Control-Allow-Origin', origin);
     //http methods allowed for CORS.
     res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
