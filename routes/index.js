@@ -14,8 +14,7 @@ const api = express.Router()
 const config= require('../config')
 const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
-//const whitelist = ['https://dxgpt.app'];
-const whitelist = ['https://dxgpt.app', 'http://localhost:4200'];
+const whitelist = config.allowedOrigins;
 
   // Middleware personalizado para CORS
 function corsWithOptions(req, res, next) {
