@@ -20,15 +20,9 @@ const allowedOrigins = config.allowedOrigins;
 
 function setCrossDomain(req, res, next) {
   //instead of * you can define ONLY the sources that we allow.
-  res.header('Access-Control-Allow-Origin', '*');
+  //res.header('Access-Control-Allow-Origin', '*');
   const origin = req.headers.origin;
-  //res.header('Access-Control-Allow-Origin', origin);
-    //http methods allowed for CORS.
-    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
-    //res.header('Access-Control-Allow-Headers', '*');
-    next();
-  /*if (allowedOrigins.includes(origin) || (req.method === 'GET' && req.url === '/robots933456.txt' && req.headers.user-agent =='HealthCheck/1.0') || req.headers.host =='dxgpt.app' || req.headers.host =='www.dxgpt.app') {
+  if (allowedOrigins.includes(origin) || (req.method === 'GET' && req.url === '/robots933456.txt' && req.headers.user-agent =='HealthCheck/1.0') || req.headers.host =='dxgpt.app' || req.headers.host =='www.dxgpt.app') {
     res.header('Access-Control-Allow-Origin', origin);
     //http methods allowed for CORS.
     res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
@@ -50,7 +44,7 @@ function setCrossDomain(req, res, next) {
       };
     serviceEmail.sendMailControlCall(requestInfo)
 
-  }*/
+  }
   
 }
 
