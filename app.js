@@ -24,7 +24,7 @@ function setCrossDomain(req, res, next) {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin) || req.method === 'GET')  {
     res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
     next();
   }else{
