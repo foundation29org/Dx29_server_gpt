@@ -93,35 +93,41 @@ async function callOpenAi(req, res) {
         console.log(e.message);
       }
       console.error("[ERROR]: " + e)
+      if(e.response.data.error.type == 'invalid_request_error'){
+        //return 400 with the msg of the error
+        res.status(400).send(e.response.data.error)
+      }else{
+        // La IP del cliente
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo)
+          .then(response => {
+
+          })
+          .catch(response => {
+            //create user, but Failed sending email.
+            insights.error(response);
+            console.log('Fail sending email');
+          })
+
+        res.status(500).send(e)
+      }
       /*if (e.response.status === 429) {
         console.error("[ERROR] OpenAI responded with status: " + e.response.status)
           console.log("OpenAI Quota exceeded")
           //handle this case
       }*/
-       // La IP del cliente
-       const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-       const origin = req.get('origin');
-       const requestInfo = {
-           method: req.method,
-           url: req.url,
-           headers: req.headers,
-           origin: origin,
-           body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-           ip: clientIp,
-           params: req.params,
-           query: req.query,
-         };
-      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo)
-        .then(response => {
-
-        })
-        .catch(response => {
-          //create user, but Failed sending email.
-          insights.error(response);
-          console.log('Fail sending email');
-        })
-
-      res.status(500).send(e)
+      
     }
 
   })();
