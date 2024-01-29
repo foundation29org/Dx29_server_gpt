@@ -25,8 +25,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     
   }
 
-  async function createBlobOpenDx29(body, response){
-    body.response = response
+  async function createBlobOpenDx29(body){
     var info = JSON.stringify(body);
     var now = new Date();
       var y = now.getFullYear();

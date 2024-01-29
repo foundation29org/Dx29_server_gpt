@@ -75,7 +75,7 @@ async function callOpenAi(req, res) {
             query: req.query,
           };
           
-        blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data, requestInfo);
+        //blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data, requestInfo);
         if (result.data.choices[0].message.content == undefined) {
             requestInfo.body = req.body;
             serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
@@ -178,7 +178,8 @@ async function callOpenAiAnonymized(req, res) {
       myuuid: req.body.myuuid,
       operation: req.body.operation,
       lang: req.body.lang,
-      response: req.body.response
+      response: req.body.response,
+      topRelatedConditions: req.body.topRelatedConditions
     }
     blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
     res.status(200).send(result.data)
