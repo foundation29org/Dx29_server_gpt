@@ -46,7 +46,7 @@ function corsWithOptions(req, res, next) {
     cors(corsOptions)(req, res, next);
   }
 
-  const checkApiKey = (req, res, next) => {
+  const checkBot_key = (req, res, next) => {
     // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
     if (req.method === 'OPTIONS') {
       return next();
@@ -60,7 +60,7 @@ function corsWithOptions(req, res, next) {
     }
   };
 
-  const checkBot_key = (req, res, next) => {
+  const checkApiKey = (req, res, next) => {
     // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
     if (req.method === 'OPTIONS') {
       return next();
