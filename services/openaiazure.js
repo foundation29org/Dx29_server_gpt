@@ -133,6 +133,150 @@ async function callOpenAi(req, res) {
   })();
 }
 
+
+async function callOpenAiBot(req, res) {
+  var jsonText = req.body.value;
+  (async () => {
+    try {
+
+      let promt = "Behave like a hypotethical doctor who has to do a diagnosis for a patient. Give me a list of potential diseases with a short description. Shows for each potential diseases always with '+' and a number, starting with '+1', for example '+23.' (never return -), the name of the disease and finish with ':'. Dont return '-', return '+' instead. You have to indicate which symptoms the patient has in common with the proposed disease and which symptoms the patient does not have in common. The text is  Symptoms: "+jsonText;
+      const messages = [
+        { role: "user", content: promt}
+      ];
+
+      const requestBody = {
+        messages: messages,
+        temperature: 0,
+        max_tokens: 800,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+      };
+
+
+      //const result = await client.getChatCompletions(deploymentId, messages, configCall);
+      const result = await axios.post('https://apiopenai.azure-api.net/dxgpt/deployments', requestBody,{
+          headers: {
+              'Content-Type': 'application/json',
+              'Ocp-Apim-Subscription-Key': ApiManagementKey,
+          }
+      }); 
+        
+      //blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data, requestInfo);
+      if (result.data.choices[0].message.content == undefined) {
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+          requestInfo.body = req.body;
+          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
+          res.status(200).send(result.data)
+        }else{
+          let cleanString = cleanResponse(result.data.choices[0].message.content);
+          let topRelatedConditions = parseDiseases(cleanString);
+          res.status(200).send(topRelatedConditions)
+        }
+      
+      
+    } catch (e) {
+      insights.error(e);
+      console.log(e)
+      if (e.response) {
+        console.log(e.response.status);
+        console.log(e.response.data);
+      } else {
+        console.log(e.message);
+      }
+      console.error("[ERROR]: " + e)
+      if(e.response.data.error.type == 'invalid_request_error'){
+        //return 400 with the msg of the error
+        res.status(400).send(e.response.data.error)
+      }else{
+        // La IP del cliente
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo)
+          .then(response => {
+
+          })
+          .catch(response => {
+            //create user, but Failed sending email.
+            insights.error(response);
+            console.log('Fail sending email');
+          })
+
+        res.status(500).send(e)
+      }
+      
+    }
+
+  })();
+}
+
+function cleanResponse(contentToParse){
+  let parseChoices0 = contentToParse;
+  if(contentToParse.indexOf("\n\n") > 0 && (contentToParse.indexOf("+") > contentToParse.indexOf("\n\n"))){
+    parseChoices0 = contentToParse.split("\n\n");
+    parseChoices0.shift();
+    parseChoices0 = parseChoices0.toString();
+  }else if(contentToParse.indexOf("\n") > 0 && (contentToParse.indexOf("+") > contentToParse.indexOf("\n"))){
+      parseChoices0 = contentToParse.split("\n");
+      parseChoices0.shift();
+      parseChoices0 = parseChoices0.toString();
+  }else if(contentToParse.indexOf("\n\n") == 0 && (contentToParse.indexOf("+") > contentToParse.indexOf("\n\n"))){
+      parseChoices0 = contentToParse.substring(contentToParse.indexOf("+"));
+  }else if(contentToParse.indexOf("\n") == 0 && (contentToParse.indexOf("+") > contentToParse.indexOf("\n"))){
+      parseChoices0 = contentToParse.substring(contentToParse.indexOf("+"));
+  }
+  return parseChoices0;
+}
+
+function parseDiseases(cleanString){
+  let parseChoices = cleanString;
+  let topRelatedConditions = [];
+  parseChoices = cleanString.split(/\+(?=\d)/);
+  for (let i = 0; i < parseChoices.length; i++) {
+    if (parseChoices[i] != '' && parseChoices[i] != "\n\n" && parseChoices[i] != "\n" && parseChoices[i].length>4) {
+        topRelatedConditions.push({content:parseChoices[i], name: ''} )
+    }
+  }
+  for (let i = 0; i < topRelatedConditions.length; i++) {
+    let index = topRelatedConditions[i].content.indexOf(':');
+    let index2 = topRelatedConditions[i].content.indexOf('<strong>');
+    if (index != -1 && index2 == -1) {
+        let firstPart = topRelatedConditions[i].content.substring(0, index + 1);
+        let secondPart = topRelatedConditions[i].content.substring(index + 1, topRelatedConditions[i].content.length);
+        if(secondPart == ''){
+            topRelatedConditions.splice(i, 1);
+            i--;
+            continue;
+        }
+        let index3 = firstPart.indexOf('.');
+        let namePart = firstPart.substring(index3+2, firstPart.length-1);        
+        
+        topRelatedConditions[i] = {content: '<strong>' + firstPart + '</strong>' + secondPart, name: namePart};
+    }
+  }
+  return topRelatedConditions;
+}
+
 async function callOpenAiAnonymized(req, res) {
   // Anonymize user message
   var jsonText = req.body.value;
@@ -381,6 +525,7 @@ function getFeedBack(req, res) {
 
 module.exports = {
   callOpenAi,
+  callOpenAiBot,
   callOpenAiAnonymized,
   opinion,
   sendFeedback,
