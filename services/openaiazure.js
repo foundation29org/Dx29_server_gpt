@@ -9,6 +9,7 @@ const Support = require('../models/support')
 const Generalfeedback = require('../models/generalfeedback')
 const axios = require('axios');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
+const translationKey = config.translationKey;
 
 async function callOpenAi(req, res) {
   //comprobar créditos del usuario
@@ -135,10 +136,15 @@ async function callOpenAi(req, res) {
 
 
 async function callOpenAiBot(req, res) {
-  var jsonText = req.body.value;
-  (async () => {
+  
     try {
-
+      var jsonText = req.body.value;
+      let detectedLang = await detectLang(jsonText);
+      console.log(detectedLang);
+      if (detectedLang != 'en') {
+        jsonText = await translateText(jsonText, detectedLang, 'en');
+      }
+      console.log(jsonText);
       let promt = "Behave like a hypotethical doctor who has to do a diagnosis for a patient. Give me a list of potential diseases with a short description. Shows for each potential diseases always with '+' and a number, starting with '+1', for example '+23.' (never return -), the name of the disease and finish with ':'. Dont return '-', return '+' instead. You have to indicate which symptoms the patient has in common with the proposed disease and which symptoms the patient does not have in common. The text is  Symptoms: "+jsonText;
       const messages = [
         { role: "user", content: promt}
@@ -179,7 +185,12 @@ async function callOpenAiBot(req, res) {
           serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
           res.status(200).send(result.data)
         }else{
-          let cleanString = cleanResponse(result.data.choices[0].message.content);
+          let responseOpenai = result.data.choices[0].message.content;
+          if(detectedLang!='en'){
+            //translateInvert
+            responseOpenai = await translateText(result.data.choices[0].message.content, 'en', detectedLang);
+          }
+          let cleanString = cleanResponse(responseOpenai);
           let topRelatedConditions = parseDiseases(cleanString);
           res.status(200).send(topRelatedConditions)
         }
@@ -226,8 +237,35 @@ async function callOpenAiBot(req, res) {
       }
       
     }
+}
 
-  })();
+async function detectLang(jsonText) {
+  // Debes devolver una promesa aquí, asegúrate de que `request.post` se maneje adecuadamente
+  return new Promise((resolve, reject) => {
+    const requestBody = [{ "text": jsonText }];
+    request.post({ url: 'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0', json: true, headers: { 'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' }, body: requestBody }, (error, response, body) => {
+      if (error) {
+        resolve('en');
+      } else {
+        resolve(body[0].language);
+      }
+    });
+  });
+}
+
+async function translateText(jsonText, lang, toLang) {
+  // Similar a detectLang, asegúrate de devolver una promesa
+  return new Promise((resolve, reject) => {
+    const requestBody = [{ "Text": jsonText }];
+    let translatedText = jsonText;
+    request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from='+lang+'&to='+toLang,json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:requestBody}, (error, response, body) => {
+      if (error) {
+        resolve(translatedText);
+      } else {
+        resolve(body[0].translations[0].text);
+      }
+    });
+  });
 }
 
 function cleanResponse(contentToParse){
