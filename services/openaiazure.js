@@ -306,7 +306,7 @@ async function questioncallopenai(req, res) {
           //translateInvert
           responseOpenai = await translateText(result.data.choices[0].message.content, 'en', detectedLang);
         }
-        res.status(200).send(responseOpenai)
+        res.status(200).send({info: responseOpenai})
       }
     
     
