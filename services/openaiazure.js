@@ -239,6 +239,120 @@ async function callOpenAiBot(req, res) {
     }
 }
 
+async function questioncallopenai(req, res) {
+  
+  try {
+    var jsonText = req.body.value;
+    var option = req.body.option;
+    var premedicalText = req.body.premedicalText;
+    let detectedLang = await detectLang(jsonText);
+    console.log(detectedLang);
+    if (detectedLang != 'en') {
+      jsonText = await translateText(jsonText, detectedLang, 'en');
+    }
+    let promt = '';
+    if(option==1){
+      promt = 'What are the common symptoms associated with '+jsonText+'? Please provide a list starting with the most probable symptoms at the top.'
+    }else if(option==2){
+      promt = 'Can you provide detailed information about '+ jsonText+' ? I am a doctor.';
+    }else if(option==3){
+      promt = 'Given the medical description: '+jsonText+'. , what are the potential symptoms not present in the patient that could help in making a differential diagnosis for '+jsonText + '. Please provide only a list, starting with the most likely symptoms at the top.';
+    }else if(option==4){
+        promt = premedicalText+'. Why do you think this patient has '+jsonText + '. Indicate the common symptoms with '+jsonText +' and the ones that he/she does not have';
+    }
+
+    console.log(jsonText);
+    const messages = [
+      { role: "user", content: promt}
+    ];
+
+    const requestBody = {
+      messages: messages,
+      temperature: 0,
+      max_tokens: 800,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+
+    //const result = await client.getChatCompletions(deploymentId, messages, configCall);
+    const result = await axios.post('https://apiopenai.azure-api.net/dxgpt/deployments', requestBody,{
+        headers: {
+            'Content-Type': 'application/json',
+            'Ocp-Apim-Subscription-Key': ApiManagementKey,
+        }
+    }); 
+      
+    //blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data, requestInfo);
+    if (result.data.choices[0].message.content == undefined) {
+      const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+      const origin = req.get('origin');
+      const requestInfo = {
+          method: req.method,
+          url: req.url,
+          headers: req.headers,
+          origin: origin,
+          ip: clientIp,
+          params: req.params,
+          query: req.query,
+        };
+        requestInfo.body = req.body;
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
+        res.status(200).send(result.data)
+      }else{
+        let responseOpenai = result.data.choices[0].message.content;
+        if(detectedLang!='en'){
+          //translateInvert
+          responseOpenai = await translateText(result.data.choices[0].message.content, 'en', detectedLang);
+        }
+        res.status(200).send(responseOpenai)
+      }
+    
+    
+  } catch (e) {
+    insights.error(e);
+    console.log(e)
+    if (e.response) {
+      console.log(e.response.status);
+      console.log(e.response.data);
+    } else {
+      console.log(e.message);
+    }
+    console.error("[ERROR]: " + e)
+    if(e.response.data.error.type == 'invalid_request_error'){
+      //return 400 with the msg of the error
+      res.status(400).send(e.response.data.error)
+    }else{
+      // La IP del cliente
+      const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+      const origin = req.get('origin');
+      const requestInfo = {
+          method: req.method,
+          url: req.url,
+          headers: req.headers,
+          origin: origin,
+          body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+          ip: clientIp,
+          params: req.params,
+          query: req.query,
+        };
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo)
+        .then(response => {
+
+        })
+        .catch(response => {
+          //create user, but Failed sending email.
+          insights.error(response);
+          console.log('Fail sending email');
+        })
+
+      res.status(500).send(e)
+    }
+    
+  }
+}
+
 async function detectLang(jsonText) {
   // Debes devolver una promesa aquí, asegúrate de que `request.post` se maneje adecuadamente
   return new Promise((resolve, reject) => {
@@ -564,6 +678,7 @@ function getFeedBack(req, res) {
 module.exports = {
   callOpenAi,
   callOpenAiBot,
+  questioncallopenai,
   callOpenAiAnonymized,
   opinion,
   sendFeedback,
