@@ -86,6 +86,7 @@ api.post('/senderror', corsWithOptions, checkApiKey, supportCtrl.sendError)
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
 api.post('/botcallopenai', checkBot_key, checkApiKey, openAIserviceCtrl.callOpenAiBot)
+api.post('/botquestioncallopenai', checkBot_key, checkApiKey, openAIserviceCtrl.questioncallopenai)
 api.post('/callanonymized', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiAnonymized)
 
 //services OPENAI
