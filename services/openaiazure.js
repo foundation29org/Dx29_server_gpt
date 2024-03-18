@@ -140,7 +140,6 @@ async function callOpenAiBot(req, res) {
     try {
       var jsonText = req.body.value;
       let detectedLang = await detectLang(jsonText);
-      console.log(detectedLang);
       if (detectedLang != 'en') {
         jsonText = await translateText(jsonText, detectedLang, 'en');
       }
@@ -183,7 +182,7 @@ async function callOpenAiBot(req, res) {
           };
           requestInfo.body = req.body;
           serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
-          res.status(200).send(result.data)
+          res.status(200).send({topRelatedConditions: [], lang: detectedLang})
         }else{
           let responseOpenai = result.data.choices[0].message.content;
           if(detectedLang!='en'){
@@ -192,7 +191,7 @@ async function callOpenAiBot(req, res) {
           }
           let cleanString = cleanResponse(responseOpenai);
           let topRelatedConditions = parseDiseases(cleanString);
-          res.status(200).send(topRelatedConditions)
+          res.status(200).send({topRelatedConditions: topRelatedConditions, lang: detectedLang})
         }
       
       
@@ -245,8 +244,7 @@ async function questioncallopenai(req, res) {
     var jsonText = req.body.value;
     var option = req.body.option;
     var premedicalText = req.body.premedicalText;
-    let detectedLang = await detectLang(jsonText);
-    console.log(detectedLang);
+    var detectedLang = req.body.lang;
     if (detectedLang != 'en') {
       jsonText = await translateText(jsonText, detectedLang, 'en');
     }
@@ -299,7 +297,7 @@ async function questioncallopenai(req, res) {
         };
         requestInfo.body = req.body;
         serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
-        res.status(200).send(result.data)
+        res.status(200).send({info: '', lang: detectedLang})
       }else{
         let responseOpenai = result.data.choices[0].message.content;
         if(detectedLang!='en'){
