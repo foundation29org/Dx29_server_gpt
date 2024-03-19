@@ -160,7 +160,7 @@ async function callOpenAiBot(req, res) {
 
 
       //const result = await client.getChatCompletions(deploymentId, messages, configCall);
-      const result = await axios.post('https://apiopenai.azure-api.net/dxgpt/deployments', requestBody,{
+      const result = await axios.post('https://apiopenai.azure-api.net/dxgptbot', requestBody,{
           headers: {
               'Content-Type': 'application/json',
               'Ocp-Apim-Subscription-Key': ApiManagementKey,
@@ -275,7 +275,7 @@ async function questioncallopenai(req, res) {
 
 
     //const result = await client.getChatCompletions(deploymentId, messages, configCall);
-    const result = await axios.post('https://apiopenai.azure-api.net/dxgpt/deployments', requestBody,{
+    const result = await axios.post('https://apiopenai.azure-api.net/dxgptbot', requestBody,{
         headers: {
             'Content-Type': 'application/json',
             'Ocp-Apim-Subscription-Key': ApiManagementKey,
