@@ -13,7 +13,6 @@ const serviceEmail = require('../services/email')
 const api = express.Router()
 const config= require('../config')
 const myApiKey = config.Server_Key;
-const myBot_key = config.bot_key;
 // Lista de dominios permitidos
 const whitelist = config.allowedOrigins;
 
@@ -46,20 +45,6 @@ function corsWithOptions(req, res, next) {
     cors(corsOptions)(req, res, next);
   }
 
-  const checkBot_key = (req, res, next) => {
-    // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
-    if (req.method === 'OPTIONS') {
-      return next();
-    } else {
-      const bot_key = req.get('bot_key');
-      if (bot_key && bot_key === myBot_key) {
-        return next();
-      } else {
-        return res.status(401).json({ error: 'API Key no válida o ausente' });
-      }
-    }
-  };
-
   const checkApiKey = (req, res, next) => {
     // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
     if (req.method === 'OPTIONS') {
@@ -85,8 +70,6 @@ api.post('/senderror', corsWithOptions, checkApiKey, supportCtrl.sendError)
 
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
-api.post('/botcallopenai', checkBot_key, checkApiKey, openAIserviceCtrl.callOpenAiBot)
-api.post('/botquestioncallopenai', checkBot_key, checkApiKey, openAIserviceCtrl.questioncallopenai)
 api.post('/callanonymized', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiAnonymized)
 
 //services OPENAI
