@@ -121,7 +121,7 @@ async function callOpenAi(req, res) {
             console.log('Fail sending email');
           })
 
-        res.status(500).send(e)
+        res.status(500).send('error')
       }
       /*if (e.response.status === 429) {
         console.error("[ERROR] OpenAI responded with status: " + e.response.status)
@@ -194,7 +194,7 @@ async function callOpenAiAnonymized(req, res) {
       console.log(e.message);
     }
     console.error("[ERROR]: " + e)
-    res.status(500).send(e)
+    res.status(500).send('error')
   }
 }
 
@@ -217,7 +217,7 @@ function opinion(req, res) {
           console.log('Fail sending email');
         })
 
-      res.status(500).send(e)
+      res.status(500).send('error')
     }
 
   })();
@@ -262,7 +262,7 @@ function sendFeedback(req, res) {
           console.log('Fail sending email');
         })
 
-      res.status(500).send(e)
+      res.status(500).send('error')
     }
 
   })();
@@ -304,7 +304,7 @@ function sendGeneralFeedback(req, res) {
           console.log('Fail sending email');
         })
 
-      res.status(500).send(e)
+      res.status(500).send('error')
     }
 
   })();
