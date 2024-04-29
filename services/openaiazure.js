@@ -15,8 +15,9 @@ async function callOpenAi(req, res) {
   //comprobar créditos del usuario
 
 
-  var jsonText = req.body.value;
   (async () => {
+    var jsonText = req.body.value;
+    var timezone = req.body.timezone
     try {
       //if req.body.value contains orvosi, orvosok, or orvoshoz
       let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
@@ -56,9 +57,15 @@ async function callOpenAi(req, res) {
           presence_penalty: 0,
         };
 
-  
+        let endpointUrl;
+        if (timezone.includes("America")) {
+            endpointUrl = 'https://apiopenai.azure-api.net/dxgptamerica/deployments';
+        } else {
+            endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments';
+        }
+
         //const result = await client.getChatCompletions(deploymentId, messages, configCall);
-        const result = await axios.post('https://apiopenai.azure-api.net/dxgpt/deployments', requestBody,{
+        const result = await axios.post(endpointUrl, requestBody,{
             headers: {
                 'Content-Type': 'application/json',
                 'Ocp-Apim-Subscription-Key': ApiManagementKey,
@@ -137,6 +144,7 @@ async function callOpenAi(req, res) {
 async function callOpenAiAnonymized(req, res) {
   // Anonymize user message
   var jsonText = req.body.value;
+  let timezone = req.body.timezone
   var anonymizationPrompt = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
   where N is the count of characters that have been anonymized. 
   Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
@@ -167,7 +175,13 @@ async function callOpenAiAnonymized(req, res) {
       presence_penalty: 0,
     };
 
-    const result = await axios.post('https://apiopenai.azure-api.net/dxgpt/anonymized', requestBody,{
+    let endpointUrl;
+        if (timezone.includes("America")) {
+            endpointUrl = 'https://apiopenai.azure-api.net/dxgptamerica/anonymized';
+        } else {
+            endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
+        }
+    const result = await axios.post(endpointUrl, requestBody,{
         headers: {
             'Content-Type': 'application/json',
             'Ocp-Apim-Subscription-Key': ApiManagementKey,
