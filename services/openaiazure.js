@@ -266,8 +266,8 @@ function sendFeedback(req, res) {
 
 
       supportService.sendFlow(support, req.body.lang)
-      /*support.save((err, supportStored) => {
-      })*/
+      support.save((err, supportStored) => {
+      })
 
       res.status(200).send({ send: true })
     } catch (e) {
@@ -304,8 +304,8 @@ function sendGeneralFeedback(req, res) {
 			var a = d.toString();
 			generalfeedback.date = a;
       sendFlow(generalfeedback, req.body.lang)
-      /*generalfeedback.save((err, generalfeedbackStored) => {
-      })*/
+      generalfeedback.save((err, generalfeedbackStored) => {
+      })
       serviceEmail.sendMailGeneralFeedback(req.body.value, req.body.myuuid)
         .then(response => {
 
