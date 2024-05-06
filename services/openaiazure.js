@@ -10,6 +10,7 @@ const Generalfeedback = require('../models/generalfeedback')
 const axios = require('axios');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const translationKey = config.translationKey;
+const supportService = require('../controllers/all/support');
 
 async function callOpenAi(req, res) {
   //comprobar créditos del usuario
@@ -259,8 +260,14 @@ function sendFeedback(req, res) {
       support.subscribe = req.body.subscribe
       support.email = req.body.email
       support.description = req.body.info
-      support.save((err, supportStored) => {
-      })
+      var d = new Date(Date.now());
+      var a = d.toString();
+      support.date = a;
+
+
+      supportService.sendFlow(support, req.body.lang)
+      /*support.save((err, supportStored) => {
+      })*/
 
       res.status(200).send({ send: true })
     } catch (e) {
@@ -292,8 +299,13 @@ function sendGeneralFeedback(req, res) {
       generalfeedback.pregunta2 = req.body.value.pregunta2
       generalfeedback.moreFunct = req.body.value.moreFunct
       generalfeedback.freeText = req.body.value.freeText
-      generalfeedback.save((err, generalfeedbackStored) => {
-      })
+      generalfeedback.email = req.body.value.email
+      var d = new Date(Date.now());
+			var a = d.toString();
+			generalfeedback.date = a;
+      sendFlow(generalfeedback, req.body.lang)
+      /*generalfeedback.save((err, generalfeedbackStored) => {
+      })*/
       serviceEmail.sendMailGeneralFeedback(req.body.value, req.body.myuuid)
         .then(response => {
 
@@ -324,47 +336,34 @@ function sendGeneralFeedback(req, res) {
   })();
 }
 
+async function sendFlow(generalfeedback, lang){
+	let requestBody = {
+    myuuid: generalfeedback.myuuid,
+    pregunta1: generalfeedback.pregunta1,
+    pregunta2: generalfeedback.pregunta2,
+    moreFunct: generalfeedback.moreFunct,
+    freeText: generalfeedback.freeText,
+    date: generalfeedback.date,
+    email: generalfeedback.email,
+    lang: lang
+  }
+  
+	let endpointUrl = 'https://prod-180.westeurope.logic.azure.com:443/workflows/28e2bf2fb424494f8f82890efb4fcbbf/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=WwF6wOV9cd4n1-AIfPZ4vnRmWx_ApJDXJH2QdtvK2BU'
+
+	try {
+        await axios.post(endpointUrl, requestBody, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+    } catch (error) {
+		console.log(error)
+        console.error('Error al enviar datos:', error.message);
+    }
+
+}
+
 function getFeedBack(req, res) {
-  /*Generalfeedback.aggregate([
-    {
-        $group: {
-            _id: { pregunta1: "$pregunta1", pregunta2: "$pregunta2" },
-            countPregunta1: { $sum: { $cond: [{ $eq: ["$pregunta1", "$pregunta1"] }, 1, 0] } },
-            countPregunta2: { $sum: { $cond: [{ $eq: ["$pregunta2", "$pregunta2"] }, 1, 0] } }
-        }
-    }
-], function(err, results) {
-    if (err) {
-        // Manejar el error como desees, por ejemplo:
-        return res.status(500).send(err);
-    }
-
-    // Procesar los resultados para obtener un formato más amigable
-    let countPregunta1 = {};
-    let countPregunta2 = {};
-
-    results.forEach(result => {
-        countPregunta1[result._id.pregunta1] = result.countPregunta1;
-        countPregunta2[result._id.pregunta2] = result.countPregunta2;
-    });
-
-    // Enviar los resultados
-    res.status(200).send({
-        pregunta1: countPregunta1,
-        pregunta2: countPregunta2
-    });
-});*/
-
-  /*Generalfeedback.find({}, function(err, generalfeedbackList) {
-    var listPregunta1= [];
-    var listPregunta2= [];
-
-    generalfeedbackList.forEach(function(generalfeedback) {
-      listPregunta1.push({name:generalfeedback.pregunta1});
-      listPregunta2.push({name:generalfeedback.pregunta2});
-    });
-    res.status(200).send(listPregunta1)
-  });*/
 
   Generalfeedback.find({}, function (err, generalfeedbackList) {
     let frecuenciasP1 = {};

@@ -12,6 +12,7 @@ const GeneralfeedbackSchema = Schema({
 	pregunta2: String,
 	moreFunct: String,
 	freeText: String,
+	email: String,
 	date: {type: Date, default: Date.now}
 })
 
