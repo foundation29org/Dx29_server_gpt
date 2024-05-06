@@ -10,7 +10,6 @@ const SupportSchema = Schema({
 	subject: String,
 	description: String,
 	status: {type: String, default: 'unread'},
-	statusDate: {type: Date, default: Date.now},
 	email: String,
 	subscribe: {type: Boolean, default: false},
 	date: {type: Date, default: Date.now}

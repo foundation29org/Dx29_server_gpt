@@ -182,7 +182,8 @@ function sendMailGeneralFeedback (info, myuuid){
         pregunta1 : info.pregunta1,
         pregunta2 : info.pregunta2,
         moreFunct : info.moreFunct,
-        freeText : info.freeText
+        freeText : info.freeText,
+        email : info.email
       }
     };
 
