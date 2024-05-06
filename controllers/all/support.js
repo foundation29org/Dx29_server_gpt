@@ -20,8 +20,8 @@ function sendMsgLogoutSupport(req, res){
 			support.subscribe = false
 
 			sendFlow(support, req.body.lang)
-			/*support.save((err, supportStored) => {
-			})*/
+			support.save((err, supportStored) => {
+			})
 			// enviamos Email
 			serviceEmail.sendMailSupport(req.body.email,req.body.lang, support)
 					.then(response => {
@@ -70,8 +70,8 @@ function sendMsSubscribe(req, res){
 	var a = d.toString();
 	support.date = a;
 	sendFlow(support, req.body.lang)
-	/*support.save((err, supportStored) => {
-	})*/
+	support.save((err, supportStored) => {
+	})
 	// enviamos Email
 	serviceEmail.sendMailSupport(req.body.email,req.body.lang, support)
 			.then(response => {
