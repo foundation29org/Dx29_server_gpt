@@ -12,7 +12,13 @@ const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const translationKey = config.translationKey;
 const supportService = require('../controllers/all/support');
 
-async function callOpenAi(req, res) {
+
+const client = new OpenAIClient(
+  "https://dxgptamerica2.openai.azure.com/", 
+  new AzureKeyCredential(config.gpt4o)
+);
+
+async function callOpenAiOriginal(req, res) {
   //comprobar créditos del usuario
 
 
@@ -90,6 +96,121 @@ async function callOpenAi(req, res) {
             serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo)
           }
         res.status(200).send(result.data)
+      }
+      
+    } catch (e) {
+      insights.error(e);
+      console.log(e)
+      if (e.response) {
+        console.log(e.response.status);
+        console.log(e.response.data);
+      } else {
+        console.log(e.message);
+      }
+      console.error("[ERROR]: " + e)
+      if(e.response.data.error.type == 'invalid_request_error'){
+        //return 400 with the msg of the error
+        res.status(400).send(e.response.data.error)
+      }else{
+        // La IP del cliente
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo)
+          .then(response => {
+
+          })
+          .catch(response => {
+            //create user, but Failed sending email.
+            insights.error(response);
+            console.log('Fail sending email');
+          })
+
+        res.status(500).send('error')
+      }
+      /*if (e.response.status === 429) {
+        console.error("[ERROR] OpenAI responded with status: " + e.response.status)
+          console.log("OpenAI Quota exceeded")
+          //handle this case
+      }*/
+      
+    }
+
+  })();
+}
+
+async function callOpenAi(req, res) {
+  //comprobar créditos del usuario
+
+
+  (async () => {
+    var jsonText = req.body.value;
+    var timezone = req.body.timezone
+    try {
+      //if req.body.value contains orvosi, orvosok, or orvoshoz
+      let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
+       let containsWord = pattern.test(req.body.value);
+       let header_language = req.headers['accept-language']       
+      if(containsWord || req.body.ip == '' || header_language.includes('hu-HU')){
+        // La IP del cliente
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo)
+        let result = 
+          {
+            "result": "bloqued"
+          };
+        res.status(200).send(result)
+      }else{  
+        const messages = [
+          { role: "user", content: jsonText}
+        ];
+
+        const configCall = {
+          temperature: 0,
+          max_tokens: 800,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0
+        }
+        const result = await client.getChatCompletions('normalcalls', messages, configCall);
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const origin = req.get('origin');
+        const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+          
+        //blobOpenDx29Ctrl.createBlobCallsOpenDx29(req.body, result.data, requestInfo);
+        if (result.choices[0].message.content == undefined) {
+            requestInfo.body = req.body;
+            serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.choices, req.body.ip, requestInfo)
+          }
+        res.status(200).send(result)
       }
       
     } catch (e) {
