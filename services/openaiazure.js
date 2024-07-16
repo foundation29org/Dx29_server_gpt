@@ -297,6 +297,7 @@ function sendGeneralFeedback(req, res) {
       generalfeedback.myuuid = req.body.myuuid
       generalfeedback.pregunta1 = req.body.value.pregunta1
       generalfeedback.pregunta2 = req.body.value.pregunta2
+      generalfeedback.userType = req.body.value.userType
       generalfeedback.moreFunct = req.body.value.moreFunct
       generalfeedback.freeText = req.body.value.freeText
       generalfeedback.email = req.body.value.email
@@ -341,6 +342,7 @@ async function sendFlow(generalfeedback, lang){
     myuuid: generalfeedback.myuuid,
     pregunta1: generalfeedback.pregunta1,
     pregunta2: generalfeedback.pregunta2,
+    userType: generalfeedback.userType,
     moreFunct: generalfeedback.moreFunct,
     freeText: generalfeedback.freeText,
     date: generalfeedback.date,

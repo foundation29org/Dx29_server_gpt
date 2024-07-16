@@ -10,6 +10,7 @@ const GeneralfeedbackSchema = Schema({
 	myuuid: String,
 	pregunta1: String,
 	pregunta2: String,
+	userType: String,
 	moreFunct: String,
 	freeText: String,
 	email: String,
