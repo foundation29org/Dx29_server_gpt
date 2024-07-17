@@ -62,7 +62,7 @@ async function callOpenAi(req, res) {
         if (timezone.includes("America")) {
             endpointUrl = 'https://apiopenai.azure-api.net/dxgptamerica/deployments';
         } else {
-            endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments';
+            endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
         }
 
         //const result = await client.getChatCompletions(deploymentId, messages, configCall);
