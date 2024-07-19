@@ -55,13 +55,22 @@ async function callOpenAi(req, res) {
           'Ocp-Apim-Subscription-Key': ApiManagementKey,
         }
       });
-
+      let parsedData;
       if (!result.data.choices[0].message.content) {
         requestInfo.body = req.body;
         await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
+        res.status(200).send({result: "error"});
+      } else {
+        try {
+            parsedData = JSON.parse(result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/)[1]);
+        } catch (e) {
+            console.error("Failed to parse diagnosis output", e);
+            res.status(200).send({result: "error"});
+        }
+        console.log(parsedData);
       }
-
-      res.status(200).send(result.data);
+      
+      res.status(200).send({result: parsedData});
       return;
     }
   } catch (e) {
