@@ -27,13 +27,11 @@ async function callOpenAi(req, res) {
     ip: clientIp,
     params: req.params,
     query: req.query,
+    header_language: header_language,
+    timezone: timezone
   };
-
   try {
-    let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
-    let containsWord = pattern.test(jsonText);
-
-    if (containsWord || req.body.ip === '' || header_language.includes('hu-HU')) {
+    if (req.body.ip === '' || req.body.ip === undefined) {
       await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
       res.status(200).send({ result: "blocked" });
     } else {
@@ -95,9 +93,21 @@ async function callOpenAi(req, res) {
 }
 
 async function callOpenAiAnonymized(req, res) {
+  const header_language = req.headers['accept-language'];
   // Anonymize user message
   var jsonText = req.body.value;
   let timezone = req.body.timezone
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    body: req.body,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: timezone
+  };
+
   var anonymizationPrompt = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
   where N is the count of characters that have been anonymized. 
   Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
@@ -114,43 +124,50 @@ async function callOpenAiAnonymized(req, res) {
   ANONYMIZED DOCUMENT:"`;
 
   try {
-
-    const messages = [
-      { role: "user", content: anonymizationPrompt }
-    ];
-
-    const requestBody = {
-      messages: messages,
-      temperature: 0,
-      max_tokens: 2000,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-    };
-
-    let endpointUrl;
-        if (timezone.includes("America")) {
-            endpointUrl = 'https://apiopenai.azure-api.net/dxgptamerica/anonymized';
-        } else {
-            endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
-        }
-    const result = await axios.post(endpointUrl, requestBody,{
-        headers: {
-            'Content-Type': 'application/json',
-            'Ocp-Apim-Subscription-Key': ApiManagementKey,
-        }
-    }); 
-
-    let infoTrack = {
-      value: result.data,
-      myuuid: req.body.myuuid,
-      operation: req.body.operation,
-      lang: req.body.lang,
-      response: req.body.response,
-      topRelatedConditions: req.body.topRelatedConditions
+    if (req.body.ip === '' || req.body.ip === undefined) {
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      res.status(200).send({ result: "blocked" });
+    }else{
+      const messages = [
+        { role: "user", content: anonymizationPrompt }
+      ];
+  
+      const requestBody = {
+        messages: messages,
+        temperature: 0,
+        max_tokens: 2000,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+      };
+  
+      let endpointUrl;
+          if (timezone.includes("America")) {
+              endpointUrl = 'https://apiopenai.azure-api.net/dxgptamerica/anonymized';
+          } else {
+              endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
+          }
+      const result = await axios.post(endpointUrl, requestBody,{
+          headers: {
+              'Content-Type': 'application/json',
+              'Ocp-Apim-Subscription-Key': ApiManagementKey,
+          }
+      }); 
+  
+      let infoTrack = {
+        value: result.data,
+        myuuid: req.body.myuuid,
+        operation: req.body.operation,
+        lang: req.body.lang,
+        response: req.body.response,
+        topRelatedConditions: req.body.topRelatedConditions,
+        header_language: header_language,
+        timezone: timezone
+      }
+      blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
+      res.status(200).send(result.data)
     }
-    blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
-    res.status(200).send(result.data)
+    
   } catch (e) {
     insights.error(e);
     console.log(e)
@@ -161,6 +178,7 @@ async function callOpenAiAnonymized(req, res) {
       console.log(e.message);
     }
     console.error("[ERROR]: " + e)
+    serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
     res.status(500).send('error')
   }
 }
