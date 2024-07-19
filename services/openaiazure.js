@@ -59,7 +59,7 @@ async function callOpenAi(req, res) {
       if (!result.data.choices[0].message.content) {
         requestInfo.body = req.body;
         await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
-        res.status(200).send({result: "error"});
+        res.status(200).send({result: "error openai"});
       } else {
         try {
             parsedData = JSON.parse(result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/)[1]);
