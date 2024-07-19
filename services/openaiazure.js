@@ -70,7 +70,7 @@ async function callOpenAi(req, res) {
         console.log(parsedData);
       }
       
-      res.status(200).send({result: parsedData});
+      res.status(200).send({result: 'success', data: parsedData});
       return;
     }
   } catch (e) {
