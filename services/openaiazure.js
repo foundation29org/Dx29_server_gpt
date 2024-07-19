@@ -150,12 +150,10 @@ async function callOpenAiAnonymized(req, res) {
         presence_penalty: 0,
       };
   
-      let endpointUrl;
-          if (timezone.includes("America")) {
-              endpointUrl = 'https://apiopenai.azure-api.net/dxgptamerica/anonymized';
-          } else {
-              endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
-          }
+
+      const endpointUrl = timezone.includes("America") ?
+      'https://apiopenai.azure-api.net/dxgptamerica/anonymized' :
+      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';//endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
       const result = await axios.post(endpointUrl, requestBody,{
           headers: {
               'Content-Type': 'application/json',
