@@ -55,23 +55,102 @@ async function callOpenAi(req, res) {
           'Ocp-Apim-Subscription-Key': ApiManagementKey,
         }
       });
-      let parsedData;
       if (!result.data.choices[0].message.content) {
         requestInfo.body = req.body;
         await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
         res.status(200).send({result: "error openai"});
       } else {
         try {
-            parsedData = JSON.parse(result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/)[1]);
+          let parsedData;
+          parsedData = JSON.parse(result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/)[1]);
+          res.status(200).send({result: 'success', data: parsedData});
+          return;
         } catch (e) {
             console.error("Failed to parse diagnosis output", e);
             res.status(200).send({result: "error"});
         }
         console.log(parsedData);
       }
+    }
+  } catch (e) {
+    insights.error(e);
+    console.log(e);
+
+    if (e.response) {
+      console.log(e.response.status);
+      console.log(e.response.data);
+
+      // Asegurarse de que e.response.data.error y e.response.data.error.type están definidos antes de acceder
+      if (e.response.data && e.response.data.error && e.response.data.error.type === 'invalid_request_error') {
+        res.status(400).send(e.response.data.error);
+        return;
+      }
+    } else {
+      console.log(e.message);
+    }
+
+    try {
+      await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+    } catch (emailError) {
+      insights.error(emailError);
+      console.log('Fail sending email');
+    }
+
+    res.status(500).send('Internal server error');
+  }
+}
+
+async function callOpenAiQuestions(req, res) {
+  const jsonText = req.body.value;
+  const timezone = req.body.timezone;
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: timezone
+  };
+  try {
+    if (req.body.ip === '' || req.body.ip === undefined) {
+      await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      res.status(200).send({ result: "blocked" });
+    } else {
+      const messages = [{ role: "user", content: jsonText }];
+      const requestBody = {
+        messages: messages,
+        temperature: 0,
+        max_tokens: 800,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+      };
+
+      const endpointUrl = timezone.includes("America") ?
+        'https://apiopenai.azure-api.net/dxgptamerica/deployments' :
+        'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
+
+      const result = await axios.post(endpointUrl, requestBody, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Ocp-Apim-Subscription-Key': ApiManagementKey,
+        }
+      });
       
-      res.status(200).send({result: 'success', data: parsedData});
-      return;
+      if (!result.data.choices[0].message.content) {
+        requestInfo.body = req.body;
+        await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
+        res.status(200).send({result: "error openai"});
+      } else {
+        res.status(200).send({result: 'success', data: result.data.choices[0].message.content});
+      }  
     }
   } catch (e) {
     insights.error(e);
@@ -374,6 +453,7 @@ function getFeedBack(req, res) {
 
 module.exports = {
   callOpenAi,
+  callOpenAiQuestions,
   callOpenAiAnonymized,
   opinion,
   sendFeedback,
