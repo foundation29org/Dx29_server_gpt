@@ -37,7 +37,11 @@ function corsWithOptions(req, res, next) {
                 query: req.query,
               };
               if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
-                serviceEmail.sendMailControlCall(requestInfo)
+                try {
+                  serviceEmail.sendMailControlCall(requestInfo)
+                } catch (emailError) {
+                  console.log('Fail sending email');
+                }
               }
             callback(new Error('Not allowed by CORS'));
         }
