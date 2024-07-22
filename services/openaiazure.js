@@ -32,7 +32,11 @@ async function callOpenAi(req, res) {
   };
   try {
     if (req.body.ip === '' || req.body.ip === undefined) {
-      await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      try {
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
       res.status(200).send({ result: "blocked" });
     } else {
       const messages = [{ role: "user", content: jsonText }];
@@ -57,7 +61,11 @@ async function callOpenAi(req, res) {
       });
       if (!result.data.choices[0].message.content) {
         requestInfo.body = req.body;
-        await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
+        try {
+          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
+        } catch (emailError) {
+          console.log('Fail sending email');
+        }
         res.status(200).send({result: "error openai"});
       } else {
         try {
@@ -90,9 +98,8 @@ async function callOpenAi(req, res) {
     }
 
     try {
-      await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
     } catch (emailError) {
-      insights.error(emailError);
       console.log('Fail sending email');
     }
 
@@ -120,7 +127,12 @@ async function callOpenAiQuestions(req, res) {
   };
   try {
     if (req.body.ip === '' || req.body.ip === undefined) {
-      await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      try {
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
+      
       res.status(200).send({ result: "blocked" });
     } else {
       const messages = [{ role: "user", content: jsonText }];
@@ -146,7 +158,12 @@ async function callOpenAiQuestions(req, res) {
       
       if (!result.data.choices[0].message.content) {
         requestInfo.body = req.body;
-        await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
+        try {
+          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
+        } catch (emailError) {
+          console.log('Fail sending email');
+        }
+        
         res.status(200).send({result: "error openai"});
       } else {
         res.status(200).send({result: 'success', data: result.data.choices[0].message.content});
@@ -170,9 +187,8 @@ async function callOpenAiQuestions(req, res) {
     }
 
     try {
-      await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
     } catch (emailError) {
-      insights.error(emailError);
       console.log('Fail sending email');
     }
 
@@ -213,7 +229,11 @@ async function callOpenAiAnonymized(req, res) {
 
   try {
     if (req.body.ip === '' || req.body.ip === undefined) {
-      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      try {
+        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
       res.status(200).send({ result: "blocked" });
     }else{
       const messages = [
@@ -264,7 +284,12 @@ async function callOpenAiAnonymized(req, res) {
       console.log(e.message);
     }
     console.error("[ERROR]: " + e)
-    serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+    try {
+      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
     res.status(500).send('error')
   }
 }
