@@ -219,6 +219,7 @@ async function callOpenAiAnonymized(req, res) {
   However, it's essential to maintain all medical specifics, such as medical history, diagnosis, treatment plans, and lab results, as they are not classified as PII. 
   The anonymized document should retain the integrity of the original content, apart from the replaced PII. 
   Avoid including any information that wasn't part of the original document and ensure the output reflects the original content structure and intent, albeit anonymized. 
+  If any part of the text is already anonymized (represented by asterisks or [ANON-N]), do not anonymize it again. 
   Here is the original document between the triple quotes:
   ----------------------------------------
   """
