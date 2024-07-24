@@ -144,7 +144,7 @@ function sendMailFeedback (email, lang, info){
       context: {
         email : email,
         lang : lang,
-        info: info
+        info: JSON.stringify(info)
       }
     };
 
@@ -185,41 +185,6 @@ function sendMailGeneralFeedback (info, myuuid){
         moreFunct : info.moreFunct,
         freeText : info.freeText,
         email : info.email
-      }
-    };
-
-    transporter.sendMail(mailOptions, function(error, info){
-      if (error) {
-        insights.error(error);
-        console.log(error);
-        reject({
-          status: 401,
-          message: 'Fail sending email'
-        })
-      } else {
-        resolve("ok")
-      }
-    });
-
-  });
-  return decoded
-}
-
-function sendMailError (msg, lang){
-  const decoded = new Promise((resolve, reject) => {
-    var maillistbcc = [
-      TRANSPORTER_OPTIONS.auth.user
-    ];
-
-    var mailOptions = {
-      to: TRANSPORTER_OPTIONS.auth.user,
-      from: TRANSPORTER_OPTIONS.auth.user,
-      bcc: maillistbcc,
-      subject: 'Mensaje de error para soporte de DxGPT',
-      template: 'mail_error/_es',
-      context: {
-        error : msg,
-        lang : lang
       }
     };
 
@@ -281,6 +246,5 @@ module.exports = {
   sendMailErrorGPTIP,
   sendMailFeedback,
   sendMailGeneralFeedback,
-  sendMailError,
   sendMailControlCall
 }

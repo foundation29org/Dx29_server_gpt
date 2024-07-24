@@ -325,7 +325,7 @@ function sendFeedback(req, res) {
   (async () => {
     try {
       blobOpenDx29Ctrl.createBlobFeedbackVoteDown(req.body);
-      serviceEmail.sendMailFeedback(req.body.email, req.body.lang, req.body.info)
+      serviceEmail.sendMailFeedback(req.body.email, req.body.lang, req.body)
         .then(response => {
 
         })

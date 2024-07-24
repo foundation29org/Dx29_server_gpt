@@ -17,7 +17,7 @@ function sendMsgLogoutSupport(req, res){
 			var d = new Date(Date.now());
 			var a = d.toString();
 			support.date = a;
-			support.subscribe = false
+			support.subscribe = true
 
 			sendFlow(support, req.body.lang)
 			support.save((err, supportStored) => {
@@ -84,22 +84,8 @@ function sendMsSubscribe(req, res){
 			})
 }
 
-function sendError(req, res){
-	// enviamos Email
-	serviceEmail.sendMailError(req.body.value,req.body.lang)
-			.then(response => {
-				return res.status(200).send({ message: 'Email sent'})
-			})
-			.catch(response => {
-				//create user, but Failed sending email.
-				insights.error(response);
-				res.status(500).send({ message: 'Fail sending email'})
-			})
-}
-
 module.exports = {
 	sendMsgLogoutSupport,
 	sendMsSubscribe,
-	sendError,
 	sendFlow
 }

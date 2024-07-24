@@ -72,8 +72,6 @@ api.get('/langs/',  langCtrl.getLangs)
 api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogoutSupport)
 api.post('/subscribe/', corsWithOptions, checkApiKey, supportCtrl.sendMsSubscribe)
 
-api.post('/senderror', corsWithOptions, checkApiKey, supportCtrl.sendError)
-
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
 api.post('/callopenaiquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiQuestions)
