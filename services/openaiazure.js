@@ -50,7 +50,7 @@ async function callOpenAi(req, res) {
       };
 
       const endpointUrl = timezone.includes("America") ?
-        'https://apiopenai.azure-api.net/dxgptamerica/deployments' :
+        'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
         'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
       const result = await axios.post(endpointUrl, requestBody, {
@@ -146,7 +146,7 @@ async function callOpenAiQuestions(req, res) {
       };
 
       const endpointUrl = timezone.includes("America") ?
-        'https://apiopenai.azure-api.net/dxgptamerica/deployments' :
+        'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
         'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
       const result = await axios.post(endpointUrl, requestBody, {
@@ -252,8 +252,8 @@ async function callOpenAiAnonymized(req, res) {
   
 
       const endpointUrl = timezone.includes("America") ?
-      'https://apiopenai.azure-api.net/dxgptamerica/anonymized' :
-      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';//endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
+      'https://apiopenai.azure-api.net/dxgptamerica/anonymized/gpt4o' :
+      'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o';//endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/anonymized';
       const result = await axios.post(endpointUrl, requestBody,{
           headers: {
               'Content-Type': 'application/json',
