@@ -70,14 +70,19 @@ async function callOpenAi(req, res) {
       } else {
         try {
           let parsedData;
-          parsedData = JSON.parse(result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/)[1]);
-          res.status(200).send({result: 'success', data: parsedData});
-          return;
+          const match = result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/);
+          if (match && match[1]) {
+            parsedData = JSON.parse(match[1]);
+            return res.status(200).send({result: 'success', data: parsedData});
+          } else {
+            console.error("Failed to parse diagnosis output 0");
+            throw new Error("Failed to match diagnosis output");
+          }
         } catch (e) {
             console.error("Failed to parse diagnosis output", e);
             res.status(200).send({result: "error"});
         }
-        console.log(parsedData);
+       
       }
     }
   } catch (e) {
