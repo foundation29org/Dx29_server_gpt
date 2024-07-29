@@ -43,7 +43,7 @@ async function callOpenAi(req, res) {
       const requestBody = {
         messages: messages,
         temperature: 0,
-        max_tokens: 800,
+        max_tokens: 2000,
         top_p: 1,
         frequency_penalty: 0,
         presence_penalty: 0,
@@ -144,7 +144,7 @@ async function callOpenAiQuestions(req, res) {
       const requestBody = {
         messages: messages,
         temperature: 0,
-        max_tokens: 800,
+        max_tokens: 2000,
         top_p: 1,
         frequency_penalty: 0,
         presence_penalty: 0,
