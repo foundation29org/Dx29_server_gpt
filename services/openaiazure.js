@@ -11,6 +11,8 @@ const axios = require('axios');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const translationKey = config.translationKey;
 const supportService = require('../controllers/all/support');
+const  {encodingForModel} = require("js-tiktoken");
+const { max } = require("moment");
 
 async function callOpenAi(req, res) {
   const jsonText = req.body.value;
@@ -40,7 +42,7 @@ async function callOpenAi(req, res) {
       res.status(200).send({ result: "blocked" });
     } else {
       const messages = [{ role: "user", content: jsonText }];
-      const requestBody = {
+      let requestBody = {
         messages: messages,
         temperature: 0,
         max_tokens: 2000,
@@ -48,7 +50,14 @@ async function callOpenAi(req, res) {
         frequency_penalty: 0,
         presence_penalty: 0,
       };
-
+      let max_tokens = calculateMaxTokens(jsonText);
+      console.log('max_tokens', max_tokens);
+      requestBody.max_tokens = max_tokens;
+      if(max_tokens > 8000){
+        //return and error max tokens
+        res.status(200).send({result: "error max tokens"});
+        return;
+      }
       const endpointUrl = timezone.includes("America") ?
         'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
         'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
@@ -70,7 +79,6 @@ async function callOpenAi(req, res) {
       } else {
         try {
           let parsedData;
-          console.log(result.data.choices[0].message.content)
           const match = result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/);
           if (match && match[1]) {
             parsedData = JSON.parse(match[1]);
@@ -111,6 +119,27 @@ async function callOpenAi(req, res) {
 
     res.status(500).send('Internal server error');
   }
+}
+
+function calculateMaxTokens(jsonText){
+  const enc = encodingForModel("gpt-4o");
+
+   // Extraer contenido relevante
+   const patientDescription = extractContent('patient_description', jsonText);
+   const diseasesList = extractContent('diseases_list', jsonText);
+
+   // Contar tokens en el contenido relevante
+   const patientDescriptionTokens = enc.encode(patientDescription).length;
+   console.log('patientDescriptionTokens', patientDescriptionTokens);
+   let max_tokens = (patientDescriptionTokens*5);
+   max_tokens+= 500; // Add extra tokens for the prompt
+   return max_tokens;
+}
+
+function extractContent(tag, text) {
+  const regex = new RegExp(`<${tag}>(.*?)</${tag}>`, 's');
+  const match = text.match(regex);
+  return match ? match[1].trim() : '';
 }
 
 async function callOpenAiQuestions(req, res) {
