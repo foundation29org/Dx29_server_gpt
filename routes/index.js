@@ -37,7 +37,11 @@ function corsWithOptions(req, res, next) {
                 query: req.query,
               };
               if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
-                serviceEmail.sendMailControlCall(requestInfo)
+                try {
+                  serviceEmail.sendMailControlCall(requestInfo)
+                } catch (emailError) {
+                  console.log('Fail sending email');
+                }
               }
             callback(new Error('Not allowed by CORS'));
         }
@@ -66,12 +70,10 @@ api.get('/langs/',  langCtrl.getLangs)
 
 //Support
 api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogoutSupport)
-api.post('/subscribe/', corsWithOptions, checkApiKey, supportCtrl.sendMsSubscribe)
-
-api.post('/senderror', corsWithOptions, checkApiKey, supportCtrl.sendError)
 
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
+api.post('/callopenaiquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiQuestions)
 api.post('/callanonymized', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiAnonymized)
 
 //services OPENAI
