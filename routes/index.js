@@ -70,7 +70,6 @@ api.get('/langs/',  langCtrl.getLangs)
 
 //Support
 api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogoutSupport)
-api.post('/subscribe/', corsWithOptions, checkApiKey, supportCtrl.sendMsSubscribe)
 
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
