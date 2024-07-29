@@ -54,7 +54,7 @@ function sendMailSupport (email, lang, supportStored){
   return decoded
 }
 
-function sendMailErrorGPT (lang, req, response){
+function sendMailError (lang, req, response){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -65,7 +65,7 @@ function sendMailErrorGPT (lang, req, response){
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
       subject: 'Mensaje para soporte de DxGPT - Error GPT',
-      template: 'mail_error_gpt/_es',
+      template: 'mail_error/_es',
       context: {
         lang : lang,
         info: JSON.stringify(req), 
@@ -144,7 +144,7 @@ function sendMailFeedback (email, lang, info){
       context: {
         email : email,
         lang : lang,
-        info: info
+        info: JSON.stringify(info)
       }
     };
 
@@ -205,41 +205,6 @@ function sendMailGeneralFeedback (info, myuuid){
   return decoded
 }
 
-function sendMailError (msg, lang){
-  const decoded = new Promise((resolve, reject) => {
-    var maillistbcc = [
-      TRANSPORTER_OPTIONS.auth.user
-    ];
-
-    var mailOptions = {
-      to: TRANSPORTER_OPTIONS.auth.user,
-      from: TRANSPORTER_OPTIONS.auth.user,
-      bcc: maillistbcc,
-      subject: 'Mensaje de error para soporte de DxGPT',
-      template: 'mail_error/_es',
-      context: {
-        error : msg,
-        lang : lang
-      }
-    };
-
-    transporter.sendMail(mailOptions, function(error, info){
-      if (error) {
-        insights.error(error);
-        console.log(error);
-        reject({
-          status: 401,
-          message: 'Fail sending email'
-        })
-      } else {
-        resolve("ok")
-      }
-    });
-
-  });
-  return decoded
-}
-
 function sendMailControlCall (req){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
@@ -277,10 +242,9 @@ function sendMailControlCall (req){
 
 module.exports = {
   sendMailSupport,
-  sendMailErrorGPT,
+  sendMailError,
   sendMailErrorGPTIP,
   sendMailFeedback,
   sendMailGeneralFeedback,
-  sendMailError,
   sendMailControlCall
 }

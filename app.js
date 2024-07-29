@@ -41,7 +41,11 @@ function setCrossDomain(req, res, next) {
         query: req.query,
       };
       if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
-        serviceEmail.sendMailControlCall(requestInfo)
+        try {
+          serviceEmail.sendMailControlCall(requestInfo)
+        } catch (emailError) {
+          console.log('Fail sending email');
+        }
       }
     res.status(401).json({ error: 'Origin not allowed' });
   }

@@ -7,31 +7,19 @@ const insights = require('../services/insights')
 function getDetectLanguage(req, res) {
     var jsonText = req.body;
     var translationKey = config.translationKey;
-    let pattern = /orvosi|orvosok|orvosként|Kizárólag|orvoshoz/i;
-    let containsWord = pattern.test(jsonText[0].text);
-    if(containsWord){
-      let resp = [
-        {
-          "language": "en",
-          "score": 1.0
-        }
-      ]
-      res.status(200).send(resp)
-    }else{
-      request.post({ url: 'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0', json: true, headers: { 'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' }, body: jsonText }, (error, response, body) => {
-        if (error) {
-          console.error(error)
-          insights.error(error);
-          res.status(500).send(error)
-        }
-        if (body == 'Missing authentication token.') {
-          res.status(401).send(body)
-        } else {
-          res.status(200).send(body)
-        }
-    
-      });
-    }
+    request.post({ url: 'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0', json: true, headers: { 'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' }, body: jsonText }, (error, response, body) => {
+      if (error) {
+        console.error(error)
+        insights.error(error);
+        res.status(500).send(error)
+      }
+      if (body == 'Missing authentication token.') {
+        res.status(401).send(body)
+      } else {
+        res.status(200).send(body)
+      }
+  
+    });
     
   }
 
