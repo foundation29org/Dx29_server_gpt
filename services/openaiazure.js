@@ -70,6 +70,7 @@ async function callOpenAi(req, res) {
       } else {
         try {
           let parsedData;
+          console.log(result.data.choices[0].message.content)
           const match = result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/);
           if (match && match[1]) {
             parsedData = JSON.parse(match[1]);
@@ -144,7 +145,7 @@ async function callOpenAiQuestions(req, res) {
       const requestBody = {
         messages: messages,
         temperature: 0,
-        max_tokens: 2000,
+        max_tokens: 800,
         top_p: 1,
         frequency_penalty: 0,
         presence_penalty: 0,
