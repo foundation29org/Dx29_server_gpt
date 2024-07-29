@@ -54,7 +54,7 @@ function sendMailSupport (email, lang, supportStored){
   return decoded
 }
 
-function sendMailErrorGPT (lang, req, response){
+function sendMailError (lang, req, response){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -65,7 +65,7 @@ function sendMailErrorGPT (lang, req, response){
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
       subject: 'Mensaje para soporte de DxGPT - Error GPT',
-      template: 'mail_error_gpt/_es',
+      template: 'mail_error/_es',
       context: {
         lang : lang,
         info: JSON.stringify(req), 
@@ -242,7 +242,7 @@ function sendMailControlCall (req){
 
 module.exports = {
   sendMailSupport,
-  sendMailErrorGPT,
+  sendMailError,
   sendMailErrorGPTIP,
   sendMailFeedback,
   sendMailGeneralFeedback,

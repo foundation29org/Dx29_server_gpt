@@ -304,7 +304,7 @@ function opinion(req, res) {
     } catch (e) {
       insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
-      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
+      serviceEmail.sendMailError(req.body.lang, req.body.value, e)
         .then(response => {
 
         })
@@ -355,7 +355,7 @@ function sendFeedback(req, res) {
     } catch (e) {
       insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
-      serviceEmail.sendMailErrorGPT(req.body.lang, req.body.value, e)
+      serviceEmail.sendMailError(req.body.lang, req.body.value, e)
         .then(response => {
 
         })
@@ -403,7 +403,7 @@ function sendGeneralFeedback(req, res) {
     } catch (e) {
       insights.error(e);
       console.error("[ERROR] OpenAI responded with status: " + e)
-      serviceEmail.sendMailErrorGPT(req.body.lang, req.body, e)
+      serviceEmail.sendMailError(req.body.lang, req.body, e)
         .then(response => {
 
         })
