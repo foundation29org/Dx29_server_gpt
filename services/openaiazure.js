@@ -55,8 +55,9 @@ async function callOpenAi(req, res) {
       requestBody.max_tokens = max_tokens;
       if(max_tokens > 4000){
         //return and error max tokens
-        res.status(200).send({result: "error max tokens"});
-        return;
+        // res.status(200).send({result: "error max tokens"});
+        // return;
+        requestBody.max_tokens = 4096;
       }
       const endpointUrl = timezone.includes("America") ?
         'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
@@ -79,7 +80,8 @@ async function callOpenAi(req, res) {
       } else {
         try {
           let parsedData;
-          const match = result.data.choices[0].message.content.match(/<5_diagnosis_output>([\s\S]*?)<\/5_diagnosis_output>/);
+          console.log('result', result.data.usage)
+          const match = result.data.choices[0].message.content.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
           if (match && match[1]) {
             parsedData = JSON.parse(match[1]);
             return res.status(200).send({result: 'success', data: parsedData});
@@ -131,7 +133,7 @@ function calculateMaxTokens(jsonText){
    // Contar tokens en el contenido relevante
    const patientDescriptionTokens = enc.encode(patientDescription).length;
    console.log('patientDescriptionTokens', patientDescriptionTokens);
-   let max_tokens = (patientDescriptionTokens*5);
+   let max_tokens = Math.round(patientDescriptionTokens * 4.5);
    max_tokens+= 500; // Add extra tokens for the prompt
    return max_tokens;
 }
