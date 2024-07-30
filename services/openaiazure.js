@@ -53,7 +53,7 @@ async function callOpenAi(req, res) {
       let max_tokens = calculateMaxTokens(jsonText);
       console.log('max_tokens', max_tokens);
       requestBody.max_tokens = max_tokens;
-      if(max_tokens > 8000){
+      if(max_tokens > 4000){
         //return and error max tokens
         res.status(200).send({result: "error max tokens"});
         return;
