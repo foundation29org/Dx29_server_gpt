@@ -42,11 +42,8 @@ function corsWithOptions(req, res, next) {
                 } catch (emailError) {
                   console.log('Fail sending email');
                 }
-                callback(new Error('Not allowed by CORS'));
-              }else{
-                callback(null, true);
               }
-            
+            callback(new Error('Not allowed by CORS'));
         }
       },
     };
