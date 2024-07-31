@@ -51,12 +51,9 @@ async function callOpenAi(req, res) {
         presence_penalty: 0,
       };
       let max_tokens = calculateMaxTokens(jsonText);
-      console.log('max_tokens', max_tokens);
+      // console.log('max_tokens', max_tokens);
       requestBody.max_tokens = max_tokens;
       if(max_tokens > 4000){
-        //return and error max tokens
-        // res.status(200).send({result: "error max tokens"});
-        // return;
         requestBody.max_tokens = 4096;
       }
       const endpointUrl = timezone.includes("America") ?
@@ -80,7 +77,7 @@ async function callOpenAi(req, res) {
       } else {
         try {
           let parsedData;
-          console.log('result', result.data.usage)
+          // console.log('result', result.data.usage)
           const match = result.data.choices[0].message.content.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
           if (match && match[1]) {
             parsedData = JSON.parse(match[1]);
@@ -132,10 +129,18 @@ function calculateMaxTokens(jsonText){
 
    // Contar tokens en el contenido relevante
    const patientDescriptionTokens = enc.encode(patientDescription).length;
-   console.log('patientDescriptionTokens', patientDescriptionTokens);
+  //  console.log('patientDescriptionTokens', patientDescriptionTokens);
    let max_tokens = Math.round(patientDescriptionTokens * 4.5);
    max_tokens+= 500; // Add extra tokens for the prompt
    return max_tokens;
+}
+
+function calculateMaxTokensAnon(jsonText){
+  const enc = encodingForModel("gpt-4o");
+  // console.log('jsonText', jsonText)
+   // Contar tokens en el contenido relevante
+   const patientDescriptionTokens = enc.encode(jsonText).length;
+   return patientDescriptionTokens+100;
 }
 
 function extractContent(tag, text) {
@@ -286,6 +291,13 @@ async function callOpenAiAnonymized(req, res) {
         frequency_penalty: 0,
         presence_penalty: 0,
       };
+
+      let max_tokens = calculateMaxTokensAnon(jsonText);
+      // console.log('max_tokens', max_tokens);
+      requestBody.max_tokens = max_tokens;
+      if(max_tokens > 4000){
+        requestBody.max_tokens = 4096;
+      }
   
 
       const endpointUrl = timezone.includes("America") ?
