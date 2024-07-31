@@ -46,11 +46,8 @@ function setCrossDomain(req, res, next) {
         } catch (emailError) {
           console.log('Fail sending email');
         }
-        res.status(401).json({ error: 'Origin not allowed' });
-      }else{
-        next();
       }
-    
+    res.status(401).json({ error: 'Origin not allowed' });
   }
   
 }
