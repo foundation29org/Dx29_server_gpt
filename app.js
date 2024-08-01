@@ -8,26 +8,10 @@ const compression = require('compression');
 const bodyParser = require('body-parser');
 const config = require('./config')
 const app = express()
-
-if(config.client_server!='http://localhost:4200'){
-  app.use((req, res, next) => {
-    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
-      next();
-    } else {
-      res.redirect(`https://${req.headers.host}${req.url}`);
-    }
-  });
-}
-
-
-// habilitar compresión 
 app.use(compression());
-
 const serviceEmail = require('./services/email')
 const api = require ('./routes')
 const path = require('path')
-//CORS middleware
-//CORS middleware
 const allowedOrigins = config.allowedOrigins;
 
 function setCrossDomain(req, res, next) {
