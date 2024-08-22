@@ -7,7 +7,6 @@ const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
 const openAIserviceCtrl = require('../services/openaiazure')
 const translationCtrl = require('../services/translation')
-const ta4hserviceCtrl = require('../services/ta4h')
 const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
@@ -89,8 +88,5 @@ api.post('/getDetectLanguage', corsWithOptions, checkApiKey, translationCtrl.get
 api.post('/translation', corsWithOptions, checkApiKey, translationCtrl.getTranslationDictionary)
 api.post('/translationinvert', corsWithOptions, checkApiKey, translationCtrl.getTranslationDictionaryInvert)
 api.post('/translation/segments', corsWithOptions, checkApiKey, translationCtrl.getTranslationSegments)
-
-//services ta4h
-api.post('/callTextAnalytics', corsWithOptions, checkApiKey, ta4hserviceCtrl.callTextAnalytics)
 
 module.exports = api

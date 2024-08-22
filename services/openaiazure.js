@@ -9,10 +9,8 @@ const Support = require('../models/support')
 const Generalfeedback = require('../models/generalfeedback')
 const axios = require('axios');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
-const translationKey = config.translationKey;
 const supportService = require('../controllers/all/support');
 const  {encodingForModel} = require("js-tiktoken");
-const { max } = require("moment");
 
 async function callOpenAi(req, res) {
   const jsonText = req.body.value;
