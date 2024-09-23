@@ -7,6 +7,7 @@ const Support = require('../../models/support')
 const serviceEmail = require('../../services/email')
 const insights = require('../../services/insights')
 const axios = require('axios');
+const config = require('../../config')
 
 function sendMsgLogoutSupport(req, res){
 			let support = new Support()
@@ -43,6 +44,10 @@ async function sendFlow(support, lang){
 		lang: lang
 	}
 	let endpointUrl = 'https://prod-208.westeurope.logic.azure.com:443/workflows/2e5021f1e8764cacb7a60a58bfe1f1db/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QdRU50xndaLmf47VpR77saF2U_AzJx1W3z6cupllejo'
+
+	if(config.client_server.indexOf('dxgpt.app') == -1){
+		endpointUrl = 'https://prod-186.westeurope.logic.azure.com:443/workflows/9dae9a0707e5452abbc7173b05277df6/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=sobGleGrapNnnf5SIgVtX6PmC7Bhzn5oTKPv9MluGwM'
+	}
 
 	try {
         await axios.post(endpointUrl, requestBody, {
