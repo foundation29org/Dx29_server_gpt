@@ -67,7 +67,9 @@ app.use(helmet({
             "https://static.hotjar.com",
             "https://script.hotjar.com",
             "https://region1.google-analytics.com",
-            "https://maps-api-v3.googleapis.com"
+            "https://maps-api-v3.googleapis.com",
+            "'unsafe-hashes'",
+            "'script-src-attr'"
         ],
         styleSrc: [
             "'self'",
@@ -96,7 +98,8 @@ app.use(helmet({
         frameSrc: [
             "'self'",
             "https://www.google.com",
-            "https://vars.hotjar.com"
+            "https://vars.hotjar.com",
+            "https://www.googletagmanager.com"
         ],
         connectSrc: [
             "'self'",
@@ -111,7 +114,10 @@ app.use(helmet({
             "https://stats.g.doubleclick.net",
             "https://ka-f.fontawesome.com",
             "https://region1.google-analytics.com",
-            "https://ipinfo.io" 
+            "https://ipinfo.io",
+            "https://www.google.com",
+            "https://google.com",
+            "https://www.googletagmanager.com"
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["blob:"],
@@ -136,6 +142,21 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
 }));
+
+// Añadir configuración de cookies
+app.use((req, res, next) => {
+  res.cookie('_ga', '', {
+    domain: '.azurewebsites.net',
+    secure: true,
+    sameSite: 'Lax'
+  });
+  res.cookie('_ga_2FZQ49SRWY', '', {
+    domain: '.azurewebsites.net',
+    secure: true,
+    sameSite: 'Lax'
+  });
+  next();
+});
 
 app.use((req, res, next) => {
   // Eliminar cabeceras que exponen información
