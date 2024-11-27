@@ -85,7 +85,12 @@ app.use(helmet({
             "https:",
             "https://maps.gstatic.com",
             "https://maps.googleapis.com",
-            "https://foundation29.org"
+            "https://foundation29.org",
+            "https://www.googleadservices.com",
+            "https://googleads.g.doubleclick.net",
+            "https://www.google.com",
+            "https://dxgpt.app",
+            "https://www.dxgpt.app"
         ],
         fontSrc: [
             "'self'",
@@ -117,7 +122,10 @@ app.use(helmet({
             "https://ipinfo.io",
             "https://www.google.com",
             "https://google.com",
-            "https://www.googletagmanager.com"
+            "https://www.googletagmanager.com",
+            "https://www.googleadservices.com",
+            "https://googleads.g.doubleclick.net",
+            "https://fonts.gstatic.com"
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["blob:"],
