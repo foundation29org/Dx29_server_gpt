@@ -13,6 +13,7 @@ const serviceEmail = require('./services/email')
 const api = require ('./routes')
 const path = require('path')
 const helmet = require('helmet');
+const cors = require('cors');
 const allowedOrigins = config.allowedOrigins;
 
 app.use(helmet({
