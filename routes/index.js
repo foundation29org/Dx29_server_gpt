@@ -19,6 +19,30 @@ function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
         console.log(origin);
+        // Verificar que el host es el esperado
+        const isValidHost = req.headers.host && (
+          req.headers.host === 'dxgpt.app' ||          // Producción
+          req.headers.host === 'www.dxgpt.app' ||          // Producción
+          req.headers.host === 'dxgpt-dev.azurewebsites.net' ||
+          req.headers.host.includes('dxgpt.app') ||    // Subdominio en producción
+          //https://dxgpt-dev.azurewebsites.net/
+          req.headers.host.includes('dxgpt-dev.azurewebsites.net') ||                // Desarrollo local
+          req.headers.host.includes('localhost:') ||                // Desarrollo local
+          req.headers.host.includes('127.0.0.1:')                  // Alternativa localhost
+        );
+
+        if (!isValidHost) {
+          console.log('Invalid host:', req.headers.host);
+          callback(new Error('Invalid host'));
+          return;
+        }
+
+        // Si es same-origin (Sec-Fetch-Site: same-origin)
+        if (req.headers['sec-fetch-site'] === 'same-origin') {
+          callback(null, true);
+          return;
+        }
+
         if (whitelist.includes(origin)) {
            // Añadir cabeceras de seguridad adicionales
           /*res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -49,11 +73,8 @@ function corsWithOptions(req, res, next) {
             callback(new Error('Not allowed by CORS'));
         }
       },
-      methods: ['GET', 'POST', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization', 'Access-Control-Allow-Origin', 'Accept', 'Accept-Language', 'Origin', 'User-Agent'],
-      maxAge: 86400 // 24 horas
+      credentials: true
     };
-  
     cors(corsOptions)(req, res, next);
   }
 

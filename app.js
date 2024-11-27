@@ -15,40 +15,6 @@ const path = require('path')
 const helmet = require('helmet');
 const allowedOrigins = config.allowedOrigins;
 
-function setCrossDomain(req, res, next) {
-  //instead of * you can define ONLY the sources that we allow.
-  //res.header('Access-Control-Allow-Origin', '*');
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD')  {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
-    next();
-  }else{
-    //send email
-    const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-    const requestInfo = {
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-        origin: origin,
-        body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-        ip: clientIp,
-        params: req.params,
-        query: req.query,
-      };
-      if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
-        try {
-          serviceEmail.sendMailControlCall(requestInfo)
-        } catch (emailError) {
-          console.log('Fail sending email');
-        }
-      }
-    res.status(401).json({ error: 'Origin not allowed' });
-  }
-  
-}
-
 app.use(helmet({
   hidePoweredBy: true, // Ocultar cabecera X-Powered-By
   contentSecurityPolicy: {
@@ -167,6 +133,14 @@ app.use((req, res, next) => {
   next();
 });
 
+
+app.use(cors({
+  origin: ['https://dxgpt.app', 'https://www.dxgpt.app', 'https://dxgpt-dev.azurewebsites.net', 'http://localhost:4200'],
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Access-Control-Allow-Origin','Accept', 'Accept-Language', 'Origin', 'User-Agent'],
+}));
+
 app.use((req, res, next) => {
   // Eliminar cabeceras que exponen información
   res.removeHeader('X-Powered-By');
@@ -184,7 +158,6 @@ app.use(bodyParser.json({
   limit: '1mb',
   strict: true // Rechazar payload que no sea JSON válido
 }));
-app.use(setCrossDomain);
 
 
 // use the forward slash with the module api api folder created routes
