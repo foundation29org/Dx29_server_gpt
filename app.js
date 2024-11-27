@@ -119,22 +119,6 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
 }));
 
-// Añadir configuración de cookies
-app.use((req, res, next) => {
-  res.cookie('_ga', '', {
-    domain: '.azurewebsites.net',
-    secure: true,
-    sameSite: 'Lax'
-  });
-  res.cookie('_ga_2FZQ49SRWY', '', {
-    domain: '.azurewebsites.net',
-    secure: true,
-    sameSite: 'Lax'
-  });
-  next();
-});
-
-
 app.use(cors({
   origin: ['https://dxgpt.app', 'https://www.dxgpt.app', 'https://dxgpt-dev.azurewebsites.net', 'http://localhost:4200'],
   credentials: true,
