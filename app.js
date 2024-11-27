@@ -21,13 +21,11 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
         defaultSrc: ["'self'"],
-        scriptSrcAttr: ["'unsafe-inline'"],
         scriptSrc: [
             "'self'",
             "'unsafe-inline'",
             "'unsafe-eval'",
             "https://apis.google.com",
-            "https://maps.googleapis.com",
             "https://www.google.com",
             "https://www.gstatic.com",
             "https://kit.fontawesome.com",
@@ -35,9 +33,6 @@ app.use(helmet({
             "https://static.hotjar.com",
             "https://script.hotjar.com",
             "https://region1.google-analytics.com",
-            "https://maps-api-v3.googleapis.com",
-            "'unsafe-hashes'",
-            "'script-src-attr'"
         ],
         styleSrc: [
             "'self'",
@@ -51,8 +46,6 @@ app.use(helmet({
             "data:",
             "blob:",
             "https:",
-            "https://maps.gstatic.com",
-            "https://maps.googleapis.com",
             "https://foundation29.org",
             "https://www.googleadservices.com",
             "https://googleads.g.doubleclick.net",
@@ -78,7 +71,6 @@ app.use(helmet({
             "'self'",
             "http://localhost:8443",
             "https://apis.google.com",
-            "https://maps.googleapis.com",
             "https://*.hotjar.com",
             "wss://*.hotjar.com",
             "https://*.hotjar.io",
