@@ -49,7 +49,122 @@ function setCrossDomain(req, res, next) {
   
 }
 
+app.use(helmet({
+  hidePoweredBy: true, // Ocultar cabecera X-Powered-By
+  contentSecurityPolicy: {
+    directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            "'unsafe-eval'",
+            "https://apis.google.com",
+            "https://maps.googleapis.com",
+            "https://www.google.com",
+            "https://www.gstatic.com",
+            "https://kit.fontawesome.com",
+            "https://www.googletagmanager.com",
+            "https://static.hotjar.com",
+            "https://script.hotjar.com",
+            "https://region1.google-analytics.com",
+            "https://maps-api-v3.googleapis.com",
+            "'unsafe-hashes'",
+            "'script-src-attr'"
+        ],
+        styleSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            "https://fonts.googleapis.com",
+            "https://kit-free.fontawesome.com",
+            "https://ka-f.fontawesome.com"
+        ],
+        imgSrc: [
+            "'self'",
+            "data:",
+            "blob:",
+            "https:",
+            "https://maps.gstatic.com",
+            "https://maps.googleapis.com",
+            "https://foundation29.org",
+            "https://www.googleadservices.com",
+            "https://googleads.g.doubleclick.net",
+            "https://www.google.com",
+            "https://dxgpt.app",
+            "https://www.dxgpt.app"
+        ],
+        fontSrc: [
+            "'self'",
+            "data:",
+            "https://fonts.gstatic.com",
+            "https://kit-free.fontawesome.com",
+            "https://ka-f.fontawesome.com",
+            "https://script.hotjar.com"
+        ],
+        frameSrc: [
+            "'self'",
+            "https://www.google.com",
+            "https://vars.hotjar.com",
+            "https://www.googletagmanager.com"
+        ],
+        connectSrc: [
+            "'self'",
+            "http://localhost:8443",
+            "https://apis.google.com",
+            "https://maps.googleapis.com",
+            "https://*.hotjar.com",
+            "wss://*.hotjar.com",
+            "https://*.hotjar.io",
+            "https://*.google-analytics.com",
+            "https://analytics.google.com",
+            "https://stats.g.doubleclick.net",
+            "https://ka-f.fontawesome.com",
+            "https://region1.google-analytics.com",
+            "https://ipinfo.io",
+            "https://www.google.com",
+            "https://google.com",
+            "https://www.googletagmanager.com",
+            "https://www.googleadservices.com",
+            "https://googleads.g.doubleclick.net",
+            "https://fonts.gstatic.com"
+        ],
+        workerSrc: ["'self'", "blob:"],
+        childSrc: ["blob:"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"]
+    }
+  },
+  frameguard: {
+      action: 'DENY'
+  },
+  hidePoweredBy: true,
+  hsts: {
+      maxAge: 63072000,
+      includeSubDomains: true,
+      preload: true
+  },
+  ieNoOpen: true,
+  noSniff: true,
+  xssFilter: true,
+  referrerPolicy: {
+      policy: 'no-referrer-when-downgrade'
+  },
+  crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
+}));
 
+// Añadir configuración de cookies
+app.use((req, res, next) => {
+  res.cookie('_ga', '', {
+    domain: '.azurewebsites.net',
+    secure: true,
+    sameSite: 'Lax'
+  });
+  res.cookie('_ga_2FZQ49SRWY', '', {
+    domain: '.azurewebsites.net',
+    secure: true,
+    sameSite: 'Lax'
+  });
+  next();
+});
 
 app.use((req, res, next) => {
   // Eliminar cabeceras que exponen información
