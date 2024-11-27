@@ -16,16 +16,23 @@ const helmet = require('helmet');
 const cors = require('cors');
 const allowedOrigins = config.allowedOrigins;
 
+const isDevelopment = config.NODE_ENV === 'development' || config.NODE_ENV  === 'local';
+app.use((req, res, next) => {
+  console.log('Before CSP:', res.getHeader('Content-Security-Policy'));
+  next();
+});
 app.use(helmet({
   hidePoweredBy: true, // Ocultar cabecera X-Powered-By
   contentSecurityPolicy: {
     directives: {
         defaultSrc: ["'self'"],
+        scriptSrcAttr: ["'unsafe-inline'"],
         scriptSrc: [
             "'self'",
             "'unsafe-inline'",
             "'unsafe-eval'",
             "https://apis.google.com",
+            "https://maps.googleapis.com",
             "https://www.google.com",
             "https://www.gstatic.com",
             "https://kit.fontawesome.com",
@@ -33,6 +40,9 @@ app.use(helmet({
             "https://static.hotjar.com",
             "https://script.hotjar.com",
             "https://region1.google-analytics.com",
+            "https://maps-api-v3.googleapis.com",
+            "'unsafe-hashes'",
+            "'script-src-attr'"
         ],
         styleSrc: [
             "'self'",
@@ -46,6 +56,8 @@ app.use(helmet({
             "data:",
             "blob:",
             "https:",
+            "https://maps.gstatic.com",
+            "https://maps.googleapis.com",
             "https://foundation29.org",
             "https://www.googleadservices.com",
             "https://googleads.g.doubleclick.net",
@@ -69,8 +81,10 @@ app.use(helmet({
         ],
         connectSrc: [
             "'self'",
+            ...(isDevelopment ? ["http://localhost:*", "ws://localhost:*"] : []),
             "http://localhost:8443",
             "https://apis.google.com",
+            "https://maps.googleapis.com",
             "https://*.hotjar.com",
             "wss://*.hotjar.com",
             "https://*.hotjar.io",
@@ -110,6 +124,11 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
 }));
+
+app.use((req, res, next) => {
+  console.log('After CSP:', res.getHeader('Content-Security-Policy'));
+  next();
+});
 
 app.use(cors({
   origin: ['https://dxgpt.app', 'https://www.dxgpt.app', 'https://dxgpt-dev.azurewebsites.net', 'http://localhost:4200'],
