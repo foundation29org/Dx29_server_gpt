@@ -139,10 +139,7 @@ app.use(helmet({
   referrerPolicy: {
       policy: 'no-referrer-when-downgrade'
   },
-  crossOriginEmbedderPolicy: false, 
-  crossOriginOpenerPolicy: { policy: "same-origin" },
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  dnsPrefetchControl: { allow: false },
+  crossOriginEmbedderPolicy: false
 }));
 
 app.use((req, res, next) => {
