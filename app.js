@@ -67,7 +67,9 @@ app.use(helmet({
             "https://static.hotjar.com",
             "https://script.hotjar.com",
             "https://region1.google-analytics.com",
-            "https://maps-api-v3.googleapis.com"
+            "https://maps-api-v3.googleapis.com",
+            "'unsafe-hashes'",
+            "'script-src-attr'"  // Añadido para permitir event handlers inline
         ],
         styleSrc: [
             "'self'",
@@ -96,7 +98,8 @@ app.use(helmet({
         frameSrc: [
             "'self'",
             "https://www.google.com",
-            "https://vars.hotjar.com"
+            "https://vars.hotjar.com",
+            "https://www.googletagmanager.com"
         ],
         connectSrc: [
             "'self'",
@@ -110,7 +113,10 @@ app.use(helmet({
             "https://analytics.google.com",
             "https://stats.g.doubleclick.net",
             "https://ka-f.fontawesome.com",
-            "https://region1.google-analytics.com"
+            "https://region1.google-analytics.com",
+            "https://www.google.com",
+            "https://google.com",
+            "https://ipinfo.io" 
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["blob:"],
