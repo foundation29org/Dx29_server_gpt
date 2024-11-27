@@ -10,249 +10,253 @@ const Generalfeedback = require('../models/generalfeedback')
 const axios = require('axios');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const supportService = require('../controllers/all/support');
-const  {encodingForModel} = require("js-tiktoken");
+const { encodingForModel } = require("js-tiktoken");
+const translationCtrl = require('../services/translation')
+const PROMPTS = require('../assets/prompts');
+
+
+function sanitizeInput(input) {
+  // Eliminar caracteres especiales y patrones potencialmente peligrosos
+  return input
+    .replace(/[<>{}]/g, '') // Eliminar caracteres especiales
+    .replace(/(\{|\}|\[|\]|\||\\|\/)/g, '') // Eliminar caracteres que podrían ser usados para inyección
+    .replace(/prompt|system|assistant|user/gi, '') // Eliminar palabras clave de OpenAI
+    .trim();
+}
+
+function isValidOpenAiRequest(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos (timezone no incluido)
+  const requiredFields = ['description', 'myuuid', 'operation', 'lang', 'ip'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar description
+  if (typeof data.description !== 'string' ||
+    data.description.length < 10 ||
+    data.description.length > 4000) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'find disease') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar ip
+  if (typeof data.ip !== 'string') return false;
+
+  // Validar timezone si existe
+  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
+    return false;
+  }
+
+  // Validar diseases_list si existe
+  if (data.diseases_list !== undefined &&
+    (typeof data.diseases_list !== 'string' || data.diseases_list.length > 1000)) {
+    return false;
+  }
+
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    /\{\{.*\}\}/,  // Handlebars syntax
+    /<script.*?>.*?<\/script>/gis,  // Scripts
+    /\$\{.*\}/,    // Template literals
+    /prompt|system|assistant|user/gi  // OpenAI keywords
+  ];
+
+  return !suspiciousPatterns.some(pattern =>
+    pattern.test(data.description) ||
+    (data.diseases_list && pattern.test(data.diseases_list))
+  );
+}
+
+function sanitizeOpenAiData(data) {
+  return {
+    ...data,
+    description: sanitizeInput(data.description),
+    diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    ip: data.ip.trim(),
+    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+  };
+}
 
 async function callOpenAi(req, res) {
-  const jsonText = req.body.value;
-  const timezone = req.body.timezone;
-  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-  const origin = req.get('origin');
-  const header_language = req.headers['accept-language'];
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    origin: origin,
-    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-    ip: clientIp,
-    params: req.params,
-    query: req.query,
-    header_language: header_language,
-    timezone: timezone
-  };
   try {
-    if (req.body.ip === '' || req.body.ip === undefined) {
+    // Validar y sanitizar el request
+    if (!isValidOpenAiRequest(req.body)) {
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeOpenAiData(req.body);
+    const { description, diseases_list, lang, ip, timezone } = sanitizedData;
+
+    // Validar IP
+    if (!ip) {
       try {
-        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      res.status(200).send({ result: "blocked" });
-    } else {
-      const messages = [{ role: "user", content: jsonText }];
-      let requestBody = {
-        messages: messages,
-        temperature: 0,
-        max_tokens: 2000,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-      };
-      let max_tokens = calculateMaxTokens(jsonText);
-      // console.log('max_tokens', max_tokens);
-      requestBody.max_tokens = max_tokens;
-      if(max_tokens > 4000){
-        requestBody.max_tokens = 4096;
-      }
-      const endpointUrl = timezone.includes("America") ?
-        'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
-        'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
-
-      const result = await axios.post(endpointUrl, requestBody, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': ApiManagementKey,
-        }
-      });
-      if (!result.data.choices[0].message.content) {
-        requestInfo.body = req.body;
-        try {
-          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
-        } catch (emailError) {
-          console.log('Fail sending email');
-        }
-        res.status(200).send({result: "error openai"});
-      } else {
-        try {
-          let parsedData;
-          // console.log('result', result.data.usage)
-          const match = result.data.choices[0].message.content.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
-          if (match && match[1]) {
-            parsedData = JSON.parse(match[1]);
-            return res.status(200).send({result: 'success', data: parsedData});
-          } else {
-            console.error("Failed to parse diagnosis output 0");
-            throw new Error("Failed to match diagnosis output");
-          }
-        } catch (e) {
-            console.error("Failed to parse diagnosis output", e);
-            res.status(200).send({result: "error"});
-        }
-       
-      }
+      return res.status(200).send({ result: "blocked" });
     }
-  } catch (e) {
-    insights.error(e);
-    console.log(e);
 
-    if (e.response) {
-      console.log(e.response.status);
-      console.log(e.response.data);
-
-      // Asegurarse de que e.response.data.error y e.response.data.error.type están definidos antes de acceder
-      if (e.response.data && e.response.data.error && e.response.data.error.type === 'invalid_request_error') {
-        res.status(400).send(e.response.data.error);
-        return;
-      }
-    } else {
-      console.log(e.message);
-    }
+    // 1. Detectar idioma y traducir a inglés si es necesario
+    let englishDescription = description;
+    let detectedLanguage = lang;
 
     try {
-      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
-    } catch (emailError) {
-      console.log('Fail sending email');
+      detectedLanguage = await translationCtrl.detectLanguage(description);
+      if (detectedLanguage && detectedLanguage !== 'en') {
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
+      }
+    } catch (translationError) {
+      console.error('Translation error:', translationError);
+      return res.status(500).send({ result: "translation error" });
     }
 
-    res.status(500).send('Internal server error');
-  }
-}
-
-function calculateMaxTokens(jsonText){
-  const enc = encodingForModel("gpt-4o");
-
-   // Extraer contenido relevante
-   const patientDescription = extractContent('patient_description', jsonText);
-   const diseasesList = extractContent('diseases_list', jsonText);
-
-   // Contar tokens en el contenido relevante
-   const patientDescriptionTokens = enc.encode(patientDescription).length;
-  //  console.log('patientDescriptionTokens', patientDescriptionTokens);
-   let max_tokens = Math.round(patientDescriptionTokens * 4.5);
-   max_tokens+= 500; // Add extra tokens for the prompt
-   return max_tokens;
-}
-
-function calculateMaxTokensAnon(jsonText){
-  const enc = encodingForModel("gpt-4o");
-  // console.log('jsonText', jsonText)
-   // Contar tokens en el contenido relevante
-   const patientDescriptionTokens = enc.encode(jsonText).length;
-   return patientDescriptionTokens+100;
-}
-
-function extractContent(tag, text) {
-  const regex = new RegExp(`<${tag}>(.*?)</${tag}>`, 's');
-  const match = text.match(regex);
-  return match ? match[1].trim() : '';
-}
-
-async function callOpenAiQuestions(req, res) {
-  const jsonText = req.body.value;
-  const timezone = req.body.timezone;
-  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-  const origin = req.get('origin');
-  const header_language = req.headers['accept-language'];
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    origin: origin,
-    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-    ip: clientIp,
-    params: req.params,
-    query: req.query,
-    header_language: header_language,
-    timezone: timezone
-  };
-  try {
-    if (req.body.ip === '' || req.body.ip === undefined) {
-      try {
-        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      
-      res.status(200).send({ result: "blocked" });
-    } else {
-      const messages = [{ role: "user", content: jsonText }];
-      const requestBody = {
-        messages: messages,
-        temperature: 0,
-        max_tokens: 800,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-      };
-
-      const endpointUrl = timezone.includes("America") ?
-        'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
-        'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
-
-      const result = await axios.post(endpointUrl, requestBody, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': ApiManagementKey,
-        }
-      });
-      
-      if (!result.data.choices[0].message.content) {
-        requestInfo.body = req.body;
-        try {
-          serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, result.data.choices, req.body.ip, requestInfo);
-        } catch (emailError) {
-          console.log('Fail sending email');
-        }
+    // 2. Llamar a OpenAI con el texto en inglés
+    const prompt = diseases_list ?
+      PROMPTS.diagnosis.withDiseases
+        .replace("{{description}}", englishDescription)
+        .replace("{{diseases_list}}", diseases_list) :
+      PROMPTS.diagnosis.withoutDiseases
+        .replace("{{description}}", englishDescription);
         
-        res.status(200).send({result: "error openai"});
-      } else {
-        res.status(200).send({result: 'success', data: result.data.choices[0].message.content});
-      }  
-    }
-  } catch (e) {
-    insights.error(e);
-    console.log(e);
+    const messages = [{ role: "user", content: prompt }];
+    const requestBody = {
+      messages,
+      temperature: 0,
+      max_tokens: calculateMaxTokens(prompt),
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
 
-    if (e.response) {
-      console.log(e.response.status);
-      console.log(e.response.data);
+    const endpointUrl = timezone?.includes("America") ?
+      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
+      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
-      // Asegurarse de que e.response.data.error y e.response.data.error.type están definidos antes de acceder
-      if (e.response.data && e.response.data.error && e.response.data.error.type === 'invalid_request_error') {
-        res.status(400).send(e.response.data.error);
-        return;
+    const openAiResponse = await axios.post(endpointUrl, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
       }
-    } else {
-      console.log(e.message);
+    });
+
+    if (!openAiResponse.data.choices[0].message.content) {
+      throw new Error('Empty OpenAI response');
     }
 
+    // 3. Anonimizar el texto en inglés
+    let anonymizedResult = await anonymizeText(englishDescription);
+    let anonymizedDescription = anonymizedResult.anonymizedText;
+    const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
+    //add translation anonimized
+    if (detectedLanguage !== 'en') {
+      anonymizedDescription = await translationCtrl.translateInvert(anonymizedDescription, detectedLanguage);
+      anonymizedResult.htmlText = await translationCtrl.translateInvert(anonymizedResult.htmlText, detectedLanguage);
+    }
+
+    // 4. Procesar la respuesta
+    let parsedResponse;
     try {
-      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+      const match = openAiResponse.data.choices[0].message.content
+        .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
+
+      if (!match || !match[1]) {
+        throw new Error("Failed to match diagnosis output");
+      }
+
+      parsedResponse = JSON.parse(match[1]);
+      console.log('parsedResponse', parsedResponse)
+    } catch (parseError) {
+      console.error("Failed to parse diagnosis output", parseError);
+      return res.status(200).send({ result: "error" });
+    }
+
+    // 5. Traducir la respuesta al idioma original si es necesario
+    if (detectedLanguage !== 'en') {
+      try {
+        parsedResponse = await Promise.all(
+          parsedResponse.map(async diagnosis => ({
+            diagnosis: await translationCtrl.translateInvert(diagnosis.diagnosis, detectedLanguage),
+            description: await translationCtrl.translateInvert(diagnosis.description, detectedLanguage),
+            symptoms_in_common: await Promise.all(
+              diagnosis.symptoms_in_common.map(symptom =>
+                translationCtrl.translateInvert(symptom, detectedLanguage)
+              )
+            ),
+            symptoms_not_in_common: await Promise.all(
+              diagnosis.symptoms_not_in_common.map(symptom =>
+                translationCtrl.translateInvert(symptom, detectedLanguage)
+              )
+            )
+          }))
+        );
+      } catch (translationError) {
+        console.error('Translation error:', translationError);
+        return res.status(500).send({ result: "translation error" });
+      }
+    }
+
+    // 6. Preparar la respuesta final
+    return res.status(200).send({
+      result: 'success',
+      data: parsedResponse,
+      anonymization: {
+        hasPersonalInfo,
+        anonymizedText: anonymizedDescription,
+        anonymizedTextHtml: anonymizedResult.htmlText
+      },
+      detectedLang: detectedLanguage
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    try {
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body.lang,
+        req.body.description,
+        error,
+        req.body.ip,
+        requestInfo
+      );
     } catch (emailError) {
       console.log('Fail sending email');
     }
-
-    res.status(500).send('Internal server error');
+    return res.status(500).send({ result: "error" });
   }
 }
 
-async function callOpenAiAnonymized(req, res) {
-  const header_language = req.headers['accept-language'];
-  // Anonymize user message
-  var jsonText = req.body.value;
-  let timezone = req.body.timezone
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    body: req.body,
-    params: req.params,
-    query: req.query,
-    header_language: header_language,
-    timezone: timezone
-  };
+function calculateMaxTokens(jsonText) {
+  const enc = encodingForModel("gpt-4o");
 
-  var anonymizationPrompt = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
+  // Extraer contenido relevante
+  const patientDescription = extractContent('patient_description', jsonText);
+  const diseasesList = extractContent('diseases_list', jsonText);
+
+  // Contar tokens en el contenido relevante
+  const patientDescriptionTokens = enc.encode(patientDescription).length;
+  //  console.log('patientDescriptionTokens', patientDescriptionTokens);
+  let max_tokens = Math.round(patientDescriptionTokens * 4.5);
+  max_tokens += 500; // Add extra tokens for the prompt
+  return max_tokens;
+}
+
+// Función auxiliar para anonimizar texto
+async function anonymizeText(text) {
+  const anonymizationPrompt = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
   where N is the count of characters that have been anonymized. 
   Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
   full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. 
@@ -263,211 +267,724 @@ async function callOpenAiAnonymized(req, res) {
   Here is the original document between the triple quotes:
   ----------------------------------------
   """
-  ${jsonText}
+  {{text}}
   """
   ----------------------------------------
   ANONYMIZED DOCUMENT:"`;
 
+  const messages = [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }];
+
+  const result = await axios.post(
+    'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
+    {
+      messages,
+      temperature: 0,
+      max_tokens: calculateMaxTokensAnon(text),
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+      }
+    }
+  );
+
+  const response = result.data.choices[0].message.content
+    .replace(/^\s*"""\s*/, '')
+    .replace(/\s*"""\s*$/, '');
+
+  const parts = response.split(/(\[ANON-\d+\])/g);
+  const hasPersonalInfo = parts.length > 1;
+
+  // Preparar versiones del texto
+  const htmlParts = parts.map(part => {
+    const match = part.match(/\[ANON-(\d+)\]/);
+    if (match) {
+      const length = parseInt(match[1]);
+      return `<span style="background-color: black; display: inline-block; width:${length}em;">&nbsp;</span>`;
+    }
+    return part;
+  });
+
+  const copyParts = parts.map(part => {
+    const match = part.match(/\[ANON-(\d+)\]/);
+    if (match) {
+      const length = parseInt(match[1]);
+      return '*'.repeat(length);
+    }
+    return part;
+  });
+
+  return {
+    hasPersonalInfo,
+    anonymizedText: copyParts.join(''),
+    htmlText: htmlParts.join('').replace(/\n/g, '<br>')
+  };
+}
+
+function calculateMaxTokensAnon(jsonText) {
+  const enc = encodingForModel("gpt-4o");
+  // console.log('jsonText', jsonText)
+  // Contar tokens en el contenido relevante
+  const patientDescriptionTokens = enc.encode(jsonText).length;
+  return patientDescriptionTokens + 100;
+}
+
+function extractContent(tag, text) {
+  const regex = new RegExp(`<${tag}>(.*?)</${tag}>`, 's');
+  const match = text.match(regex);
+  return match ? match[1].trim() : '';
+}
+
+
+
+
+function isValidQuestionRequest(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['questionType', 'disease', 'myuuid', 'operation', 'lang', 'ip'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar questionType
+  if (typeof data.questionType !== 'number' ||
+    !Number.isInteger(data.questionType) ||
+    data.questionType < 0 ||
+    data.questionType > 4) return false;
+
+  // Validar disease
+  if (typeof data.disease !== 'string' ||
+    data.disease.length < 2 ||
+    data.disease.length > 100) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'info disease') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar detectedLang
+  if (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2) return false;
+
+  // Validar ip
+  if (typeof data.ip !== 'string') return false;
+
+  // Validar timezone si existe
+  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
+    return false;
+  }
+
+  // Validar medicalDescription si existe (requerido para questionType 3 y 4)
+  if ([3, 4].includes(data.questionType)) {
+    if (!data.medicalDescription ||
+      typeof data.medicalDescription !== 'string' ||
+      data.medicalDescription.length < 10 ||
+      data.medicalDescription.length > 4000) {
+      return false;
+    }
+  }
+
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    /\{\{.*\}\}/,  // Handlebars syntax
+    /<script.*?>.*?<\/script>/gis,  // Scripts
+    /\$\{.*\}/,    // Template literals
+    /prompt|system|assistant|user/gi  // OpenAI keywords
+  ];
+
+  return !suspiciousPatterns.some(pattern =>
+    pattern.test(data.disease) ||
+    (data.medicalDescription && pattern.test(data.medicalDescription))
+  );
+}
+
+function sanitizeQuestionData(data) {
+  return {
+    ...data,
+    disease: sanitizeInput(data.disease),
+    medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    ip: data.ip.trim(),
+    timezone: data.timezone?.trim() || '',
+    questionType: Number(data.questionType),
+    detectedLang: data.detectedLang.trim().toLowerCase()
+  };
+}
+
+
+async function callOpenAiQuestions(req, res) {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
   try {
+    // Validar los datos de entrada
+    if (!isValidQuestionRequest(req.body)) {
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
     if (req.body.ip === '' || req.body.ip === undefined) {
       try {
-        serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
+        await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      res.status(200).send({ result: "blocked" });
-    }else{
-      const messages = [
-        { role: "user", content: anonymizationPrompt }
-      ];
-  
-      const requestBody = {
-        messages: messages,
-        temperature: 0,
-        max_tokens: 2000,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-      };
-
-      let max_tokens = calculateMaxTokensAnon(jsonText);
-      // console.log('max_tokens', max_tokens);
-      requestBody.max_tokens = max_tokens;
-      if(max_tokens > 4000){
-        requestBody.max_tokens = 4096;
-      }
-  
-
-      const endpointUrl = timezone.includes("America") ?
-      'https://apiopenai.azure-api.net/dxgptamerica/anonymized/gpt4o' :
-      'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o';
-      const result = await axios.post(endpointUrl, requestBody,{
-          headers: {
-              'Content-Type': 'application/json',
-              'Ocp-Apim-Subscription-Key': ApiManagementKey,
-          }
-      }); 
-  
-      let infoTrack = {
-        value: result.data,
-        myuuid: req.body.myuuid,
-        operation: req.body.operation,
-        lang: req.body.lang,
-        response: req.body.response,
-        topRelatedConditions: req.body.topRelatedConditions,
-        header_language: header_language,
-        timezone: timezone
-      }
-      blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
-      res.status(200).send(result.data)
+      return res.status(200).send({ result: "blocked" });
     }
-    
+
+    // Sanitizar los datos
+    const sanitizedData = sanitizeQuestionData(req.body);
+
+    const answerFormat = 'The output should be as HTML but only with <p>, <li>, </ul>, and <span> tags. Use <strong> for titles';
+
+    // Construir el prompt según el tipo de pregunta
+    let prompt = '';
+    switch (sanitizedData.questionType) {
+      case 0:
+        prompt = `What are the common symptoms associated with ${sanitizedData.disease}? Please provide a list starting with the most probable symptoms at the top. ${answerFormat}`;
+        break;
+      case 1:
+        prompt = `Can you provide detailed information about ${sanitizedData.disease}? I am a doctor. ${answerFormat}`;
+        break;
+      case 2:
+        prompt = `Provide a diagnosis test for ${sanitizedData.disease}. ${answerFormat}`;
+        break;
+      case 3:
+        prompt = `Given the medical description: ${sanitizedData.medicalDescription}, what are the potential symptoms not present in the patient that could help in making a differential diagnosis for ${sanitizedData.disease}. Please provide only a list, starting with the most likely symptoms at the top.`;
+        break;
+      case 4:
+        prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
+        break;
+      default:
+        return res.status(400).send({ result: "error", message: "Invalid question type" });
+    }
+
+    const messages = [{ role: "user", content: prompt }];
+    const requestBody = {
+      messages: messages,
+      temperature: 0,
+      max_tokens: 800,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+    let max_tokens = calculateMaxTokens(prompt);
+    if (max_tokens > 4000) {
+      requestBody.max_tokens = 4096;
+    }
+
+    const endpointUrl = sanitizedData.timezone.includes("America") ?
+      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
+      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
+
+    const result = await axios.post(endpointUrl, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+      }
+    });
+
+    if (!result.data.choices[0].message.content) {
+      try {
+        await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
+      return res.status(200).send({ result: "error openai" });
+    }
+
+    // Procesar la respuesta
+    let content = result.data.choices[0].message.content.replace(/^```html\n|\n```$/g, '');
+    const splitChar = content.indexOf("\n\n") >= 0 ? "\n\n" : "\n";
+    let contentArray = content.split(splitChar);
+
+    // Encontrar el inicio de la lista numerada
+    const startIndex = contentArray.findIndex(item => item.trim().startsWith("1."));
+    if (startIndex >= 0) {
+      contentArray = contentArray.slice(startIndex);
+    }
+
+    let processedContent = contentArray.join(splitChar);
+
+    // Procesar según el tipo de pregunta
+    if (sanitizedData.questionType === 3) {
+      // Eliminar asteriscos dobles
+      processedContent = processedContent.replace(/\*\*/g, '');
+
+      // Traducir si es necesario
+      if (sanitizedData.detectedLang !== 'en') {
+        try {
+          const translatedContent = await translationCtrl.translateInvert(processedContent, sanitizedData.detectedLang);
+          processedContent = translatedContent;
+        } catch (translationError) {
+          console.error('Translation error:', translationError);
+        }
+      }
+
+      // Procesar lista de síntomas
+      const symptoms = processedContent.split("\n")
+        .filter(line => line !== '' && line !== ' ' && line !== ':')
+        .map(line => {
+          let index = line.indexOf('.');
+          let name = line.split(".")[1];
+          if (index !== -1) {
+            name = line.substring(index + 1);
+          }
+          name = name.trim();
+          if (name.endsWith('.')) {
+            name = name.slice(0, -1);
+          }
+          return { name, checked: false };
+        });
+
+      return res.status(200).send({
+        result: 'success',
+        data: {
+          type: 'differential',
+          symptoms
+        }
+      });
+
+    } else {
+      // Para otros tipos de preguntas
+      if (sanitizedData.detectedLang !== 'en') {
+        try {
+          processedContent = await translationCtrl.translateInvert(processedContent, sanitizedData.detectedLang);
+        } catch (translationError) {
+          console.error('Translation error:', translationError);
+        }
+      }
+
+      return res.status(200).send({
+        result: 'success',
+        data: {
+          type: 'general',
+          content: processedContent
+        }
+      });
+    }
+
   } catch (e) {
     insights.error(e);
-    console.log(e)
+    console.log(e);
+
     if (e.response) {
       console.log(e.response.status);
       console.log(e.response.data);
+
+      // Asegurarse de que e.response.data.error y e.response.data.error.type están definidos antes de acceder
+      if (e.response.data && e.response.data.error && e.response.data.error.type === 'invalid_request_error') {
+        res.status(400).send(e.response.data.error);
+        return;
+      }
     } else {
       console.log(e.message);
     }
-    console.error("[ERROR]: " + e)
+
     try {
-      serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, e, req.body.ip, requestInfo);
+      serviceEmail.sendMailErrorGPTIP(lang, req.body, e, ip, requestInfo);
     } catch (emailError) {
       console.log('Fail sending email');
     }
-    
+
+    res.status(500).send('Internal server error');
+  }
+}
+
+
+function isValidOpinionData(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['value', 'myuuid', 'operation', 'lang', 'vote'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'vote') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar vote
+  if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) return false;
+
+  // Validar value (texto médico)
+  if (typeof data.value !== 'string' || data.value.length > 10000) return false;
+
+  // Verificar patrones sospechosos en el texto
+  const suspiciousPatterns = [
+    /\{\{.*\}\}/,  // Handlebars syntax
+    /<script.*?>.*?<\/script>/gis,  // Scripts
+    /\$\{.*\}/,    // Template literals
+    /prompt|system|assistant|user/gi  // OpenAI keywords
+  ];
+
+  if (suspiciousPatterns.some(pattern => pattern.test(data.value))) {
+    return false;
+  }
+
+  // Validar topRelatedConditions si existe
+  if (data.topRelatedConditions) {
+    if (!Array.isArray(data.topRelatedConditions)) return false;
+    if (!data.topRelatedConditions.every(condition =>
+      typeof condition === 'object' &&
+      typeof condition.name === 'string' &&
+      condition.name.length < 200
+    )) return false;
+  }
+
+  return true;
+}
+
+function sanitizeOpinionData(data) {
+  return {
+    ...data,
+    value: data.value
+      .replace(/[<>]/g, '')
+      .replace(/(\{|\}|\||\\)/g, '')
+      .replace(/prompt|system|assistant|user/gi, '')
+      .trim(),
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    topRelatedConditions: data.topRelatedConditions?.map(condition => ({
+      ...condition,
+      name: condition.name
+        .replace(/[<>]/g, '')
+        .replace(/(\{|\}|\||\\)/g, '')
+        .trim()
+    }))
+  };
+}
+
+async function opinion(req, res) {
+  try {
+
+    // Validar los datos de entrada
+    if (!isValidOpinionData(req.body)) {
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    // Sanitizar los datos
+    const sanitizedData = sanitizeOpinionData(req.body);
+
+    // Añadir la versión del prompt
+    sanitizedData.version = PROMPTS.version;
+    await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
+    res.status(200).send({ send: true })
+  } catch (e) {
+    insights.error(e);
+    console.error("[ERROR] OpenAI responded with status: " + e)
+    serviceEmail.sendMailError(req.body.lang, req.body.value, e)
+      .then(response => {
+
+      })
+      .catch(response => {
+        insights.error(response);
+        //create user, but Failed sending email.
+        console.log('Fail sending email');
+      })
+
     res.status(500).send('error')
   }
 }
 
-function opinion(req, res) {
+function isValidFeedbackData(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
 
-  (async () => {
-    try {
-      blobOpenDx29Ctrl.createBlobOpenVote(req.body);
-      res.status(200).send({ send: true })
-    } catch (e) {
-      insights.error(e);
-      console.error("[ERROR] OpenAI responded with status: " + e)
-      serviceEmail.sendMailError(req.body.lang, req.body.value, e)
-        .then(response => {
+  // Validar campos requeridos
+  const requiredFields = ['email', 'myuuid', 'lang', 'info', 'value'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
-        })
-        .catch(response => {
-          insights.error(response);
-          //create user, but Failed sending email.
-          console.log('Fail sending email');
-        })
+  // Validar email
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(data.email)) return false;
 
-      res.status(500).send('error')
-    }
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
 
-  })();
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar info (feedback text)
+  if (typeof data.info !== 'string' || data.info.length > 2000) return false;
+
+  // Validar value (texto médico)
+  if (typeof data.value !== 'string' || data.value.length > 10000) return false;
+
+  // Verificar patrones sospechosos en textos
+  const suspiciousPatterns = [
+    /\{\{.*\}\}/,  // Handlebars syntax
+    /<script.*?>.*?<\/script>/gis,  // Scripts
+    /\$\{.*\}/,    // Template literals
+    /prompt|system|assistant|user/gi  // OpenAI keywords
+  ];
+
+  if (suspiciousPatterns.some(pattern =>
+    pattern.test(data.info) ||
+    pattern.test(data.value)
+  )) {
+    return false;
+  }
+
+  // Validar topRelatedConditions si existe
+  if (data.topRelatedConditions) {
+    if (!Array.isArray(data.topRelatedConditions)) return false;
+    if (!data.topRelatedConditions.every(condition =>
+      typeof condition === 'object' &&
+      typeof condition.name === 'string' &&
+      condition.name.length < 200
+    )) return false;
+  }
+
+  // Validar subscribe
+  if (data.subscribe !== undefined && typeof data.subscribe !== 'boolean') {
+    return false;
+  }
+
+  return true;
 }
 
-function sendFeedback(req, res) {
+function sanitizeFeedbackData(data) {
+  return {
+    ...data,
+    email: data.email.trim().toLowerCase(),
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    info: data.info
+      .replace(/[<>]/g, '')
+      .replace(/(\{|\}|\||\\)/g, '')
+      .replace(/prompt|system|assistant|user/gi, '')
+      .trim(),
+    value: data.value
+      .replace(/[<>]/g, '')
+      .replace(/(\{|\}|\||\\)/g, '')
+      .replace(/prompt|system|assistant|user/gi, '')
+      .trim(),
+    topRelatedConditions: data.topRelatedConditions?.map(condition => ({
+      ...condition,
+      name: condition.name
+        .replace(/[<>]/g, '')
+        .replace(/(\{|\}|\||\\)/g, '')
+        .trim()
+    })),
+    subscribe: !!data.subscribe // Asegura que sea booleano
+  };
+}
 
-  (async () => {
-    try {
-      blobOpenDx29Ctrl.createBlobFeedbackVoteDown(req.body);
-      serviceEmail.sendMailFeedback(req.body.email, req.body.lang, req.body)
-        .then(response => {
-
-        })
-        .catch(response => {
-          //create user, but Failed sending email.
-          insights.error(response);
-          console.log('Fail sending email');
-        })
+async function sendFeedback(req, res) {
 
 
-      let support = new Support()
-      //support.type = 'Home form'
-      support.subject = 'DxGPT vote down'
-      support.subscribe = req.body.subscribe
-      support.email = req.body.email
-      support.description = req.body.info
-      var d = new Date(Date.now());
-      var a = d.toString();
-      support.date = a;
+  try {
+    // Validar los datos de entrada
+    if (!isValidFeedbackData(req.body)) {
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
 
 
-      supportService.sendFlow(support, req.body.lang)
-      support.save((err, supportStored) => {
+    // Sanitizar los datos
+    const sanitizedData = sanitizeFeedbackData(req.body);
+
+    // Guardar feedback en blob storage
+    await blobOpenDx29Ctrl.createBlobFeedbackVoteDown(sanitizedData);
+    serviceEmail.sendMailFeedback(sanitizedData.email, sanitizedData.lang, sanitizedData)
+      .then(response => {
+
+      })
+      .catch(response => {
+        //create user, but Failed sending email.
+        insights.error(response);
+        console.log('Fail sending email');
       })
 
-      res.status(200).send({ send: true })
-    } catch (e) {
-      insights.error(e);
-      console.error("[ERROR] OpenAI responded with status: " + e)
-      serviceEmail.sendMailError(req.body.lang, req.body.value, e)
-        .then(response => {
 
-        })
-        .catch(response => {
-          insights.error(response);
-          //create user, but Failed sending email.
-          console.log('Fail sending email');
-        })
+    let support = new Support()
+    //support.type = 'Home form'
+    support.subject = 'DxGPT vote down'
+    support.subscribe = sanitizedData.subscribe
+    support.email = sanitizedData.email
+    support.description = sanitizedData.info
+    var d = new Date(Date.now());
+    var a = d.toString();
+    support.date = a;
 
-      res.status(500).send('error')
-    }
 
-  })();
-}
+    supportService.sendFlow(support, sanitizedData.lang)
+    support.save((err, supportStored) => {
+    })
 
-function sendGeneralFeedback(req, res) {
+    res.status(200).send({ send: true })
+  } catch (e) {
+    insights.error(e);
+    console.error("[ERROR] OpenAI responded with status: " + e);
 
-  (async () => {
     try {
-      let generalfeedback = new Generalfeedback()
-      generalfeedback.myuuid = req.body.myuuid
-      generalfeedback.pregunta1 = req.body.value.pregunta1
-      generalfeedback.pregunta2 = req.body.value.pregunta2
-      generalfeedback.userType = req.body.value.userType
-      generalfeedback.moreFunct = req.body.value.moreFunct
-      generalfeedback.freeText = req.body.value.freeText
-      generalfeedback.email = req.body.value.email
-      var d = new Date(Date.now());
-			var a = d.toString();
-			generalfeedback.date = a;
-      sendFlow(generalfeedback, req.body.lang)
-      generalfeedback.save((err, generalfeedbackStored) => {
-      })
-      serviceEmail.sendMailGeneralFeedback(req.body.value, req.body.myuuid)
-        .then(response => {
-
-        })
-        .catch(response => {
-          insights.error(response);
-          //create user, but Failed sending email.
-          console.log('Fail sending email');
-        })
-
-      res.status(200).send({ send: true })
-    } catch (e) {
-      insights.error(e);
-      console.error("[ERROR] OpenAI responded with status: " + e)
-      serviceEmail.sendMailError(req.body.lang, req.body, e)
-        .then(response => {
-
-        })
-        .catch(response => {
-          insights.error(response);
-          //create user, but Failed sending email.
-          console.log('Fail sending email');
-        })
-
-      res.status(500).send('error')
+      await serviceEmail.sendMailError(req.body.lang, req.body.value, e);
+    } catch (emailError) {
+      insights.error(emailError);
+      console.log('Fail sending email');
     }
 
-  })();
+    return res.status(500).send('error');
+  }
 }
 
-async function sendFlow(generalfeedback, lang){
-	let requestBody = {
+function isValidGeneralFeedbackData(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['value', 'myuuid', 'lang'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar value (objeto del formulario)
+  if (!data.value || typeof data.value !== 'object') return false;
+
+  // Validar campos específicos del formulario
+  const formFields = {
+    pregunta1: (val) => typeof val === 'number' && val >= 0 && val <= 5,
+    pregunta2: (val) => typeof val === 'number' && val >= 0 && val <= 5,
+    userType: (val) => typeof val === 'string' && val.length < 100,
+    moreFunct: (val) => typeof val === 'string' && val.length < 1000,
+    freeText: (val) => !val || (typeof val === 'string' && val.length < 2000),
+    email: (val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
+  };
+
+  return Object.entries(formFields).every(([field, validator]) => {
+    if (field === 'freeText' || field === 'email') {
+      // Estos campos son opcionales
+      return !data.value[field] || validator(data.value[field]);
+    }
+    return data.value.hasOwnProperty(field) && validator(data.value[field]);
+  });
+}
+
+function sanitizeGeneralFeedbackData(data) {
+  const sanitizeText = (text) => {
+    if (!text) return text;
+    return text
+      .replace(/[<>]/g, '')
+      .replace(/(\{|\}|\||\\)/g, '')
+      .replace(/prompt|system|assistant|user/gi, '')
+      .trim();
+  };
+
+  return {
+    ...data,
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    value: {
+      ...data.value,
+      userType: sanitizeText(data.value.userType),
+      moreFunct: sanitizeText(data.value.moreFunct),
+      freeText: sanitizeText(data.value.freeText),
+      email: data.value.email?.trim().toLowerCase(),
+      // Mantener los valores numéricos sin cambios
+      pregunta1: data.value.pregunta1,
+      pregunta2: data.value.pregunta2
+    }
+  };
+}
+
+async function sendGeneralFeedback(req, res) {
+
+
+  try {
+
+    // Validar los datos de entrada
+    if (!isValidGeneralFeedbackData(req.body)) {
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    // Sanitizar los datos
+    const sanitizedData = sanitizeGeneralFeedbackData(req.body);
+    const generalfeedback = new Generalfeedback({
+      myuuid: sanitizedData.myuuid,
+      pregunta1: sanitizedData.value.pregunta1,
+      pregunta2: sanitizedData.value.pregunta2,
+      userType: sanitizedData.value.userType,
+      moreFunct: sanitizedData.value.moreFunct,
+      freeText: sanitizedData.value.freeText,
+      email: sanitizedData.value.email,
+      date: new Date(Date.now()).toString()
+    });
+    sendFlow(generalfeedback, sanitizedData.lang)
+    await generalfeedback.save();
+    try {
+      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid);
+    } catch (emailError) {
+      insights.error(emailError);
+      console.log('Fail sending email');
+    }
+
+    return res.status(200).send({ send: true })
+  } catch (e) {
+    insights.error(e);
+    console.error("[ERROR] OpenAI responded with status: " + e)
+    try {
+      await serviceEmail.sendMailError(req.body.lang, req.body, e);
+    } catch (emailError) {
+      insights.error(emailError);
+      console.log('Fail sending email');
+    }
+
+    return res.status(500).send('error')
+  }
+}
+
+async function sendFlow(generalfeedback, lang) {
+  let requestBody = {
     myuuid: generalfeedback.myuuid,
     pregunta1: generalfeedback.pregunta1,
     pregunta2: generalfeedback.pregunta2,
@@ -478,23 +995,21 @@ async function sendFlow(generalfeedback, lang){
     email: generalfeedback.email,
     lang: lang
   }
-  
-	let endpointUrl = 'https://prod-180.westeurope.logic.azure.com:443/workflows/28e2bf2fb424494f8f82890efb4fcbbf/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=WwF6wOV9cd4n1-AIfPZ4vnRmWx_ApJDXJH2QdtvK2BU'
 
-  if(config.client_server.indexOf('dxgpt.app') == -1){
-		endpointUrl = 'https://prod-63.westeurope.logic.azure.com:443/workflows/6b6ab71c5e514ce08788a3a0599e9f0e/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=M6yotP-WV7WoEB-QhKbrJPib9kgScK4f2Z1X6x5N8Ps'
-	}
+  const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
+    ? 'https://prod-63.westeurope.logic.azure.com:443/workflows/6b6ab71c5e514ce08788a3a0599e9f0e/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=M6yotP-WV7WoEB-QhKbrJPib9kgScK4f2Z1X6x5N8Ps'
+    : 'https://prod-180.westeurope.logic.azure.com:443/workflows/28e2bf2fb424494f8f82890efb4fcbbf/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=WwF6wOV9cd4n1-AIfPZ4vnRmWx_ApJDXJH2QdtvK2BU';
 
-	try {
-        await axios.post(endpointUrl, requestBody, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-    } catch (error) {
-		console.log(error)
-        console.error('Error al enviar datos:', error.message);
-    }
+  try {
+    await axios.post(endpointUrl, requestBody, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  } catch (error) {
+    console.log(error)
+    console.error('Error al enviar datos:', error.message);
+  }
 
 }
 
@@ -531,7 +1046,6 @@ function getFeedBack(req, res) {
 module.exports = {
   callOpenAi,
   callOpenAiQuestions,
-  callOpenAiAnonymized,
   opinion,
   sendFeedback,
   sendGeneralFeedback,

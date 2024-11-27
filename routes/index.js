@@ -6,7 +6,6 @@ const express = require('express')
 const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
 const openAIserviceCtrl = require('../services/openaiazure')
-const translationCtrl = require('../services/translation')
 const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
@@ -21,6 +20,11 @@ function corsWithOptions(req, res, next) {
       origin: function (origin, callback) {
         console.log(origin);
         if (whitelist.includes(origin)) {
+           // Añadir cabeceras de seguridad adicionales
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          res.setHeader('X-Frame-Options', 'DENY');
+          res.setHeader('X-XSS-Protection', '1; mode=block');
+          res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
           callback(null, true);
         } else {
             // La IP del cliente
@@ -45,6 +49,9 @@ function corsWithOptions(req, res, next) {
             callback(new Error('Not allowed by CORS'));
         }
       },
+      methods: ['GET', 'POST', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization', 'Access-Control-Allow-Origin', 'Accept', 'Accept-Language', 'Origin', 'User-Agent'],
+      maxAge: 86400 // 24 horas
     };
   
     cors(corsOptions)(req, res, next);
@@ -73,20 +80,11 @@ api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogou
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
 api.post('/callopenaiquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiQuestions)
-api.post('/callanonymized', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiAnonymized)
 
-//services OPENAI
 api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
-
 api.post('/feedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendFeedback)
-
 api.post('/generalfeedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendGeneralFeedback)
 //api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
-
-api.post('/getDetectLanguage', corsWithOptions, checkApiKey, translationCtrl.getDetectLanguage)
-api.post('/translation', corsWithOptions, checkApiKey, translationCtrl.getTranslationDictionary)
-api.post('/translationinvert', corsWithOptions, checkApiKey, translationCtrl.getTranslationDictionaryInvert)
-api.post('/translation/segments', corsWithOptions, checkApiKey, translationCtrl.getTranslationSegments)
 
 module.exports = api
