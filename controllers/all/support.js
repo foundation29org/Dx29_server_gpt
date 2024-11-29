@@ -26,8 +26,7 @@ function isValidSupportData(data) {
 		data.userName.length > 100) return false;
   
 	// Validar description
-	if (typeof data.description !== 'string' || 
-		data.description.length < 10 || 
+	if (typeof data.description !== 'string' ||
 		data.description.length > 2000) return false;
   
 	// Validar subscribe
