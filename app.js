@@ -77,7 +77,8 @@ app.use(helmet({
             "'self'",
             "https://www.google.com",
             "https://vars.hotjar.com",
-            "https://www.googletagmanager.com"
+            "https://www.googletagmanager.com",
+            "https://app.powerbi.com"
         ],
         connectSrc: [
             "'self'",
@@ -131,7 +132,13 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({
-  origin: ['https://dxgpt.app', 'https://www.dxgpt.app', 'https://dxgpt-dev.azurewebsites.net', 'http://localhost:4200'],
+  origin: [
+    'https://dxgpt.app', 
+    'https://www.dxgpt.app', 
+    'https://dxgpt-dev.azurewebsites.net', 
+    'http://localhost:4200',
+    'http://localhost:8443'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Access-Control-Allow-Origin','Accept', 'Accept-Language', 'Origin', 'User-Agent'],
