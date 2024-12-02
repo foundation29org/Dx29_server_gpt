@@ -26,11 +26,11 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
         defaultSrc: ["'self'"],
-        scriptSrcAttr: ["'unsafe-inline'"],
+        //scriptSrcAttr: ["'unsafe-inline'"],
         scriptSrc: [
             "'self'",
-            "'unsafe-inline'",
-            "'unsafe-eval'",
+            //"'unsafe-inline'",
+            //"'unsafe-eval'",
             "https://apis.google.com",
             "https://maps.googleapis.com",
             "https://www.google.com",
@@ -47,10 +47,9 @@ app.use(helmet({
             "https://googleads.g.doubleclick.net"
             //"'script-src-attr'"
         ],
-        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: [
             "'self'",
-            "'unsafe-inline'",
+            //"'unsafe-inline'",
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
             "https://ka-f.fontawesome.com"
