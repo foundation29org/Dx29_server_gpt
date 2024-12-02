@@ -65,6 +65,9 @@ app.use(helmet({
             "https://foundation29.org",
             "https://www.googleadservices.com",
             "https://googleads.g.doubleclick.net",
+            "https://*.google-analytics.com",
+        "https://*.googleadservices.com",
+            "https://*.g.doubleclick.net",
             "https://www.google.com",
             "https://dxgpt.app",
             "https://www.dxgpt.app"
@@ -84,7 +87,9 @@ app.use(helmet({
             "https://www.googletagmanager.com",
             "https://app.powerbi.com",
             "https://www.googleadservices.com",
-            "https://bid.g.doubleclick.net"
+            "https://bid.g.doubleclick.net",
+            "https://*.doubleclick.net",
+            "https://*.googleadservices.com"
         ],
         connectSrc: [
             "'self'",
@@ -96,6 +101,7 @@ app.use(helmet({
             "wss://*.hotjar.com",
             "https://*.hotjar.io",
             "https://*.google-analytics.com",
+            "https://*.analytics.google.com",
             "https://analytics.google.com",
             "https://stats.g.doubleclick.net",
             "https://ka-f.fontawesome.com",
@@ -104,7 +110,9 @@ app.use(helmet({
             "https://www.google.com",
             "https://google.com",
             "https://www.googletagmanager.com",
-            "https://www.googleadservices.com",
+            "https://*.googleadservices.com",
+            "https://www.google.com/ads",
+            "https://www.google.com/pagead",
             "https://googleads.g.doubleclick.net",
             "https://fonts.gstatic.com",
             "https://www.google.es", // Añade este
