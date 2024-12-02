@@ -42,6 +42,7 @@ app.use(helmet({
             "https://region1.google-analytics.com",
             "https://maps-api-v3.googleapis.com",
             "'unsafe-hashes'",
+            "https://www.googleadservices.com"
             //"'script-src-attr'"
         ],
         scriptSrcAttr: ["'unsafe-inline'"],
