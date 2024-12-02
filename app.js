@@ -101,7 +101,11 @@ app.use(helmet({
             "https://www.googletagmanager.com",
             "https://www.googleadservices.com",
             "https://googleads.g.doubleclick.net",
-            "https://fonts.gstatic.com"
+            "https://fonts.gstatic.com",
+            "https://www.google.es", // Añade este
+            "https://*.g.doubleclick.net", // Añade este
+            "https://pagead2.googlesyndication.com", // Añade este
+            "https://adservice.google.com" // Añade este
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["blob:"],
@@ -110,7 +114,7 @@ app.use(helmet({
     }
   },
   frameguard: {
-      action: 'DENY'
+      action: 'deny'
   },
   hidePoweredBy: true,
   hsts: {
@@ -121,9 +125,7 @@ app.use(helmet({
   ieNoOpen: true,
   noSniff: true,
   xssFilter: true,
-  referrerPolicy: {
-      policy: 'no-referrer-when-downgrade'
-  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
 }));
 
