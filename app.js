@@ -42,7 +42,9 @@ app.use(helmet({
             "https://region1.google-analytics.com",
             "https://maps-api-v3.googleapis.com",
             "'unsafe-hashes'",
-            "https://www.googleadservices.com"
+            "https://www.googleadservices.com",
+            "https://www.google.com",
+            "https://googleads.g.doubleclick.net"
             //"'script-src-attr'"
         ],
         scriptSrcAttr: ["'unsafe-inline'"],
@@ -80,7 +82,9 @@ app.use(helmet({
             "https://www.google.com",
             "https://vars.hotjar.com",
             "https://www.googletagmanager.com",
-            "https://app.powerbi.com"
+            "https://app.powerbi.com",
+            "https://www.googleadservices.com",
+            "https://bid.g.doubleclick.net"
         ],
         connectSrc: [
             "'self'",
@@ -115,7 +119,7 @@ app.use(helmet({
     }
   },
   frameguard: {
-      action: 'deny'
+      action: 'DENY'
   },
   hidePoweredBy: true,
   hsts: {
