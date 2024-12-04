@@ -127,16 +127,10 @@ app.use(helmet({
             "https://adservice.google.com",
             "https://tagmanager.google.com" // Añade este
         ],
-        cookieSrc: [
-          "'self'",
-          "https://www.googletagmanager.com",
-          "https://*.google-analytics.com"
-        ],
         workerSrc: ["'self'", "blob:", "https://www.googletagmanager.com"],
         childSrc: ["blob:"],
         objectSrc: ["'none'"],
-        mediaSrc: ["'self'"],
-        storageSrc: ["'self'", "https://www.googletagmanager.com"]
+        mediaSrc: ["'self'"]
     }
   },
   frameguard: {
@@ -160,14 +154,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((req, res, next) => {
-  res.setHeader('Set-Cookie', [
-    '_ga=; SameSite=None; Secure',
-    '_gid=; SameSite=None; Secure',
-    '_gat=; SameSite=None; Secure'
-  ]);
-  next();
-});
+
 
 app.use(cors({
   origin: [
@@ -183,6 +170,15 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Access-Control-Allow-Origin','Accept', 'Accept-Language', 'Origin', 'User-Agent', 'Cookie'],
   exposedHeaders: ['Set-Cookie']
 }));
+
+app.use((req, res, next) => {
+  res.setHeader('Set-Cookie', [
+    '_ga=; SameSite=None; Secure',
+    '_gid=; SameSite=None; Secure',
+    '_gat=; SameSite=None; Secure'
+  ]);
+  next();
+});
 
 app.use((req, res, next) => {
   // Eliminar cabeceras que exponen información
