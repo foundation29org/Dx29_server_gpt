@@ -45,7 +45,8 @@ app.use(helmet({
             "https://www.googleadservices.com",
             "https://www.google.com",
             "https://googleads.g.doubleclick.net",
-            "https://www.googletagmanager.com"
+            "https://www.googletagmanager.com",
+            "https://tagmanager.google.com"
             //"'script-src-attr'"
         ],
         styleSrc: [
@@ -54,7 +55,8 @@ app.use(helmet({
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
             "https://ka-f.fontawesome.com",
-            "https://www.googletagmanager.com"
+            "https://www.googletagmanager.com",
+            "https://tagmanager.google.com"
         ],
         imgSrc: [
             "'self'",
@@ -122,7 +124,8 @@ app.use(helmet({
             "https://www.google.es", // Añade este
             "https://*.g.doubleclick.net", // Añade este
             "https://pagead2.googlesyndication.com", // Añade este
-            "https://adservice.google.com" // Añade este
+            "https://adservice.google.com",
+            "https://tagmanager.google.com" // Añade este
         ],
         workerSrc: ["'self'", "blob:"],
         childSrc: ["blob:"],
