@@ -44,9 +44,7 @@ app.use(helmet({
             "'unsafe-hashes'",
             "https://www.googleadservices.com",
             "https://www.google.com",
-            "https://googleads.g.doubleclick.net",
-            "https://www.googletagmanager.com",
-            "https://tagmanager.google.com"
+            "https://googleads.g.doubleclick.net"
             //"'script-src-attr'"
         ],
         styleSrc: [
@@ -54,9 +52,7 @@ app.use(helmet({
             "'unsafe-inline'",
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
-            "https://ka-f.fontawesome.com",
-            "https://www.googletagmanager.com",
-            "https://tagmanager.google.com"
+            "https://ka-f.fontawesome.com"
         ],
         imgSrc: [
             "'self'",
@@ -73,8 +69,7 @@ app.use(helmet({
             "https://*.g.doubleclick.net",
             "https://www.google.com",
             "https://dxgpt.app",
-            "https://www.dxgpt.app",
-            "https://www.googletagmanager.com"
+            "https://www.dxgpt.app"
         ],
         fontSrc: [
             "'self'",
@@ -93,14 +88,12 @@ app.use(helmet({
             "https://www.googleadservices.com",
             "https://bid.g.doubleclick.net",
             "https://*.doubleclick.net",
-            "https://*.googleadservices.com",
-            "https://www.googletagmanager.com"
+            "https://*.googleadservices.com"
         ],
         connectSrc: [
             "'self'",
             ...(isDevelopment ? ["http://localhost:*", "ws://localhost:*"] : []),
             "http://localhost:8443",
-            "https://www.googletagmanager.com",
             "https://apis.google.com",
             "https://maps.googleapis.com",
             "https://*.hotjar.com",
@@ -124,10 +117,9 @@ app.use(helmet({
             "https://www.google.es", // Añade este
             "https://*.g.doubleclick.net", // Añade este
             "https://pagead2.googlesyndication.com", // Añade este
-            "https://adservice.google.com",
-            "https://tagmanager.google.com" // Añade este
+            "https://adservice.google.com" // Añade este
         ],
-        workerSrc: ["'self'", "blob:", "https://www.googletagmanager.com"],
+        workerSrc: ["'self'", "blob:"],
         childSrc: ["blob:"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"]
@@ -154,31 +146,18 @@ app.use((req, res, next) => {
   next();
 });
 
-
-
 app.use(cors({
   origin: [
     'https://dxgpt.app', 
     'https://www.dxgpt.app', 
     'https://dxgpt-dev.azurewebsites.net', 
     'http://localhost:4200',
-    'http://localhost:8443',
-    'http://127.0.0.1:8080'
+    'http://localhost:8443'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Access-Control-Allow-Origin','Accept', 'Accept-Language', 'Origin', 'User-Agent', 'Cookie'],
-  exposedHeaders: ['Set-Cookie']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Access-Control-Allow-Origin','Accept', 'Accept-Language', 'Origin', 'User-Agent'],
 }));
-
-app.use((req, res, next) => {
-  res.setHeader('Set-Cookie', [
-    '_ga=; SameSite=None; Secure',
-    '_gid=; SameSite=None; Secure',
-    '_gat=; SameSite=None; Secure'
-  ]);
-  next();
-});
 
 app.use((req, res, next) => {
   // Eliminar cabeceras que exponen información
