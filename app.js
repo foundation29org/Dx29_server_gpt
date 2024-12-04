@@ -44,7 +44,8 @@ app.use(helmet({
             "'unsafe-hashes'",
             "https://www.googleadservices.com",
             "https://www.google.com",
-            "https://googleads.g.doubleclick.net"
+            "https://googleads.g.doubleclick.net",
+            "https://www.googletagmanager.com"
             //"'script-src-attr'"
         ],
         styleSrc: [
@@ -52,7 +53,8 @@ app.use(helmet({
             "'unsafe-inline'",
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
-            "https://ka-f.fontawesome.com"
+            "https://ka-f.fontawesome.com",
+            "https://www.googletagmanager.com"
         ],
         imgSrc: [
             "'self'",
@@ -69,7 +71,8 @@ app.use(helmet({
             "https://*.g.doubleclick.net",
             "https://www.google.com",
             "https://dxgpt.app",
-            "https://www.dxgpt.app"
+            "https://www.dxgpt.app",
+            "https://www.googletagmanager.com"
         ],
         fontSrc: [
             "'self'",
@@ -88,12 +91,14 @@ app.use(helmet({
             "https://www.googleadservices.com",
             "https://bid.g.doubleclick.net",
             "https://*.doubleclick.net",
-            "https://*.googleadservices.com"
+            "https://*.googleadservices.com",
+            "https://www.googletagmanager.com"
         ],
         connectSrc: [
             "'self'",
             ...(isDevelopment ? ["http://localhost:*", "ws://localhost:*"] : []),
             "http://localhost:8443",
+            "https://www.googletagmanager.com",
             "https://apis.google.com",
             "https://maps.googleapis.com",
             "https://*.hotjar.com",
@@ -152,7 +157,8 @@ app.use(cors({
     'https://www.dxgpt.app', 
     'https://dxgpt-dev.azurewebsites.net', 
     'http://localhost:4200',
-    'http://localhost:8443'
+    'http://localhost:8443',
+    'http://127.0.0.1:8080'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
