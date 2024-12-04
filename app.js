@@ -26,11 +26,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
         defaultSrc: ["'self'"],
-        scriptSrcAttr: ["'unsafe-inline'"],
         scriptSrc: [
             "'self'",
-            "'unsafe-inline'",
-            "'unsafe-eval'",
             "https://apis.google.com",
             "https://maps.googleapis.com",
             "https://www.google.com",
@@ -49,7 +46,6 @@ app.use(helmet({
         ],
         styleSrc: [
             "'self'",
-            "'unsafe-inline'",
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
             "https://ka-f.fontawesome.com"
