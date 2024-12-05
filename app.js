@@ -17,10 +17,7 @@ const cors = require('cors');
 const allowedOrigins = config.allowedOrigins;
 
 const isDevelopment = config.NODE_ENV === 'development' || config.NODE_ENV  === 'local';
-app.use((req, res, next) => {
-  console.log('Before CSP:', res.getHeader('Content-Security-Policy'));
-  next();
-});
+
 app.use(helmet({
   hidePoweredBy: true, // Ocultar cabecera X-Powered-By
   contentSecurityPolicy: {
@@ -137,11 +134,6 @@ app.use(helmet({
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
 }));
-
-app.use((req, res, next) => {
-  console.log('After CSP:', res.getHeader('Content-Security-Policy'));
-  next();
-});
 
 app.use(cors({
   origin: [

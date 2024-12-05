@@ -90,6 +90,7 @@ function sanitizeOpenAiData(data) {
 
 async function callOpenAi(req, res) {
   try {
+    const header_language = req.headers['accept-language'];
     // Validar y sanitizar el request
     if (!isValidOpenAiRequest(req.body)) {
       return res.status(400).send({
@@ -114,11 +115,14 @@ async function callOpenAi(req, res) {
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
     let detectedLanguage = lang;
-
+    let englishDiseasesList = diseases_list;
     try {
       detectedLanguage = await translationCtrl.detectLanguage(description);
       if (detectedLanguage && detectedLanguage !== 'en') {
         englishDescription = await translationCtrl.translateText(description, detectedLanguage);
+        if (englishDiseasesList) {
+          englishDiseasesList = await translationCtrl.translateText(diseases_list, detectedLanguage);
+        }
       }
     } catch (translationError) {
       console.error('Translation error:', translationError);
@@ -126,10 +130,10 @@ async function callOpenAi(req, res) {
     }
 
     // 2. Llamar a OpenAI con el texto en inglés
-    const prompt = diseases_list ?
+    const prompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
         .replace("{{description}}", englishDescription)
-        .replace("{{diseases_list}}", diseases_list) :
+        .replace("{{diseases_list}}", englishDiseasesList) :
       PROMPTS.diagnosis.withoutDiseases
         .replace("{{description}}", englishDescription);
         
@@ -170,6 +174,7 @@ async function callOpenAi(req, res) {
 
     // 4. Procesar la respuesta
     let parsedResponse;
+    let parsedResponseEnglish;
     try {
       const match = openAiResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
@@ -179,7 +184,7 @@ async function callOpenAi(req, res) {
       }
 
       parsedResponse = JSON.parse(match[1]);
-      console.log('parsedResponse', parsedResponse)
+      parsedResponseEnglish = JSON.parse(match[1]);
     } catch (parseError) {
       console.error("Failed to parse diagnosis output", parseError);
       return res.status(200).send({ result: "error" });
@@ -209,6 +214,21 @@ async function callOpenAi(req, res) {
         return res.status(500).send({ result: "translation error" });
       }
     }
+
+    let infoTrack = {
+      value: anonymizedDescription,
+      valueEnglish: englishDescription,
+      myuuid: sanitizedData.myuuid,
+      operation: sanitizedData.operation,
+      lang: sanitizedData.lang,
+      response: parsedResponse,
+      responseEnglish: parsedResponseEnglish,
+      topRelatedConditions: sanitizedData.diseases_list,
+      topRelatedConditionsEnglish: englishDiseasesList,
+      header_language: header_language,
+      timezone: timezone
+    }
+    blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack);
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
