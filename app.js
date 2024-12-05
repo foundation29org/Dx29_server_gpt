@@ -48,10 +48,7 @@ app.use(helmet({
             "'self'",
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
-            "https://ka-f.fontawesome.com",
-            "sha256-oWDtNOj/yNTyy/xzvG78EjXKIldJ9QhW08Ixni51SMY=",
-            "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
-            "sha256-CFTcexgkOpCT4UZKHW7f+jB9Hk2NRE4FEuIvFmkyo18="
+            "https://ka-f.fontawesome.com"
         ],
         imgSrc: [
             "'self'",
