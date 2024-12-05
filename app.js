@@ -38,7 +38,6 @@ app.use(helmet({
             "https://script.hotjar.com",
             "https://region1.google-analytics.com",
             "https://maps-api-v3.googleapis.com",
-            "'unsafe-hashes'",
             "https://www.googleadservices.com",
             "https://www.google.com",
             "https://googleads.g.doubleclick.net"
@@ -46,6 +45,7 @@ app.use(helmet({
         ],
         styleSrc: [
             "'self'",
+            "'unsafe-inline'",
             "https://fonts.googleapis.com",
             "https://kit-free.fontawesome.com",
             "https://ka-f.fontawesome.com"
