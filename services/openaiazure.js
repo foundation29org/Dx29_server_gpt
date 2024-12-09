@@ -126,7 +126,8 @@ async function callOpenAi(req, res) {
       }
     } catch (translationError) {
       console.error('Translation error:', translationError);
-      return res.status(500).send({ result: "translation error" });
+      //return res.status(500).send({ result: "translation error" });
+      throw translationError;
     }
 
     // 2. Llamar a OpenAI con el texto en inglés
@@ -187,6 +188,7 @@ async function callOpenAi(req, res) {
       parsedResponseEnglish = JSON.parse(match[1]);
     } catch (parseError) {
       console.error("Failed to parse diagnosis output", parseError);
+      insights.error(parseError);
       return res.status(200).send({ result: "error" });
     }
 
@@ -211,7 +213,8 @@ async function callOpenAi(req, res) {
         );
       } catch (translationError) {
         console.error('Translation error:', translationError);
-        return res.status(500).send({ result: "translation error" });
+        throw translationError;
+        //return res.status(500).send({ result: "translation error" });
       }
     }
 
@@ -244,6 +247,7 @@ async function callOpenAi(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
+    insights.error(error);
     try {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
@@ -536,6 +540,7 @@ async function callOpenAiQuestions(req, res) {
       } catch (emailError) {
         console.log('Fail sending email');
       }
+      insights.error('error openai callOpenAiQuestions');
       return res.status(200).send({ result: "error openai" });
     }
 
@@ -564,6 +569,7 @@ async function callOpenAiQuestions(req, res) {
           processedContent = translatedContent;
         } catch (translationError) {
           console.error('Translation error:', translationError);
+          insights.error(translationError);
         }
       }
 
@@ -598,6 +604,7 @@ async function callOpenAiQuestions(req, res) {
           processedContent = await translationCtrl.translateInvert(processedContent, sanitizedData.detectedLang);
         } catch (translationError) {
           console.error('Translation error:', translationError);
+          insights.error(translationError);
         }
       }
 
@@ -1029,6 +1036,7 @@ async function sendFlow(generalfeedback, lang) {
   } catch (error) {
     console.log(error)
     console.error('Error al enviar datos:', error.message);
+    insights.error(error);
   }
 
 }
