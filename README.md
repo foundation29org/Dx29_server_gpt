@@ -21,7 +21,7 @@ For more details on the evaluation methodology and results, please see our [GitH
 <br>
 <br>
 
-The client code is here: [Dx29 client](https://github.com/foundation29org/Dx29_client/)
+The client code is here: [Dx29 client](https://github.com/foundation29org/Dx29_client_gpt)
 <p>&nbsp;</p>
 <p>&nbsp;</p>
 
