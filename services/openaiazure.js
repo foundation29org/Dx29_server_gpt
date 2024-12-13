@@ -177,18 +177,41 @@ async function callOpenAi(req, res) {
     let parsedResponse;
     let parsedResponseEnglish;
     try {
+      // Log the raw response for debugging
+      console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
+      
       const match = openAiResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
 
       if (!match || !match[1]) {
-        throw new Error("Failed to match diagnosis output");
+        const error = new Error("Failed to match diagnosis output");
+        error.rawResponse = openAiResponse.data.choices[0].message.content;
+        throw error;
       }
 
-      parsedResponse = JSON.parse(match[1]);
-      parsedResponseEnglish = JSON.parse(match[1]);
+      try {
+        parsedResponse = JSON.parse(match[1]);
+        parsedResponseEnglish = JSON.parse(match[1]);
+      } catch (jsonError) {
+        const error = new Error("Failed to parse JSON");
+        error.matchedContent = match[1];
+        error.jsonError = jsonError.message;
+        throw error;
+      }
     } catch (parseError) {
-      console.error("Failed to parse diagnosis output", parseError);
-      insights.error(parseError);
+      console.error("Failed to parse diagnosis output:", {
+        error: parseError.message,
+        rawResponse: parseError.rawResponse,
+        matchedContent: parseError.matchedContent,
+        jsonError: parseError.jsonError
+      });
+      insights.error({
+        message: "Failed to parse diagnosis output",
+        error: parseError.message,
+        rawResponse: parseError.rawResponse,
+        matchedContent: parseError.matchedContent,
+        jsonError: parseError.jsonError
+      });
       return res.status(200).send({ result: "error" });
     }
 
