@@ -202,6 +202,7 @@ async function callOpenAi(req, res) {
       console.error("Failed to parse diagnosis output:", {
         error: parseError.message,
         rawResponse: parseError.rawResponse,
+        description: description,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError
       });
@@ -209,9 +210,22 @@ async function callOpenAi(req, res) {
         message: "Failed to parse diagnosis output",
         error: parseError.message,
         rawResponse: parseError.rawResponse,
+        description: description,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError
       });
+      //save error in blob
+      let infoError = {
+        myuuid: sanitizedData.myuuid,
+        operation: sanitizedData.operation,
+        lang: sanitizedData.lang,
+        description: description,
+        error: parseError.message,
+        rawResponse: parseError.rawResponse,
+        matchedContent: parseError.matchedContent,
+        jsonError: parseError.jsonError
+      }
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
       return res.status(200).send({ result: "error" });
     }
 
@@ -271,6 +285,14 @@ async function callOpenAi(req, res) {
   } catch (error) {
     console.error('Error:', error);
     insights.error(error);
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      rawResponse: error.rawResponse,
+      matchedContent: error.matchedContent,
+      jsonError: error.jsonError
+    }
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     try {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
@@ -296,7 +318,7 @@ function calculateMaxTokens(jsonText) {
   // Contar tokens en el contenido relevante
   const patientDescriptionTokens = enc.encode(patientDescription).length;
   //  console.log('patientDescriptionTokens', patientDescriptionTokens);
-  let max_tokens = Math.round(patientDescriptionTokens * 5);
+  let max_tokens = Math.round(patientDescriptionTokens * 6);
   max_tokens += 500; // Add extra tokens for the prompt
   return max_tokens;
 }
@@ -564,6 +586,11 @@ async function callOpenAiQuestions(req, res) {
         console.log('Fail sending email');
       }
       insights.error('error openai callOpenAiQuestions');
+      let infoError = {
+        error: result.data,
+        requestInfo: requestInfo
+      }
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
       return res.status(200).send({ result: "error openai" });
     }
 
@@ -663,6 +690,7 @@ async function callOpenAiQuestions(req, res) {
       message: 'API Error in callOpenAiQuestions',
       details: errorDetails
     });
+    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails);
 
     if (e.response) {
       console.log(e.response.status);
