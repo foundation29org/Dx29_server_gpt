@@ -137,7 +137,7 @@ async function callOpenAi(req, res) {
         .replace("{{diseases_list}}", englishDiseasesList) :
       PROMPTS.diagnosis.withoutDiseases
         .replace("{{description}}", englishDescription);
-        
+
     const messages = [{ role: "user", content: prompt }];
     const requestBody = {
       messages,
@@ -179,7 +179,7 @@ async function callOpenAi(req, res) {
     try {
       // Log the raw response for debugging
       console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
-      
+
       const match = openAiResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
 
@@ -296,7 +296,7 @@ function calculateMaxTokens(jsonText) {
   // Contar tokens en el contenido relevante
   const patientDescriptionTokens = enc.encode(patientDescription).length;
   //  console.log('patientDescriptionTokens', patientDescriptionTokens);
-  let max_tokens = Math.round(patientDescriptionTokens * 4.5);
+  let max_tokens = Math.round(patientDescriptionTokens * 5);
   max_tokens += 500; // Add extra tokens for the prompt
   return max_tokens;
 }
@@ -535,7 +535,7 @@ async function callOpenAiQuestions(req, res) {
     const requestBody = {
       messages: messages,
       temperature: 0,
-      max_tokens: 800,
+      max_tokens: 1000,
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0,
@@ -643,27 +643,84 @@ async function callOpenAiQuestions(req, res) {
   } catch (e) {
     insights.error(e);
     console.log(e);
+    const errorDetails = {
+      timestamp: new Date().toISOString(),
+      endpoint: 'callOpenAiQuestions',
+      requestData: {
+        body: req.body,
+        questionType: req.body?.questionType,
+        disease: req.body?.disease,
+        lang: req.body?.lang
+      },
+      error: {
+        message: e.message,
+        stack: e.stack,
+        name: e.name
+      }
+    };
+    console.error('Detailed API Error:', JSON.stringify(errorDetails, null, 2));
+    insights.error({
+      message: 'API Error in callOpenAiQuestions',
+      details: errorDetails
+    });
 
     if (e.response) {
       console.log(e.response.status);
       console.log(e.response.data);
 
-      // Asegurarse de que e.response.data.error y e.response.data.error.type están definidos antes de acceder
-      if (e.response.data && e.response.data.error && e.response.data.error.type === 'invalid_request_error') {
-        res.status(400).send(e.response.data.error);
-        return;
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body?.lang || 'en',
+          JSON.stringify({
+            error: '400 Bad Request',
+            details: errorDetails
+          }),
+          e,
+          req.body?.ip,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Failed sending error email:', emailError);
+        insights.error({
+          message: 'Failed to send error email',
+          emailError: emailError
+        });
       }
+      return res.status(400).send({
+        result: 'error',
+        message: 'Bad request',
+        details: e.response.data
+      });
     } else {
-      console.log(e.message);
+      console.error('Non-API Error:', JSON.stringify(errorDetails, null, 2));
+      insights.error({
+        message: 'Non-API Error in callOpenAiQuestions',
+        details: errorDetails
+      });
     }
 
+    // Intentar enviar el email de error
     try {
-      serviceEmail.sendMailErrorGPTIP(lang, req.body, e, ip, requestInfo);
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body?.lang || 'en',
+        req.body,
+        e,
+        req.body?.ip,
+        requestInfo
+      );
     } catch (emailError) {
-      console.log('Fail sending email');
+      console.log('Failed sending error email:', emailError);
+      insights.error({
+        message: 'Failed to send error email',
+        emailError: emailError
+      });
     }
 
-    res.status(500).send('Internal server error');
+    res.status(500).send({
+      result: 'error',
+      message: 'Internal server error',
+      errorId: new Date().getTime() // Para poder rastrear el error en los logs
+    });
   }
 }
 
