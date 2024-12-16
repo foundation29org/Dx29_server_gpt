@@ -296,7 +296,7 @@ function calculateMaxTokens(jsonText) {
   // Contar tokens en el contenido relevante
   const patientDescriptionTokens = enc.encode(patientDescription).length;
   //  console.log('patientDescriptionTokens', patientDescriptionTokens);
-  let max_tokens = Math.round(patientDescriptionTokens * 5);
+  let max_tokens = Math.round(patientDescriptionTokens * 6);
   max_tokens += 500; // Add extra tokens for the prompt
   return max_tokens;
 }
