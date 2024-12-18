@@ -71,6 +71,7 @@ api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogou
 
 //services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
+api.post('/callopenaiV2', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiV2)
 api.post('/callopenaiquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiQuestions)
 
 api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
