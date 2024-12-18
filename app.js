@@ -12,159 +12,45 @@ app.use(compression());
 const serviceEmail = require('./services/email')
 const api = require ('./routes')
 const path = require('path')
-const helmet = require('helmet');
-const cors = require('cors');
 const allowedOrigins = config.allowedOrigins;
 
-const isDevelopment = config.NODE_ENV === 'development' || config.NODE_ENV  === 'local';
+function setCrossDomain(req, res, next) {
+  //instead of * you can define ONLY the sources that we allow.
+  //res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD')  {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
+    next();
+  }else{
+    //send email
+    const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    const requestInfo = {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        origin: origin,
+        body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+        ip: clientIp,
+        params: req.params,
+        query: req.query,
+      };
+      if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
+        try {
+          serviceEmail.sendMailControlCall(requestInfo)
+        } catch (emailError) {
+          console.log('Fail sending email');
+        }
+      }
+    res.status(401).json({ error: 'Origin not allowed' });
+  }
+  
+}
 
-app.use(helmet({
-  hidePoweredBy: true, // Ocultar cabecera X-Powered-By
-  contentSecurityPolicy: {
-    directives: {
-        defaultSrc: ["'self'"],
-        scriptSrcAttr: ["'unsafe-inline'"], // Permitir event handlers en línea
-        scriptSrc: [
-            "'self'",
-            "https://apis.google.com",
-            "https://maps.googleapis.com",
-            "https://www.google.com",
-            "https://www.gstatic.com",
-            "https://kit.fontawesome.com",
-            "https://www.googletagmanager.com",
-            "https://static.hotjar.com",
-            "https://script.hotjar.com",
-            "https://region1.google-analytics.com",
-            "https://maps-api-v3.googleapis.com",
-            "https://www.googleadservices.com",
-            "https://www.google.com",
-            "https://googleads.g.doubleclick.net"
-            //"'script-src-attr'"
-        ],
-        styleSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            "https://fonts.googleapis.com",
-            "https://kit-free.fontawesome.com",
-            "https://ka-f.fontawesome.com"
-        ],
-        imgSrc: [
-            "'self'",
-            "data:",
-            "blob:",
-            "https:",
-            "https://maps.gstatic.com",
-            "https://maps.googleapis.com",
-            "https://foundation29.org",
-            "https://www.googleadservices.com",
-            "https://googleads.g.doubleclick.net",
-            "https://*.google-analytics.com",
-        "https://*.googleadservices.com",
-            "https://*.g.doubleclick.net",
-            "https://www.google.com",
-            "https://dxgpt.app",
-            "https://www.dxgpt.app"
-        ],
-        fontSrc: [
-            "'self'",
-            "data:",
-            "https://fonts.gstatic.com",
-            "https://kit-free.fontawesome.com",
-            "https://ka-f.fontawesome.com",
-            "https://script.hotjar.com"
-        ],
-        frameSrc: [
-            "'self'",
-            "https://www.google.com",
-            "https://vars.hotjar.com",
-            "https://www.googletagmanager.com",
-            "https://app.powerbi.com",
-            "https://www.googleadservices.com",
-            "https://bid.g.doubleclick.net",
-            "https://*.doubleclick.net",
-            "https://*.googleadservices.com"
-        ],
-        connectSrc: [
-            "'self'",
-            ...(isDevelopment ? ["http://localhost:*", "ws://localhost:*"] : []),
-            "http://localhost:8443",
-            "https://apis.google.com",
-            "https://maps.googleapis.com",
-            "https://*.hotjar.com",
-            "wss://*.hotjar.com",
-            "https://*.hotjar.io",
-            "https://*.google-analytics.com",
-            "https://*.analytics.google.com",
-            "https://analytics.google.com",
-            "https://stats.g.doubleclick.net",
-            "https://ka-f.fontawesome.com",
-            "https://region1.google-analytics.com",
-            "https://ipinfo.io",
-            "https://www.google.com",
-            "https://www.googletagmanager.com",
-            "https://google.com",
-            "https://*.googleadservices.com",
-            "https://www.google.com/ads",
-            "https://www.google.com/pagead",
-            "https://googleads.g.doubleclick.net",
-            "https://fonts.gstatic.com",
-            "https://www.google.es", // Añade este
-            "https://*.g.doubleclick.net", // Añade este
-            "https://pagead2.googlesyndication.com", // Añade este
-            "https://adservice.google.com" // Añade este
-        ],
-        workerSrc: ["'self'", "blob:"],
-        childSrc: ["blob:"],
-        objectSrc: ["'none'"],
-        mediaSrc: ["'self'"]
-    }
-  },
-  frameguard: {
-      action: 'DENY'
-  },
-  hidePoweredBy: true,
-  hsts: {
-      maxAge: 63072000,
-      includeSubDomains: true,
-      preload: true
-  },
-  ieNoOpen: true,
-  noSniff: true,
-  xssFilter: true,
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  crossOriginEmbedderPolicy: false,  // Necesario para recursos de terceros
-}));
-
-app.use(cors({
-  origin: [
-    'https://dxgpt.app', 
-    'https://www.dxgpt.app', 
-    'https://dxgpt-dev.azurewebsites.net', 
-    'http://localhost:4200',
-    'http://localhost:8443'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Access-Control-Allow-Origin','Accept', 'Accept-Language', 'Origin', 'User-Agent'],
-}));
-
-app.use((req, res, next) => {
-  // Eliminar cabeceras que exponen información
-  res.removeHeader('X-Powered-By');
-  res.removeHeader('Server');
-  res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Permissions-Policy', 
-    'geolocation=(), camera=(), microphone=(), payment=(), usb=()');
-  next();
-});
-
-app.use(bodyParser.urlencoded({limit: '1mb', extended: false}))
-app.use(bodyParser.json({
-  limit: '1mb',
-  strict: true // Rechazar payload que no sea JSON válido
-}));
+app.use(bodyParser.urlencoded({limit: '50mb', extended: false}))
+app.use(bodyParser.json({limit: '50mb'}))
+app.use(setCrossDomain);
 
 
 // use the forward slash with the module api api folder created routes
