@@ -25,7 +25,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     
   }
 
-  async function createBlobOpenDx29(body){
+  async function createBlobOpenDx29(body, version){
     var info = JSON.stringify(body);
     var now = new Date();
       var y = now.getFullYear();
@@ -39,7 +39,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
       var fileNameNcr = 'info.json';
       var name = body.myuuid+'/'+date;
       var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
-      var tempUrl = 'data'+'/'+url;
+      var tempUrl = version === 'v2' ? 'datav2/' + url : 'data/' + url;
       var result = await createBlob(tempUrl, info, fileNameNcr);
   }
 
