@@ -50,7 +50,7 @@ async function translateText(text, targetLang) {
   if (!text || typeof text !== 'string') {
     throw new Error('Invalid text input for translation');
   }
-  if (!targetLang || typeof targetLang !== 'string' || targetLang.length !== 2) {
+  if (!targetLang || typeof targetLang !== 'string') {
     throw new Error('Invalid target language for translation');
   }
 
@@ -96,7 +96,7 @@ async function translateInvert(text, targetLang) {
   if (!text || typeof text !== 'string') {
     throw new Error('Invalid text input for translation');
   }
-  if (!targetLang || typeof targetLang !== 'string' || targetLang.length !== 2) {
+  if (!targetLang || typeof targetLang !== 'string') {
     throw new Error('Invalid target language for translation');
   }
 
