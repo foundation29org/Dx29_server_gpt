@@ -142,7 +142,7 @@ async function callOpenAi(req, res) {
     const requestBody = {
       messages,
       temperature: 0,
-      max_tokens: calculateMaxTokens(prompt),
+      //max_tokens: calculateMaxTokens(prompt),
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0,
