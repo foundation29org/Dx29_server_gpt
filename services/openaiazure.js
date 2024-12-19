@@ -142,7 +142,7 @@ async function callOpenAi(req, res) {
     const requestBody = {
       messages,
       temperature: 0,
-      max_tokens: calculateMaxTokens(prompt),
+      //max_tokens: calculateMaxTokens(prompt),
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0,
@@ -361,37 +361,47 @@ async function anonymizeText(text) {
     }
   );
 
-  const response = result.data.choices[0].message.content
-    .replace(/^\s*"""\s*/, '')
-    .replace(/\s*"""\s*$/, '');
-
-  const parts = response.split(/(\[ANON-\d+\])/g);
-  const hasPersonalInfo = parts.length > 1;
-
-  // Preparar versiones del texto
-  const htmlParts = parts.map(part => {
-    const match = part.match(/\[ANON-(\d+)\]/);
-    if (match) {
-      const length = parseInt(match[1]);
-      return `<span style="background-color: black; display: inline-block; width:${length}em;">&nbsp;</span>`;
-    }
-    return part;
-  });
-
-  const copyParts = parts.map(part => {
-    const match = part.match(/\[ANON-(\d+)\]/);
-    if (match) {
-      const length = parseInt(match[1]);
-      return '*'.repeat(length);
-    }
-    return part;
-  });
-
-  return {
-    hasPersonalInfo,
-    anonymizedText: copyParts.join(''),
-    htmlText: htmlParts.join('').replace(/\n/g, '<br>')
+  const resultResponse = {
+    hasPersonalInfo: false,
+    anonymizedText: '',
+    htmlText: ''
   };
+
+  // Verificar si existe el contenido
+  if (result.data.choices[0].message.content) {
+    const response = result.data.choices[0].message.content
+      .replace(/^\s*"""\s*/, '')
+      .replace(/\s*"""\s*$/, '');
+
+    const parts = response.split(/(\[ANON-\d+\])/g);
+    resultResponse.hasPersonalInfo = parts.length > 1;
+
+    // Preparar versiones del texto
+    const htmlParts = parts.map(part => {
+      const match = part.match(/\[ANON-(\d+)\]/);
+      if (match) {
+        const length = parseInt(match[1]);
+        return `<span style="background-color: black; display: inline-block; width:${length}em;">&nbsp;</span>`;
+      }
+      return part;
+    });
+
+    const copyParts = parts.map(part => {
+      const match = part.match(/\[ANON-(\d+)\]/);
+      if (match) {
+        const length = parseInt(match[1]);
+        return '*'.repeat(length);
+      }
+      return part;
+    });
+
+    // Asignar los valores procesados al objeto de retorno
+    resultResponse.anonymizedText = copyParts.join('');
+    resultResponse.htmlText = htmlParts.join('').replace(/\n/g, '<br>');
+  }
+
+  // Devolver el objeto de respuesta
+  return resultResponse;
 }
 
 function calculateMaxTokensAnon(jsonText) {
@@ -1033,7 +1043,7 @@ function sanitizeOpinionData(data) {
         .replace(/(\{|\}|\||\\)/g, '')
         .trim()
     })),
-    isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false 
+    isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
   };
 }
 
@@ -1157,7 +1167,7 @@ function sanitizeFeedbackData(data) {
         .trim()
     })),
     subscribe: !!data.subscribe,
-    isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false 
+    isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
   };
 }
 
