@@ -89,8 +89,23 @@ function sanitizeOpenAiData(data) {
 }
 
 async function callOpenAi(req, res) {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
   try {
-    const header_language = req.headers['accept-language'];
     // Validar y sanitizar el request
     if (!isValidOpenAiRequest(req.body)) {
       return res.status(400).send({
@@ -419,8 +434,24 @@ function extractContent(tag, text) {
 }
 
 async function callOpenAiV2(req, res) {
+
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
   try {
-    const header_language = req.headers['accept-language'];
     // Validar y sanitizar el request
     if (!isValidOpenAiRequest(req.body)) {
       return res.status(400).send({
