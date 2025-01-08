@@ -132,7 +132,7 @@ async function callOpenAi(req, res) {
     let detectedLanguage = lang;
     let englishDiseasesList = diseases_list;
     try {
-      detectedLanguage = await translationCtrl.detectLanguage(description);
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
         englishDescription = await translationCtrl.translateText(description, detectedLanguage);
         if (englishDiseasesList) {
@@ -478,7 +478,7 @@ async function callOpenAiV2(req, res) {
     let detectedLanguage = lang;
     let englishDiseasesList = diseases_list;
     try {
-      detectedLanguage = await translationCtrl.detectLanguage(description);
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
         englishDescription = await translationCtrl.translateText(description, detectedLanguage);
         if (englishDiseasesList) {
