@@ -5,7 +5,7 @@ const request = require('request')
 const insights = require('../services/insights')
 const axios = require('axios');
 
-async function detectLanguage(text) {
+async function detectLanguage(text, lang) {
   // Validar input
   if (!text || typeof text !== 'string') {
     throw new Error('Invalid text input for language detection');
@@ -30,8 +30,12 @@ async function detectLanguage(text) {
     if (!response.data || !response.data[0] || !response.data[0].language) {
       throw new Error('Invalid response from translation service');
     }
-
-    return response.data[0].language;
+    const confidenceThreshold = 0.9;
+    if (response.data[0].score < confidenceThreshold && lang == 'es') {
+      return lang;
+    }else{
+      return response.data[0].language;
+    }
 
   } catch (error) {
     insights.error(error);
