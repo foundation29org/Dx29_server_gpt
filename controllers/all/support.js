@@ -37,10 +37,11 @@ function isValidSupportData(data) {
   
 	// Verificar patrones sospechosos
 	const suspiciousPatterns = [
-	  /\{\{.*\}\}/,  // Handlebars syntax
-	  /<script.*?>.*?<\/script>/gis,  // Scripts
-	  /\$\{.*\}/,    // Template literals
-	  /prompt|system|assistant|user/gi  // OpenAI keywords
+		/\{\{[^}]*\}\}/g,  // Handlebars syntax
+		/<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+		/\$\{[^}]*\}/g,    // Template literals
+		// Modificar la detección de palabras clave para evitar falsos positivos
+		/\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
 	];
   
 	return !suspiciousPatterns.some(pattern => 
@@ -54,7 +55,7 @@ function isValidSupportData(data) {
 	  return text
 		.replace(/[<>]/g, '')
 		.replace(/(\{|\}|\||\\)/g, '')
-		.replace(/prompt|system|assistant|user/gi, '')
+		.replace(/prompt:|system:|assistant:|user:/gi, '')
 		.trim();
 	};
   
