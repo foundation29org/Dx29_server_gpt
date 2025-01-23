@@ -20,7 +20,7 @@ function sanitizeInput(input) {
   return input
     .replace(/[<>{}]/g, '') // Eliminar caracteres especiales
     .replace(/(\{|\}|\[|\]|\||\\|\/)/g, '') // Eliminar caracteres que podrían ser usados para inyección
-    .replace(/prompt|system|assistant|user/gi, '') // Eliminar palabras clave de OpenAI
+    .replace(/prompt:|system:|assistant:|user:/gi, '') // Eliminar palabras clave de OpenAI con ':'
     .trim();
 }
 
@@ -64,16 +64,35 @@ function isValidOpenAiRequest(data) {
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{.*\}\}/,  // Handlebars syntax
-    /<script.*?>.*?<\/script>/gis,  // Scripts
-    /\$\{.*\}/,    // Template literals
-    /prompt|system|assistant|user/gi  // OpenAI keywords
-  ];
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    // Modificar la detección de palabras clave para evitar falsos positivos
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+];
 
-  return !suspiciousPatterns.some(pattern =>
-    pattern.test(data.description) ||
-    (data.diseases_list && pattern.test(data.diseases_list))
-  );
+// Normalizar el texto para la validación
+const normalizedDescription = data.description.replace(/\n/g, ' ');
+const normalizedDiseasesList = data.diseases_list || '';
+
+return !suspiciousPatterns.some(pattern => {
+    const descriptionMatch = pattern.test(normalizedDescription);
+    const diseasesMatch = data.diseases_list && pattern.test(normalizedDiseasesList);
+    
+    if (descriptionMatch || diseasesMatch) {
+        console.log('Pattern matched:', pattern);
+        console.log('In description:', descriptionMatch);
+        console.log('In diseases list:', diseasesMatch);
+        insights.error({
+          message: "Pattern matched",
+          pattern: pattern,
+          description: descriptionMatch,
+          diseases_list: diseasesMatch
+        });
+    }
+    
+    return descriptionMatch || diseasesMatch;
+});
 }
 
 function sanitizeOpenAiData(data) {
@@ -108,6 +127,10 @@ async function callOpenAi(req, res) {
   try {
     // Validar y sanitizar el request
     if (!isValidOpenAiRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
       return res.status(400).send({
         result: "error",
         message: "Invalid request format or content"
@@ -716,11 +739,12 @@ function isValidQuestionRequest(data) {
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{.*\}\}/,  // Handlebars syntax
-    /<script.*?>.*?<\/script>/gis,  // Scripts
-    /\$\{.*\}/,    // Template literals
-    /prompt|system|assistant|user/gi  // OpenAI keywords
-  ];
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    // Modificar la detección de palabras clave para evitar falsos positivos
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+];
 
   return !suspiciousPatterns.some(pattern =>
     pattern.test(data.disease) ||
@@ -1034,11 +1058,12 @@ function isValidOpinionData(data) {
 
   // Verificar patrones sospechosos en el texto
   const suspiciousPatterns = [
-    /\{\{.*\}\}/,  // Handlebars syntax
-    /<script.*?>.*?<\/script>/gis,  // Scripts
-    /\$\{.*\}/,    // Template literals
-    /prompt|system|assistant|user/gi  // OpenAI keywords
-  ];
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    // Modificar la detección de palabras clave para evitar falsos positivos
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+];
 
   if (suspiciousPatterns.some(pattern => pattern.test(data.value))) {
     return false;
@@ -1063,7 +1088,7 @@ function sanitizeOpinionData(data) {
     value: data.value
       .replace(/[<>]/g, '')
       .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt|system|assistant|user/gi, '')
+      .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim(),
     myuuid: data.myuuid.trim(),
     lang: data.lang.trim().toLowerCase(),
@@ -1143,11 +1168,12 @@ function isValidFeedbackData(data) {
 
   // Verificar patrones sospechosos en textos
   const suspiciousPatterns = [
-    /\{\{.*\}\}/,  // Handlebars syntax
-    /<script.*?>.*?<\/script>/gis,  // Scripts
-    /\$\{.*\}/,    // Template literals
-    /prompt|system|assistant|user/gi  // OpenAI keywords
-  ];
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    // Modificar la detección de palabras clave para evitar falsos positivos
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+];
 
   if (suspiciousPatterns.some(pattern =>
     pattern.test(data.info) ||
@@ -1183,12 +1209,12 @@ function sanitizeFeedbackData(data) {
     info: data.info
       .replace(/[<>]/g, '')
       .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt|system|assistant|user/gi, '')
+      .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim(),
     value: data.value
       .replace(/[<>]/g, '')
       .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt|system|assistant|user/gi, '')
+      .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim(),
     topRelatedConditions: data.topRelatedConditions?.map(condition => ({
       ...condition,
@@ -1306,7 +1332,7 @@ function sanitizeGeneralFeedbackData(data) {
     return text
       .replace(/[<>]/g, '')
       .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt|system|assistant|user/gi, '')
+      .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim();
   };
 
