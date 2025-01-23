@@ -261,7 +261,8 @@ async function callOpenAi(req, res) {
         error: parseError.message,
         rawResponse: parseError.rawResponse,
         matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError
+        jsonError: parseError.jsonError,
+        model: 'gpt4o'
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
       return res.status(200).send({ result: "error" });
@@ -328,7 +329,8 @@ async function callOpenAi(req, res) {
       error: error.message,
       rawResponse: error.rawResponse,
       matchedContent: error.matchedContent,
-      jsonError: error.jsonError
+      jsonError: error.jsonError,
+      model: 'gpt4o'
     }
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     try {
@@ -600,7 +602,8 @@ async function callOpenAiV2(req, res) {
         error: parseError.message,
         rawResponse: parseError.rawResponse,
         matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError
+        jsonError: parseError.jsonError,
+        model: 'o1-preview'
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
       return res.status(200).send({ result: "error" });
@@ -667,7 +670,8 @@ async function callOpenAiV2(req, res) {
       error: error.message,
       rawResponse: error.rawResponse,
       matchedContent: error.matchedContent,
-      jsonError: error.jsonError
+      jsonError: error.jsonError,
+      model: 'o1-preview'
     }
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     try {
