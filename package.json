@@ -58,5 +58,8 @@
       "title": "About Dx29",
       "filename": "apidoc/footer.md"
     }
+  },
+  "volta": {
+    "node": "18.20.6"
   }
 }
