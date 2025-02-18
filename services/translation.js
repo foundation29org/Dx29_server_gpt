@@ -27,25 +27,29 @@ async function detectLanguage(text, lang) {
       }
     );
 
-    if (!response.data || !response.data[0] || !response.data[0].language) {
-      throw new Error('Invalid response from translation service');
+    if (!response.data || !response.data[0]) {
+      const error = new Error('Invalid response from translation service');
+      error.code = 'TRANSLATION_ERROR';
+      throw error;
     }
+
+    const detectionResult = response.data[0];
+    
+    if (!detectionResult.isTranslationSupported) {
+      const error = new Error(`Detected language '${detectionResult.language}' is not supported for translation (confidence: ${detectionResult.score})`);
+      error.code = 'UNSUPPORTED_LANGUAGE';
+      throw error;
+    }
+    
     const confidenceThreshold = 0.9;
-    if (response.data[0].score < confidenceThreshold && lang == 'es') {
+    if (detectionResult.score < confidenceThreshold && lang == 'es') {
       return lang;
     }else{
-      return response.data[0].language;
+      return detectionResult.language;
     }
 
   } catch (error) {
-    insights.error(error);
-    console.error('Translation detection error:', error);
-    
-    if (error.response?.status === 401) {
-      throw new Error('Authentication failed with translation service');
-    }
-    
-    throw new Error('Failed to detect language');
+    throw error;
   }
 }
 

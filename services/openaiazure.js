@@ -163,9 +163,30 @@ async function callOpenAi(req, res) {
         }
       }
     } catch (translationError) {
-      console.error('Translation error:', translationError);
-      //return res.status(500).send({ result: "translation error" });
-      throw translationError;
+      console.error('Translation error:', translationError.message);
+      
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        insights.error({
+          type: 'UNSUPPORTED_LANGUAGE',
+          message: translationError.message
+        });
+
+        return res.status(200).send({ 
+          result: "unsupported_language",
+          message: translationError.message
+        });
+      }
+
+      // Otros errores de traducción
+      insights.error({
+        type: 'TRANSLATION_ERROR',
+        message: translationError.message
+      });
+
+      return res.status(500).send({ 
+        result: "error",
+        message: "An error occurred during translation"
+      });
     }
 
     // 2. Llamar a OpenAI con el texto en inglés
@@ -511,9 +532,30 @@ async function callOpenAiV2(req, res) {
         }
       }
     } catch (translationError) {
-      console.error('Translation error:', translationError);
-      //return res.status(500).send({ result: "translation error" });
-      throw translationError;
+      console.error('Translation error:', translationError.message);
+      
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        insights.error({
+          type: 'UNSUPPORTED_LANGUAGE',
+          message: translationError.message
+        });
+
+        return res.status(200).send({ 
+          result: "unsupported_language",
+          message: translationError.message
+        });
+      }
+
+      // Otros errores de traducción
+      insights.error({
+        type: 'TRANSLATION_ERROR',
+        message: translationError.message
+      });
+
+      return res.status(500).send({ 
+        result: "error",
+        message: "An error occurred during translation"
+      });
     }
 
     // 2. Llamar a OpenAI con el texto en inglés
