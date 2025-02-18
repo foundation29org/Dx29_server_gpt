@@ -164,6 +164,28 @@ async function callOpenAi(req, res) {
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
+      let infoErrorlang = {
+        body: req.body,
+        error: translationError.message,
+        type: translationError.code || 'TRANSLATION_ERROR',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: 'gpt4o'
+      };
+      
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          translationError,
+          req.body.ip,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
       
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
@@ -533,7 +555,30 @@ async function callOpenAiV2(req, res) {
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
+       // Registrar el error en el blob y enviar email
+      let infoErrorlang = {
+        body: req.body,
+        error: translationError.message,
+        type: translationError.code || 'TRANSLATION_ERROR',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: 'o1-preview'
+      };
       
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          translationError,
+          req.body.ip,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
