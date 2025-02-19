@@ -259,7 +259,7 @@ async function callOpenAi(req, res) {
     let parsedResponseEnglish;
     try {
       // Log the raw response for debugging
-      console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
+      //console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
 
       const match = openAiResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
@@ -644,7 +644,7 @@ async function callOpenAiV2(req, res) {
     let parsedResponseEnglish;
     try {
       // Log the raw response for debugging
-      console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
+      //console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
 
       const match = openAiResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
@@ -945,7 +945,6 @@ async function callOpenAiQuestions(req, res) {
         'Ocp-Apim-Subscription-Key': ApiManagementKey,
       }
     });
-
     if (!result.data.choices[0].message.content) {
       try {
         await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, ip, requestInfo);
@@ -966,8 +965,23 @@ async function callOpenAiQuestions(req, res) {
     const splitChar = content.indexOf("\n\n") >= 0 ? "\n\n" : "\n";
     let contentArray = content.split(splitChar);
 
+    // Procesar el array para manejar ambos formatos
+    contentArray = contentArray.flatMap(item => {
+      // Si el item contiene saltos de línea y números, dividirlo
+      if (item.includes('\n') && /\d+\./.test(item)) {
+          return item.split('\n')
+              .map(line => line.trim())
+              .filter(line => line.length > 0);
+      }
+      return [item];
+    });
+
     // Encontrar el inicio de la lista numerada
-    const startIndex = contentArray.findIndex(item => item.trim().startsWith("1."));
+    const startIndex = contentArray.findIndex(item => 
+        item && typeof item === 'string' && item.trim().startsWith("1.")
+    );
+
+    //const startIndex = contentArray.findIndex(item => item.trim().startsWith("1."));
     if (startIndex >= 0) {
       contentArray = contentArray.slice(startIndex);
     }
