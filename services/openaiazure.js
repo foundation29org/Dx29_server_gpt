@@ -911,7 +911,14 @@ async function callOpenAiQuestions(req, res) {
         prompt = `Provide a diagnosis test for ${sanitizedData.disease}. ${answerFormat}`;
         break;
       case 3:
-        prompt = `Given the medical description: ${sanitizedData.medicalDescription}, what are the potential symptoms not present in the patient that could help in making a differential diagnosis for ${sanitizedData.disease}. Please provide only a list, starting with the most likely symptoms at the top.`;
+        //prompt = `Given the medical description: ${sanitizedData.medicalDescription}, what are the potential symptoms not present in the patient that could help in making a differential diagnosis for ${sanitizedData.disease}. Please provide only a list, starting with the most likely symptoms at the top.`;
+        prompt = `Given the medical description: ${sanitizedData.medicalDescription} for the disease: ${sanitizedData.disease}, 
+          please provide a list of potential symptoms NOT currently mentioned by the patient that would help in making a differential diagnosis.
+
+          Requirements:
+          1. Return only a numbered list.
+          2. Do not include any headings, introductions, or explanations—only the list itself.
+          3. Order them from most likely/relevant to least likely/relevant.`;
         break;
       case 4:
         prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
@@ -961,6 +968,7 @@ async function callOpenAiQuestions(req, res) {
     }
 
     // Procesar la respuesta
+    //console.log(result.data.choices[0].message.content);
     let content = result.data.choices[0].message.content.replace(/^```html\n|\n```$/g, '');
     const splitChar = content.indexOf("\n\n") >= 0 ? "\n\n" : "\n";
     let contentArray = content.split(splitChar);
