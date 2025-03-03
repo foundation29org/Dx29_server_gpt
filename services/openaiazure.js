@@ -347,7 +347,8 @@ async function callOpenAi(req, res) {
       topRelatedConditions: sanitizedData.diseases_list,
       topRelatedConditionsEnglish: englishDiseasesList,
       header_language: header_language,
-      timezone: timezone
+      timezone: timezone,
+      model: 'gpt4o'
     }
     blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
 
@@ -734,7 +735,9 @@ async function callOpenAiV2(req, res) {
       topRelatedConditions: sanitizedData.diseases_list,
       topRelatedConditionsEnglish: englishDiseasesList,
       header_language: header_language,
-      timezone: timezone
+      timezone: timezone,
+      model: 'o1'
+      
     }
     blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
 
