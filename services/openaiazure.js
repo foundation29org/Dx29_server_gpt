@@ -1,4 +1,3 @@
-
 const { OpenAIClient, AzureKeyCredential } = require("@azure/openai");
 const config = require('../config')
 const insights = require('../services/insights')
@@ -616,7 +615,9 @@ async function callOpenAiV2(req, res) {
       messages
     };
 
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/o1';
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
+      'https://apiopenai.azure-api.net/dxgpt/deployments/o1-dxgptamerica' :
+      'https://apiopenai.azure-api.net/dxgpt/deployments/o1';
 
     const openAiResponse = await axios.post(endpointUrl, requestBody, {
       headers: {
