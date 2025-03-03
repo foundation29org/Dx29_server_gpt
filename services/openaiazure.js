@@ -561,7 +561,7 @@ async function callOpenAiV2(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'o1-preview'
+        model: 'o1'
       };
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
@@ -616,7 +616,7 @@ async function callOpenAiV2(req, res) {
       messages
     };
 
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/o1-preview';
+    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/o1';
 
     const openAiResponse = await axios.post(endpointUrl, requestBody, {
       headers: {
@@ -690,7 +690,7 @@ async function callOpenAiV2(req, res) {
         rawResponse: parseError.rawResponse,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError,
-        model: 'o1-preview'
+        model: 'o1'
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
       return res.status(200).send({ result: "error" });
@@ -758,7 +758,7 @@ async function callOpenAiV2(req, res) {
       rawResponse: error.rawResponse,
       matchedContent: error.matchedContent,
       jsonError: error.jsonError,
-      model: 'o1-preview'
+      model: 'o1'
     }
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     try {
