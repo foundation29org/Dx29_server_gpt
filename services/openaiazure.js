@@ -34,7 +34,7 @@ function isValidOpenAiRequest(data) {
   // Validar description
   if (typeof data.description !== 'string' ||
     data.description.length < 10 ||
-    data.description.length > 4000) return false;
+    data.description.length > 8000) return false;
 
   // Validar myuuid
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
@@ -827,7 +827,7 @@ function isValidQuestionRequest(data) {
     if (!data.medicalDescription ||
       typeof data.medicalDescription !== 'string' ||
       data.medicalDescription.length < 10 ||
-      data.medicalDescription.length > 4000) {
+      data.medicalDescription.length > 8000) {
       return false;
     }
   }
