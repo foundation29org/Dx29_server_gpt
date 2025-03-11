@@ -228,7 +228,7 @@ async function callOpenAi(req, res) {
       presence_penalty: 0,
     };
 
-    const endpointUrl = timezone?.includes("America") ?
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
       'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
       'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
@@ -946,7 +946,7 @@ async function callOpenAiQuestions(req, res) {
       requestBody.max_tokens = 4096;
     }
 
-    const endpointUrl = sanitizedData.timezone.includes("America") ?
+    const endpointUrl = sanitizedData.timezone.includes("America") || sanitizedData.timezone.includes("Asia") ?
       'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
       'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
@@ -1781,7 +1781,7 @@ async function generateFollowUpQuestions(req, res) {
       presence_penalty: 0,
     };
 
-    const endpointUrl = timezone?.includes("America") ?
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
       'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
       'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
@@ -1856,7 +1856,7 @@ async function generateFollowUpQuestions(req, res) {
       model: 'follow-up'
     };
     
-    blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'follow-up');
+    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -2122,7 +2122,7 @@ async function processFollowUpAnswers(req, res) {
       presence_penalty: 0,
     };
 
-    const endpointUrl = timezone?.includes("America") ?
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
       'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
       'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
@@ -2165,7 +2165,7 @@ async function processFollowUpAnswers(req, res) {
       model: 'process-follow-up'
     };
     
-    blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'process-follow-up');
+    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
