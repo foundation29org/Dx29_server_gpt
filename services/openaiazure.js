@@ -228,7 +228,7 @@ async function callOpenAi(req, res) {
       presence_penalty: 0,
     };
 
-    const endpointUrl = timezone?.includes("America") ?
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
       'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
       'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
@@ -946,7 +946,7 @@ async function callOpenAiQuestions(req, res) {
       requestBody.max_tokens = 4096;
     }
 
-    const endpointUrl = sanitizedData.timezone.includes("America") ?
+    const endpointUrl = sanitizedData.timezone.includes("America") || sanitizedData.timezone.includes("Asia") ?
       'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
       'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
 
@@ -1580,6 +1580,629 @@ function getFeedBack(req, res) {
 
 }
 
+function isValidFollowUpQuestionsRequest(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['description', 'diseases', 'myuuid', 'operation', 'lang', 'ip'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar description
+  if (typeof data.description !== 'string' ||
+    data.description.length < 10 ||
+    data.description.length > 8000) return false;
+
+  // Validar diseases
+  if (typeof data.diseases !== 'string' ||
+    data.diseases.length < 2 ||
+    data.diseases.length > 1000) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'generate follow-up questions') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar ip
+  if (typeof data.ip !== 'string') return false;
+
+  // Validar timezone si existe
+  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
+    return false;
+  }
+
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+  ];
+
+  // Normalizar el texto para la validación
+  const normalizedDescription = data.description.replace(/\n/g, ' ');
+  const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
+
+  return !suspiciousPatterns.some(pattern => {
+    return pattern.test(normalizedDescription) || pattern.test(normalizedDiseases);
+  });
+}
+
+function sanitizeFollowUpQuestionsData(data) {
+  return {
+    ...data,
+    description: sanitizeInput(data.description),
+    diseases: sanitizeInput(data.diseases),
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    ip: data.ip.trim(),
+    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+  };
+}
+
+async function generateFollowUpQuestions(req, res) {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body,
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
+
+  try {
+    // Validar y sanitizar el request
+    if (!isValidFollowUpQuestionsRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content for follow-up questions",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeFollowUpQuestionsData(req.body);
+    const { description, diseases, lang, ip, timezone } = sanitizedData;
+
+    // Validar IP
+    if (!ip) {
+      try {
+        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
+      return res.status(200).send({ result: "blocked" });
+    }
+
+    // 1. Detectar idioma y traducir a inglés si es necesario
+    let englishDescription = description;
+    let detectedLanguage = lang;
+    let englishDiseases = diseases;
+    try {
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
+      if (detectedLanguage && detectedLanguage !== 'en') {
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
+        englishDiseases = await translationCtrl.translateText(diseases, detectedLanguage);
+      }
+    } catch (translationError) {
+      console.error('Translation error:', translationError.message);
+      let infoErrorlang = {
+        body: req.body,
+        error: translationError.message,
+        type: translationError.code || 'TRANSLATION_ERROR',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: 'follow-up'
+      };
+      
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          translationError,
+          req.body.ip,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+      
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        insights.error({
+          type: 'UNSUPPORTED_LANGUAGE',
+          message: translationError.message
+        });
+
+        return res.status(200).send({ 
+          result: "unsupported_language",
+          message: translationError.message
+        });
+      }
+
+      // Otros errores de traducción
+      insights.error({
+        type: 'TRANSLATION_ERROR',
+        message: translationError.message
+      });
+
+      return res.status(500).send({ 
+        result: "error",
+        message: "An error occurred during translation"
+      });
+    }
+
+    // 2. Construir el prompt para generar preguntas de seguimiento
+    const prompt = `
+    You are a medical assistant helping to gather more information from a patient. The patient has provided the following description of their symptoms:
+    
+    "${englishDescription}"
+    
+    Based on this description, the system has identified these potential conditions: ${englishDiseases}
+    
+    The patient has indicated that none of these conditions seem to match their experience. Please generate 5 specific follow-up questions that would help clarify the patient's condition and potentially lead to a more accurate diagnosis.
+    
+    The questions should:
+    1. Focus on getting more specific details about symptoms already mentioned
+    2. Explore potential related symptoms that haven't been mentioned
+    3. Ask about timing, severity, triggers, or alleviating factors
+    4. Be clear, concise, and easy for a patient to understand
+    5. Avoid medical jargon when possible
+    
+    Format your response as a JSON array of strings, with each string being a question. Example:
+    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]
+    
+    Your response should be ONLY the JSON array, nothing else.`;
+
+    const messages = [{ role: "user", content: prompt }];
+    const requestBody = {
+      messages,
+      temperature: 0.7,
+      max_tokens: 1000,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
+      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
+      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
+
+    const openAiResponse = await axios.post(endpointUrl, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+      }
+    });
+
+    if (!openAiResponse.data.choices[0].message.content) {
+      throw new Error('Empty OpenAI response');
+    }
+
+    // 3. Procesar la respuesta
+    let questions;
+    try {
+      // Limpiar la respuesta para asegurar que es un JSON válido
+      const content = openAiResponse.data.choices[0].message.content.trim();
+      const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
+      questions = JSON.parse(jsonContent);
+      
+      if (!Array.isArray(questions)) {
+        throw new Error('Response is not an array');
+      }
+    } catch (parseError) {
+      console.error("Failed to parse questions:", parseError);
+      insights.error({
+        message: "Failed to parse follow-up questions",
+        error: parseError.message,
+        rawResponse: openAiResponse.data.choices[0].message.content
+      });
+      
+      let infoError = {
+        myuuid: sanitizedData.myuuid,
+        operation: sanitizedData.operation,
+        lang: sanitizedData.lang,
+        description: description,
+        error: parseError.message,
+        rawResponse: openAiResponse.data.choices[0].message.content,
+        model: 'follow-up'
+      };
+      
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      return res.status(200).send({ result: "error" });
+    }
+
+    // 4. Traducir las preguntas al idioma original si es necesario
+    if (detectedLanguage !== 'en') {
+      try {
+        questions = await Promise.all(
+          questions.map(question => translationCtrl.translateInvert(question, detectedLanguage))
+        );
+      } catch (translationError) {
+        console.error('Translation error:', translationError);
+        throw translationError;
+      }
+    }
+
+    // 5. Guardar información para seguimiento
+    let infoTrack = {
+      value: description,
+      valueEnglish: englishDescription,
+      myuuid: sanitizedData.myuuid,
+      operation: sanitizedData.operation,
+      lang: sanitizedData.lang,
+      diseases: diseases,
+      diseasesEnglish: englishDiseases,
+      questions: questions,
+      header_language: header_language,
+      timezone: timezone,
+      model: 'follow-up'
+    };
+    
+    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
+
+    // 6. Preparar la respuesta final
+    return res.status(200).send({
+      result: 'success',
+      data: {
+        questions: questions
+      },
+      detectedLang: detectedLanguage
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    insights.error(error);
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      model: 'follow-up'
+    };
+    
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    try {
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body.lang,
+        req.body.description,
+        error,
+        req.body.ip,
+        requestInfo
+      );
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
+    return res.status(500).send({ result: "error" });
+  }
+}
+
+function isValidProcessFollowUpRequest(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['description', 'answers', 'myuuid', 'operation', 'lang', 'ip'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar description
+  if (typeof data.description !== 'string' ||
+    data.description.length < 10 ||
+    data.description.length > 8000) return false;
+
+  // Validar answers
+  if (!Array.isArray(data.answers) || data.answers.length === 0) return false;
+  
+  // Validar estructura de cada respuesta
+  for (const answer of data.answers) {
+    if (!answer || typeof answer !== 'object') return false;
+    if (!answer.question || typeof answer.question !== 'string') return false;
+    if (!answer.answer || typeof answer.answer !== 'string') return false;
+  }
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'process follow-up answers') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar ip
+  if (typeof data.ip !== 'string') return false;
+
+  // Validar timezone si existe
+  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
+    return false;
+  }
+
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+  ];
+
+  // Normalizar el texto para la validación
+  const normalizedDescription = data.description.replace(/\n/g, ' ');
+  
+  if (suspiciousPatterns.some(pattern => pattern.test(normalizedDescription))) {
+    return false;
+  }
+  
+  // Verificar patrones sospechosos en las respuestas
+  for (const answer of data.answers) {
+    if (suspiciousPatterns.some(pattern => 
+      pattern.test(answer.question) || pattern.test(answer.answer))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function sanitizeProcessFollowUpData(data) {
+  return {
+    ...data,
+    description: sanitizeInput(data.description),
+    answers: data.answers.map(answer => ({
+      question: sanitizeInput(answer.question),
+      answer: sanitizeInput(answer.answer)
+    })),
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    ip: data.ip.trim(),
+    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+  };
+}
+
+async function processFollowUpAnswers(req, res) {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body,
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
+
+  try {
+    // Validar y sanitizar el request
+    if (!isValidProcessFollowUpRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content for processing follow-up answers",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeProcessFollowUpData(req.body);
+    const { description, answers, lang, ip, timezone } = sanitizedData;
+
+    // Validar IP
+    if (!ip) {
+      try {
+        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
+      return res.status(200).send({ result: "blocked" });
+    }
+
+    // 1. Detectar idioma y traducir a inglés si es necesario
+    let englishDescription = description;
+    let detectedLanguage = lang;
+    let englishAnswers = answers;
+    
+    try {
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
+      if (detectedLanguage && detectedLanguage !== 'en') {
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
+        
+        // Traducir las preguntas y respuestas
+        englishAnswers = await Promise.all(
+          answers.map(async (item) => ({
+            question: await translationCtrl.translateText(item.question, detectedLanguage),
+            answer: await translationCtrl.translateText(item.answer, detectedLanguage)
+          }))
+        );
+      }
+    } catch (translationError) {
+      console.error('Translation error:', translationError.message);
+      let infoErrorlang = {
+        body: req.body,
+        error: translationError.message,
+        type: translationError.code || 'TRANSLATION_ERROR',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: 'process-follow-up'
+      };
+      
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          translationError,
+          req.body.ip,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+      
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        insights.error({
+          type: 'UNSUPPORTED_LANGUAGE',
+          message: translationError.message
+        });
+
+        return res.status(200).send({ 
+          result: "unsupported_language",
+          message: translationError.message
+        });
+      }
+
+      // Otros errores de traducción
+      insights.error({
+        type: 'TRANSLATION_ERROR',
+        message: translationError.message
+      });
+
+      return res.status(500).send({ 
+        result: "error",
+        message: "An error occurred during translation"
+      });
+    }
+
+    // 2. Construir el prompt para procesar las respuestas y actualizar la descripción
+    const questionsAndAnswers = englishAnswers.map(item => 
+      `Question: ${item.question}\nAnswer: ${item.answer}`
+    ).join('\n\n');
+    
+    const prompt = `
+    You are a medical assistant helping to update a patient's symptom description based on their answers to follow-up questions.
+    
+    Original description:
+    "${englishDescription}"
+    
+    Follow-up questions and answers:
+    ${questionsAndAnswers}
+    
+    Please create an updated, comprehensive description that integrates the original information with the new details from the follow-up questions. The updated description should:
+    
+    1. Maintain all relevant information from the original description
+    2. Seamlessly incorporate the new information from the answers
+    3. Be well-organized and clear
+    4. Be written in first person, as if the patient is describing their symptoms
+    5. Not include the questions themselves, only the information
+    
+    Return ONLY the updated description, with no additional commentary or explanation.`;
+
+    const messages = [{ role: "user", content: prompt }];
+    const requestBody = {
+      messages,
+      temperature: 0.3,
+      max_tokens: 2000,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+    const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
+      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
+      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
+
+    const openAiResponse = await axios.post(endpointUrl, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+      }
+    });
+
+    if (!openAiResponse.data.choices[0].message.content) {
+      throw new Error('Empty OpenAI response');
+    }
+
+    // 3. Obtener la descripción actualizada
+    let updatedDescription = openAiResponse.data.choices[0].message.content.trim();
+
+    // 4. Traducir la descripción actualizada al idioma original si es necesario
+    if (detectedLanguage !== 'en') {
+      try {
+        updatedDescription = await translationCtrl.translateInvert(updatedDescription, detectedLanguage);
+      } catch (translationError) {
+        console.error('Translation error:', translationError);
+        throw translationError;
+      }
+    }
+
+    // 5. Guardar información para seguimiento
+    let infoTrack = {
+      originalDescription: description,
+      originalDescriptionEnglish: englishDescription,
+      myuuid: sanitizedData.myuuid,
+      operation: sanitizedData.operation,
+      lang: sanitizedData.lang,
+      answers: answers,
+      answersEnglish: englishAnswers,
+      updatedDescription: updatedDescription,
+      header_language: header_language,
+      timezone: timezone,
+      model: 'process-follow-up'
+    };
+    
+    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
+
+    // 6. Preparar la respuesta final
+    return res.status(200).send({
+      result: 'success',
+      data: {
+        updatedDescription: updatedDescription
+      },
+      detectedLang: detectedLanguage
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    insights.error(error);
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      model: 'process-follow-up'
+    };
+    
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    try {
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body.lang,
+        req.body.description,
+        error,
+        req.body.ip,
+        requestInfo
+      );
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
+    return res.status(500).send({ result: "error" });
+  }
+}
+
 module.exports = {
   callOpenAi,
   callOpenAiV2,
@@ -1587,5 +2210,7 @@ module.exports = {
   opinion,
   sendFeedback,
   sendGeneralFeedback,
-  getFeedBack
+  getFeedBack,
+  generateFollowUpQuestions,
+  processFollowUpAnswers
 }
