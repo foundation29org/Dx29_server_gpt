@@ -13,6 +13,7 @@ const { encodingForModel } = require("js-tiktoken");
 const translationCtrl = require('../services/translation')
 const PROMPTS = require('../assets/prompts');
 
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function sanitizeInput(input) {
   // Eliminar caracteres especiales y patrones potencialmente peligrosos
@@ -104,6 +105,46 @@ function sanitizeOpenAiData(data) {
     ip: data.ip.trim(),
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
+}
+
+async function callOpenAiWithFailover(endpoint, requestBody, timezone, model = 'gpt4o', retryCount = 0) {
+  const RETRY_DELAY = 1000; // 1 segundo de espera entre reintentos
+  
+  // Determinar el orden de los endpoints según el timezone
+  let endpoints = [];
+  if (timezone?.includes("America") || timezone?.includes("Asia")) {
+    endpoints = [
+      `https://apiopenai.azure-api.net/dxgptamerica/deployments/${model}`,
+      `https://apiopenai.azure-api.net/dxgpt/deployments/${model}`
+    ];
+  } else {
+    endpoints = [
+      `https://apiopenai.azure-api.net/dxgpt/deployments/${model}`,
+      `https://apiopenai.azure-api.net/dxgptamerica/deployments/${model}`
+    ];
+  }
+
+  try {
+    const response = await axios.post(endpoints[retryCount], requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+      }
+    });
+    return response;
+  } catch (error) {
+    if (retryCount < endpoints.length - 1) {
+      console.log(`Failed to call ${endpoints[retryCount]}, retrying in ${RETRY_DELAY}ms...`);
+      insights.error({
+        message: `Failed to call OpenAI endpoint ${endpoints[retryCount]}`,
+        error: error.message,
+        retryCount
+      });
+      await delay(RETRY_DELAY);
+      return callOpenAiWithFailover(endpoint, requestBody, timezone, model, retryCount + 1);
+    }
+    throw error;
+  }
 }
 
 async function callOpenAi(req, res) {
@@ -222,31 +263,24 @@ async function callOpenAi(req, res) {
     const requestBody = {
       messages,
       temperature: 0,
-      //max_tokens: calculateMaxTokens(prompt),
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0,
     };
 
-    /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
-      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
-      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';*/
+      /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
+    'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
+    'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';*/
 
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
-
-    const openAiResponse = await axios.post(endpointUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
-      }
-    });
+    // Reemplazar la llamada directa a axios con nuestra función de failover
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, timezone, 'gpt4o');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
     }
 
     // 3. Anonimizar el texto en inglés
-    let anonymizedResult = await anonymizeText(englishDescription);
+    let anonymizedResult = await anonymizeText(englishDescription, timezone);
     let anonymizedDescription = anonymizedResult.anonymizedText;
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
     //add translation anonimized
@@ -409,7 +443,24 @@ function calculateMaxTokens(jsonText) {
 }
 
 // Función auxiliar para anonimizar texto
-async function anonymizeText(text) {
+async function anonymizeText(text, timezone) {
+  const RETRY_DELAY = 1000;
+  
+  //    'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
+  // Determinar el orden de los endpoints según el timezone
+  let endpoints = [];
+  if (timezone?.includes("America") || timezone?.includes("Asia")) {
+    endpoints = [
+      'https://apiopenai.azure-api.net/dxgptamerica/anonymized/gpt4o',
+      'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o'
+    ];
+  } else {
+    endpoints = [
+      'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
+      'https://apiopenai.azure-api.net/dxgptamerica/anonymized/gpt4o'
+    ];
+  }
+
   const anonymizationPrompt = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
   where N is the count of characters that have been anonymized. 
   Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
@@ -427,24 +478,48 @@ async function anonymizeText(text) {
   ANONYMIZED DOCUMENT:"`;
 
   const messages = [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }];
+  const requestBody = {
+    messages,
+    temperature: 0,
+    max_tokens: calculateMaxTokensAnon(text),
+    top_p: 1,
+    frequency_penalty: 0,
+    presence_penalty: 0,
+  };
 
-  const result = await axios.post(
-    'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
-    {
-      messages,
-      temperature: 0,
-      max_tokens: calculateMaxTokensAnon(text),
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+  async function tryEndpoint(endpointUrl) {
+    const result = await axios.post(
+      endpointUrl,
+      requestBody,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Ocp-Apim-Subscription-Key': ApiManagementKey,
+        }
       }
+    );
+    return result;
+  }
+
+  let result;
+  for (let i = 0; i < endpoints.length; i++) {
+    try {
+      result = await tryEndpoint(endpoints[i]);
+      break; // Si la llamada es exitosa, salimos del bucle
+    } catch (error) {
+      if (i === endpoints.length - 1) {
+        // Si es el último endpoint, propagamos el error
+        throw error;
+      }
+      console.log(`Failed to call ${endpoints[i]}, retrying with next endpoint in ${RETRY_DELAY}ms...`);
+      insights.error({
+        message: `Failed to call anonymization endpoint ${endpoints[i]}`,
+        error: error.message,
+        retryCount: i
+      });
+      await delay(RETRY_DELAY);
     }
-  );
+  }
 
   const resultResponse = {
     hasPersonalInfo: false,
@@ -485,7 +560,6 @@ async function anonymizeText(text) {
     resultResponse.htmlText = htmlParts.join('').replace(/\n/g, '<br>');
   }
 
-  // Devolver el objeto de respuesta
   return resultResponse;
 }
 
@@ -618,25 +692,19 @@ async function callOpenAiV2(req, res) {
       messages
     };
 
-    /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
-      'https://apiopenai.azure-api.net/dxgpt/deployments/o1-dxgptamerica' :
-      'https://apiopenai.azure-api.net/dxgpt/deployments/o1';*/
+      /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
+    'https://apiopenai.azure-api.net/dxgpt/deployments/o1-dxgptamerica' :
+    'https://apiopenai.azure-api.net/dxgpt/deployments/o1';*/
 
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/o1';
-
-    const openAiResponse = await axios.post(endpointUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
-      }
-    });
+    // Reemplazar la llamada directa a axios con nuestra función de failover
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, timezone, 'o1');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
     }
 
     // 3. Anonimizar el texto en inglés
-    let anonymizedResult = await anonymizeText(englishDescription);
+    let anonymizedResult = await anonymizeText(englishDescription, timezone);
     let anonymizedDescription = anonymizedResult.anonymizedText;
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
     //add translation anonimized
@@ -950,18 +1018,8 @@ async function callOpenAiQuestions(req, res) {
       requestBody.max_tokens = 4096;
     }
 
-    /*const endpointUrl = sanitizedData.timezone.includes("America") || sanitizedData.timezone.includes("Asia") ?
-      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
-      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';*/
-
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
-
-    const result = await axios.post(endpointUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
-      }
-    });
+    // Reemplazar la llamada directa a axios con nuestra función de failover
+    const result = await callOpenAiWithFailover(null, requestBody, sanitizedData.timezone, 'gpt4o');
     if (!result.data.choices[0].message.content) {
       try {
         await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, ip, requestInfo);
@@ -1787,18 +1845,8 @@ async function generateFollowUpQuestions(req, res) {
       presence_penalty: 0,
     };
 
-    /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
-      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
-      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';*/
-
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
-
-    const openAiResponse = await axios.post(endpointUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
-      }
-    });
+    // Reemplazar la llamada directa a axios con nuestra función de failover
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
@@ -2130,18 +2178,8 @@ async function processFollowUpAnswers(req, res) {
       presence_penalty: 0,
     };
 
-    /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
-      'https://apiopenai.azure-api.net/dxgptamerica/deployments/gpt4o' :
-      'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';*/
-
-    const endpointUrl = 'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';
-
-    const openAiResponse = await axios.post(endpointUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
-      }
-    });
+    // Reemplazar la llamada directa a axios con nuestra función de failover
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
