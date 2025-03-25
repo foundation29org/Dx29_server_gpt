@@ -1,30 +1,31 @@
 'use strict'
 
-const config = require('../config')
-const request = require('request')
 const insights = require('../services/insights')
 const axios = require('axios');
 
-async function detectLanguage(text, lang) {
+async function detectLanguage(text, lang, endpoint) {
   // Validar input
   if (!text || typeof text !== 'string') {
     throw new Error('Invalid text input for language detection');
   }
 
   const jsonText = [{ "Text": text }];
-  const translationKey = config.translationKey;
 
   try {
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Ocp-Apim-Subscription-Key': endpoint.key
+    };
+
+    if (endpoint.region) {
+      headers['Ocp-Apim-Subscription-Region'] = endpoint.region;
+    }
+
     const response = await axios.post(
       'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0',
       jsonText,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': translationKey,
-          'Ocp-Apim-Subscription-Region': 'northeurope'
-        }
-      }
+      { headers }
     );
 
     if (!response.data || !response.data[0]) {
@@ -49,11 +50,18 @@ async function detectLanguage(text, lang) {
     }
 
   } catch (error) {
+    let infoError = {
+      text: text,
+      lang: lang,
+      error: error.message,
+      endpoint: endpoint
+    }
+    insights.error(infoError);
     throw error;
   }
 }
 
-async function translateText(text, targetLang) {
+async function translateText(text, targetLang, endpoint) {
   // Validar inputs
   if (!text || typeof text !== 'string') {
     throw new Error('Invalid text input for translation');
@@ -63,19 +71,20 @@ async function translateText(text, targetLang) {
   }
 
   const jsonText = [{ "Text": text }];
-  const translationKey = config.translationKey;
+  const headers = {
+    'Content-Type': 'application/json',
+    'Ocp-Apim-Subscription-Key': endpoint.key
+  };
+
+  if (endpoint.region) {  
+    headers['Ocp-Apim-Subscription-Region'] = endpoint.region;
+  }
 
   try {
     const response = await axios.post(
       `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from=${targetLang}&to=en`,
       jsonText,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': translationKey,
-          'Ocp-Apim-Subscription-Region': 'northeurope'
-        }
-      }
+      { headers }
     );
 
     if (!response.data || 
@@ -88,7 +97,13 @@ async function translateText(text, targetLang) {
     return response.data[0].translations[0].text;
 
   } catch (error) {
-    insights.error(error);
+    let infoError = {
+      text: text,
+      targetLang: targetLang,
+      endpoint: endpoint,
+      error: error.message
+    }
+    insights.error(infoError);
     console.error('Translation error:', error);
     
     if (error.response?.status === 401) {
@@ -99,7 +114,7 @@ async function translateText(text, targetLang) {
   }
 }
 
-async function translateInvert(text, targetLang) {
+async function translateInvert(text, targetLang, endpoint) {
   // Validar inputs
   if (!text || typeof text !== 'string') {
     throw new Error('Invalid text input for translation');
@@ -109,19 +124,20 @@ async function translateInvert(text, targetLang) {
   }
 
   const jsonText = [{ "Text": text }];
-  const translationKey = config.translationKey;
+  const headers = {
+    'Content-Type': 'application/json',
+    'Ocp-Apim-Subscription-Key': endpoint.key
+  };
+
+  if (endpoint.region) {
+    headers['Ocp-Apim-Subscription-Region'] = endpoint.region;
+  }
 
   try {
     const response = await axios.post(
       `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=en&to=${targetLang}`,
       jsonText,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': translationKey,
-          'Ocp-Apim-Subscription-Region': 'northeurope'
-        }
-      }
+      { headers }
     );
 
     if (!response.data || 
@@ -135,7 +151,13 @@ async function translateInvert(text, targetLang) {
     return response.data[0].translations[0].text;
 
   } catch (error) {
-    insights.error(error);
+    let infoError = {
+      text: text,
+      targetLang: targetLang,
+      endpoint: endpoint,
+      error: error.message
+    }
+    insights.error(infoError);
     console.error('Translation invert error:', error);
     
     if (error.response?.status === 401) {
@@ -146,27 +168,8 @@ async function translateInvert(text, targetLang) {
   }
 }
 
-function translateSegments(text, lang){
-
-  var translationKey = config.translationKey;
-  request.post({url:'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&&from=en&to='+lang+'&textType=html',json: true,headers: {'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' },body:text}, (error, response, body) => {
-      if (error) {
-        console.error(error)
-        insights.error(error);
-        res.status(500).send(error)
-      }
-      if(body=='Missing authentication token.'){
-        res.status(401).send(body)
-      }else{
-        res.status(200).send(body)
-      }
-  
-    });
-  }
-
 module.exports = {
   detectLanguage,
   translateText,
-  translateInvert,
-  translateSegments
+  translateInvert
 }
