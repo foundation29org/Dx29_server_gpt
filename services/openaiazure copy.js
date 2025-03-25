@@ -107,87 +107,23 @@ function sanitizeOpenAiData(data) {
   };
 }
 
-function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
-  const tz = timezone?.split('/')[0]?.toLowerCase();
-  const region = (() => {
-    if (tz?.includes('america')) return 'northamerica';
-    if (tz?.includes('europe')) return 'europe';
-    if (tz?.includes('asia')) return 'asia';
-    if (tz?.includes('africa')) return 'africa';
-    if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
-    return 'other';
-  })();
-  const suffix = mode === 'anonymized' ? 'anonymized' : 'call';
+async function callOpenAiWithFailover(endpoint, requestBody, timezone, model = 'gpt4o', retryCount = 0) {
+  const RETRY_DELAY = 1000; // 1 segundo de espera entre reintentos
+  
+  // Determinar el orden de los endpoints según el timezone
+  let endpoints = [];
+  if (timezone?.includes("America") || timezone?.includes("Asia")) {
+    endpoints = [
+      `https://apiopenai.azure-api.net/dxgptamerica/deployments/${model}`,
+      `https://apiopenai.azure-api.net/dxgpt/deployments/${model}`
+    ];
+  } else {
+    endpoints = [
+      `https://apiopenai.azure-api.net/dxgpt/deployments/${model}`,
+      `https://apiopenai.azure-api.net/dxgptamerica/deployments/${model}`
+    ];
+  }
 
-  const endpointsMap = {
-    gpt4o: {
-      asia: [
-        `https://apiopenai.azure-api.net/v2/as1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`
-      ],
-      europe: [
-        `https://apiopenai.azure-api.net/v2/eu1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`
-      ],
-      northamerica: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`
-      ],
-      southamerica: [
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`
-      ],
-      africa: [
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`
-      ],
-      oceania: [
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`
-      ],
-      other: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`
-      ]
-    },
-    o1: {
-      asia: [
-        'https://apiopenai.azure-api.net/v2/as2/call/o1',
-        'https://apiopenai.azure-api.net/v2/us1/call/o1'
-      ],
-      europe: [
-        'https://apiopenai.azure-api.net/v2/eu1/call/o1',
-        'https://apiopenai.azure-api.net/v2/us2/call/o1'
-      ],
-      northamerica: [
-        'https://apiopenai.azure-api.net/v2/us1/call/o1',
-        'https://apiopenai.azure-api.net/v2/us2/call/o1'
-      ],
-      southamerica: [
-        'https://apiopenai.azure-api.net/v2/us2/call/o1',
-        'https://apiopenai.azure-api.net/v2/us1/call/o1'
-      ],
-      africa: [
-        'https://apiopenai.azure-api.net/v2/us2/call/o1',
-        'https://apiopenai.azure-api.net/v2/as2/call/o1'
-      ],
-      oceania: [
-        'https://apiopenai.azure-api.net/v2/as2/call/o1',
-        'https://apiopenai.azure-api.net/v2/us1/call/o1'
-      ],
-      other: [
-        'https://apiopenai.azure-api.net/v2/us1/call/o1',
-        'https://apiopenai.azure-api.net/v2/as2/call/o1'
-      ]
-    }
-  };
-  return endpointsMap[model]?.[region] || endpointsMap[model].other;
-}
-
-async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
-  const RETRY_DELAY = 1000;
-
-  const endpoints = getEndpointsByTimezone(timezone, model, 'call');
   try {
     const response = await axios.post(endpoints[retryCount], requestBody, {
       headers: {
@@ -198,86 +134,16 @@ async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', re
     return response;
   } catch (error) {
     if (retryCount < endpoints.length - 1) {
-      console.warn(`❌ Error en ${endpoints[retryCount]} — Reintentando en ${RETRY_DELAY}ms...`);
+      console.log(`Failed to call ${endpoints[retryCount]}, retrying in ${RETRY_DELAY}ms...`);
       insights.error({
-        message: `Fallo OpenAI endpoint ${endpoints[retryCount]}`,
+        message: `Failed to call OpenAI endpoint ${endpoints[retryCount]}`,
         error: error.message,
         retryCount
       });
       await delay(RETRY_DELAY);
-      return callOpenAiWithFailover(requestBody, timezone, model, retryCount + 1);
+      return callOpenAiWithFailover(endpoint, requestBody, timezone, model, retryCount + 1);
     }
     throw error;
-  }
-}
-
-const translatorEndpoints = [
-  {
-    name: 'westeurope',
-    url: 'https://api.cognitive.microsofttranslator.com',
-    key: config.translationKey, // West Europe
-    region: 'westeurope'
-  },
-  {
-    name: 'global',
-    url: 'https://api.cognitive.microsofttranslator.com',
-    key: config.translationKeyGlobal, // global
-  }
-  // Agregá más si querés
-];
-
-async function detectLanguageWithRetry(text, lang, retries = 3, delay = 1000) {
-  for (let i = 0; i < translatorEndpoints.length; i++) {
-    const endpoint = translatorEndpoints[i];
-
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        return await translationCtrl.detectLanguage(text, lang, endpoint);
-      } catch (error) {
-        const isLastTry = attempt === retries - 1 && i === translatorEndpoints.length - 1;
-        if (isLastTry) throw error;
-
-        console.warn(`Error in ${endpoint.region}, retrying... (${attempt + 1}/${retries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-}
-
-async function translateTextWithRetry(text, fromLang, retries = 3, delay = 1000) {
-  for (let i = 0; i < translatorEndpoints.length; i++) {
-    const endpoint = translatorEndpoints[i];
-
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        return await translationCtrl.translateText(text, fromLang, endpoint);
-      } catch (error) {
-        const isLastTry = attempt === retries - 1 && i === translatorEndpoints.length - 1;
-        if (isLastTry) throw error;
-
-        console.warn(`Error in ${endpoint.name}, retrying... (${attempt + 1}/${retries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-}
-
-
-async function translateInvertWithRetry(text, toLang, retries = 3, delay = 1000) {
-  for (let i = 0; i < translatorEndpoints.length; i++) {
-    const endpoint = translatorEndpoints[i];
-
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        return await translationCtrl.translateInvert(text, toLang, endpoint);
-      } catch (error) {
-        const isLastTry = attempt === retries - 1 && i === translatorEndpoints.length - 1;
-        if (isLastTry) throw error;
-
-        console.warn(`Error in ${endpoint.name} (invert), retrying... (${attempt + 1}/${retries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
   }
 }
 
@@ -329,11 +195,11 @@ async function callOpenAi(req, res) {
     let detectedLanguage = lang;
     let englishDiseasesList = diseases_list;
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
         if (englishDiseasesList) {
-          englishDiseasesList = await translateTextWithRetry(diseases_list, detectedLanguage);
+          englishDiseasesList = await translationCtrl.translateText(diseases_list, detectedLanguage);
         }
       }
     } catch (translationError) {
@@ -407,7 +273,7 @@ async function callOpenAi(req, res) {
     'https://apiopenai.azure-api.net/dxgpt/deployments/gpt4o';*/
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, timezone, 'gpt4o');
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, timezone, 'gpt4o');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
@@ -419,13 +285,8 @@ async function callOpenAi(req, res) {
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
     //add translation anonimized
     if (detectedLanguage !== 'en') {
-      try {
-        anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
-        anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
-      } catch (translationError) {
-        console.error('Error en la traducción inversa:', translationError.message);
-        insights.error(translationError);
-      }
+      anonymizedDescription = await translationCtrl.translateInvert(anonymizedDescription, detectedLanguage);
+      anonymizedResult.htmlText = await translationCtrl.translateInvert(anonymizedResult.htmlText, detectedLanguage);
     }
 
     // 4. Procesar la respuesta
@@ -490,16 +351,16 @@ async function callOpenAi(req, res) {
       try {
         parsedResponse = await Promise.all(
           parsedResponse.map(async diagnosis => ({
-            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
+            diagnosis: await translationCtrl.translateInvert(diagnosis.diagnosis, detectedLanguage),
+            description: await translationCtrl.translateInvert(diagnosis.description, detectedLanguage),
             symptoms_in_common: await Promise.all(
               diagnosis.symptoms_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
+                translationCtrl.translateInvert(symptom, detectedLanguage)
               )
             ),
             symptoms_not_in_common: await Promise.all(
               diagnosis.symptoms_not_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
+                translationCtrl.translateInvert(symptom, detectedLanguage)
               )
             )
           }))
@@ -587,8 +448,18 @@ async function anonymizeText(text, timezone) {
   
   //    'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
   // Determinar el orden de los endpoints según el timezone
-
-  const endpoints = getEndpointsByTimezone(timezone, 'gpt4o', 'anonymized');
+  let endpoints = [];
+  if (timezone?.includes("America") || timezone?.includes("Asia")) {
+    endpoints = [
+      'https://apiopenai.azure-api.net/dxgptamerica/anonymized/gpt4o',
+      'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o'
+    ];
+  } else {
+    endpoints = [
+      'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
+      'https://apiopenai.azure-api.net/dxgptamerica/anonymized/gpt4o'
+    ];
+  }
 
   const anonymizationPrompt = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
   where N is the count of characters that have been anonymized. 
@@ -656,24 +527,37 @@ async function anonymizeText(text, timezone) {
     htmlText: ''
   };
 
-  const content = result?.data?.choices?.[0]?.message?.content;
   // Verificar si existe el contenido
-  if (content) {
-    const response = content.trim().replace(/^"""\s*|\s*"""$/g, '');
+  if (result.data.choices[0].message.content) {
+    const response = result.data.choices[0].message.content
+      .replace(/^\s*"""\s*/, '')
+      .replace(/\s*"""\s*$/, '');
+
     const parts = response.split(/(\[ANON-\d+\])/g);
     resultResponse.hasPersonalInfo = parts.length > 1;
 
-    resultResponse.anonymizedText = parts.map(part => {
+    // Preparar versiones del texto
+    const htmlParts = parts.map(part => {
       const match = part.match(/\[ANON-(\d+)\]/);
-      return match ? '*'.repeat(parseInt(match[1])) : part;
-    }).join('');
+      if (match) {
+        const length = parseInt(match[1]);
+        return `<span style="background-color: black; display: inline-block; width:${length}em;">&nbsp;</span>`;
+      }
+      return part;
+    });
 
-    resultResponse.htmlText = parts.map(part => {
+    const copyParts = parts.map(part => {
       const match = part.match(/\[ANON-(\d+)\]/);
-      return match
-        ? `<span style="background-color: black; display: inline-block; width:${parseInt(match[1])}em;">&nbsp;</span>`
-        : part;
-    }).join('').replace(/\n/g, '<br>');
+      if (match) {
+        const length = parseInt(match[1]);
+        return '*'.repeat(length);
+      }
+      return part;
+    });
+
+    // Asignar los valores procesados al objeto de retorno
+    resultResponse.anonymizedText = copyParts.join('');
+    resultResponse.htmlText = htmlParts.join('').replace(/\n/g, '<br>');
   }
 
   return resultResponse;
@@ -738,11 +622,11 @@ async function callOpenAiV2(req, res) {
     let detectedLanguage = lang;
     let englishDiseasesList = diseases_list;
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
         if (englishDiseasesList) {
-          englishDiseasesList = await translateTextWithRetry(diseases_list, detectedLanguage);
+          englishDiseasesList = await translationCtrl.translateText(diseases_list, detectedLanguage);
         }
       }
     } catch (translationError) {
@@ -813,7 +697,7 @@ async function callOpenAiV2(req, res) {
     'https://apiopenai.azure-api.net/dxgpt/deployments/o1';*/
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, timezone, 'o1');
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, timezone, 'o1');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
@@ -825,13 +709,8 @@ async function callOpenAiV2(req, res) {
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
     //add translation anonimized
     if (detectedLanguage !== 'en') {
-      try {
-        anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
-        anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
-      } catch (translationError) {
-        console.error('Error en la traducción inversa:', translationError.message);
-        insights.error(translationError);
-      }
+      anonymizedDescription = await translationCtrl.translateInvert(anonymizedDescription, detectedLanguage);
+      anonymizedResult.htmlText = await translationCtrl.translateInvert(anonymizedResult.htmlText, detectedLanguage);
     }
 
     // 4. Procesar la respuesta
@@ -896,16 +775,16 @@ async function callOpenAiV2(req, res) {
       try {
         parsedResponse = await Promise.all(
           parsedResponse.map(async diagnosis => ({
-            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
+            diagnosis: await translationCtrl.translateInvert(diagnosis.diagnosis, detectedLanguage),
+            description: await translationCtrl.translateInvert(diagnosis.description, detectedLanguage),
             symptoms_in_common: await Promise.all(
               diagnosis.symptoms_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
+                translationCtrl.translateInvert(symptom, detectedLanguage)
               )
             ),
             symptoms_not_in_common: await Promise.all(
               diagnosis.symptoms_not_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
+                translationCtrl.translateInvert(symptom, detectedLanguage)
               )
             )
           }))
@@ -1140,7 +1019,7 @@ async function callOpenAiQuestions(req, res) {
     }
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const result = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const result = await callOpenAiWithFailover(null, requestBody, sanitizedData.timezone, 'gpt4o');
     if (!result.data.choices[0].message.content) {
       try {
         await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, ip, requestInfo);
@@ -1193,7 +1072,7 @@ async function callOpenAiQuestions(req, res) {
       // Traducir si es necesario
       if (sanitizedData.detectedLang !== 'en') {
         try {
-          const translatedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
+          const translatedContent = await translationCtrl.translateInvert(processedContent, sanitizedData.detectedLang);
           processedContent = translatedContent;
         } catch (translationError) {
           console.error('Translation error:', translationError);
@@ -1229,7 +1108,7 @@ async function callOpenAiQuestions(req, res) {
       // Para otros tipos de preguntas
       if (sanitizedData.detectedLang !== 'en') {
         try {
-          processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
+          processedContent = await translationCtrl.translateInvert(processedContent, sanitizedData.detectedLang);
         } catch (translationError) {
           console.error('Translation error:', translationError);
           insights.error(translationError);
@@ -1880,12 +1759,10 @@ async function generateFollowUpQuestions(req, res) {
     let detectedLanguage = lang;
     let englishDiseases = diseases;
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        if (englishDiseases) {
-          englishDiseases = await translateTextWithRetry(diseases, detectedLanguage);
-        }
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
+        englishDiseases = await translationCtrl.translateText(diseases, detectedLanguage);
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
@@ -1969,7 +1846,7 @@ async function generateFollowUpQuestions(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
@@ -2012,7 +1889,7 @@ async function generateFollowUpQuestions(req, res) {
     if (detectedLanguage !== 'en') {
       try {
         questions = await Promise.all(
-          questions.map(question => translateInvertWithRetry(question, detectedLanguage))
+          questions.map(question => translationCtrl.translateInvert(question, detectedLanguage))
         );
       } catch (translationError) {
         console.error('Translation error:', translationError);
@@ -2206,15 +2083,15 @@ async function processFollowUpAnswers(req, res) {
     let englishAnswers = answers;
     
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      detectedLanguage = await translationCtrl.detectLanguage(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        englishDescription = await translationCtrl.translateText(description, detectedLanguage);
         
         // Traducir las preguntas y respuestas
         englishAnswers = await Promise.all(
           answers.map(async (item) => ({
-            question: await translateTextWithRetry(item.question, detectedLanguage),
-            answer: await translateTextWithRetry(item.answer, detectedLanguage)
+            question: await translationCtrl.translateText(item.question, detectedLanguage),
+            answer: await translationCtrl.translateText(item.answer, detectedLanguage)
           }))
         );
       }
@@ -2302,7 +2179,7 @@ async function processFollowUpAnswers(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const openAiResponse = await callOpenAiWithFailover(null, requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!openAiResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
@@ -2314,7 +2191,7 @@ async function processFollowUpAnswers(req, res) {
     // 4. Traducir la descripción actualizada al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
-        updatedDescription = await translateInvertWithRetry(updatedDescription, detectedLanguage);
+        updatedDescription = await translationCtrl.translateInvert(updatedDescription, detectedLanguage);
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
