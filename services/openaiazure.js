@@ -2374,6 +2374,240 @@ async function processFollowUpAnswers(req, res) {
   }
 }
 
+function isValidSummarizeRequest(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['description', 'myuuid', 'operation', 'lang', 'ip'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
+  if (typeof data.description !== 'string' ||
+    data.description.length < 10 ||
+    data.description.length > 400000) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'summarize text') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar ip
+  if (typeof data.ip !== 'string') return false;
+
+  // Validar timezone si existe
+  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
+    return false;
+  }
+
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+  ];
+
+  // Normalizar el texto para la validación
+  const normalizedDescription = data.description.replace(/\n/g, ' ');
+
+  return !suspiciousPatterns.some(pattern => {
+    const descriptionMatch = pattern.test(normalizedDescription);
+    
+    if (descriptionMatch) {
+      console.log('Pattern matched:', pattern);
+      insights.error({
+        message: "Pattern matched in summarize request",
+        pattern: pattern,
+        description: descriptionMatch
+      });
+    }
+    
+    return descriptionMatch;
+  });
+}
+
+async function summarize(req, res) {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body,
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
+
+  try {
+    // Validar y sanitizar el request
+    if (!isValidSummarizeRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content for summarization",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeOpenAiData(req.body);
+    const { description, lang, ip, timezone } = sanitizedData;
+
+    // Validar IP
+    if (!ip) {
+      try {
+        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
+      } catch (emailError) {
+        console.log('Fail sending email');
+      }
+      return res.status(200).send({ result: "blocked" });
+    }
+
+    // 1. Detectar idioma y traducir a inglés si es necesario
+    let englishDescription = description;
+    let detectedLanguage = lang;
+    try {
+      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      if (detectedLanguage && detectedLanguage !== 'en') {
+        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+      }
+    } catch (translationError) {
+      console.error('Translation error:', translationError.message);
+      let infoErrorlang = {
+        body: req.body,
+        error: translationError.message,
+        type: translationError.code || 'TRANSLATION_ERROR',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: 'summarize'
+      };
+      
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        return res.status(200).send({ 
+          result: "unsupported_language",
+          message: translationError.message
+        });
+      }
+
+      return res.status(500).send({ 
+        result: "error",
+        message: "An error occurred during translation"
+      });
+    }
+
+    // 2. Construir el prompt para el resumen
+    const prompt = `
+    Summarize the following patient's medical description, keeping only relevant clinical information such as symptoms, evolution time, important medical history, and physical signs. Do not include irrelevant details or repeat phrases. The result should be shorter, clearer, and maintain the medical essence:
+
+    "${englishDescription}"
+
+    Return ONLY the summarized description, with no additional commentary or explanation.`;
+
+    const messages = [{ role: "user", content: prompt }];
+    const requestBody = {
+      messages,
+      temperature: 0, // Cambiado a 0 para máxima precisión
+      max_tokens: 1000,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+    // 3. Llamar a OpenAI con failover
+
+    let endpoint= 'https://apiopenai.azure-api.net/v2/eu1/summarize/gpt-4o-mini';
+    const openAiResponse = await axios.post(endpoint, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': ApiManagementKey,
+      }
+    });
+
+    if (!openAiResponse.data.choices[0].message.content) {
+      throw new Error('Empty OpenAI response');
+    }
+
+    // 4. Obtener el resumen
+    let summary = openAiResponse.data.choices[0].message.content.trim();
+    let summaryEnglish = summary;
+
+    // 5. Traducir el resumen al idioma original si es necesario
+    if (detectedLanguage !== 'en') {
+      try {
+        summary = await translateInvertWithRetry(summary, detectedLanguage);
+      } catch (translationError) {
+        console.error('Translation error:', translationError);
+        throw translationError;
+      }
+    }
+
+    // 6. Guardar información para seguimiento
+    let infoTrack = {
+      originalText: description,
+      originalTextEnglish: englishDescription,
+      myuuid: sanitizedData.myuuid,
+      operation: sanitizedData.operation,
+      lang: sanitizedData.lang,
+      summary: summary,
+      summaryEnglish: summaryEnglish,
+      header_language: header_language,
+      timezone: timezone,
+      model: 'summarize'
+    };
+    
+    blobOpenDx29Ctrl.createBlobSummarize(infoTrack);
+
+    // 7. Preparar la respuesta final
+    return res.status(200).send({
+      result: 'success',
+      data: {
+        summary: summary
+      },
+      detectedLang: detectedLanguage
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    insights.error(error);
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      model: 'summarize'
+    };
+    
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    try {
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body.lang,
+        req.body.description,
+        error,
+        req.body.ip,
+        requestInfo
+      );
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
+    return res.status(500).send({ result: "error" });
+  }
+}
+
 module.exports = {
   callOpenAi,
   callOpenAiV2,
@@ -2383,5 +2617,6 @@ module.exports = {
   sendGeneralFeedback,
   getFeedBack,
   generateFollowUpQuestions,
-  processFollowUpAnswers
+  processFollowUpAnswers,
+  summarize
 }
