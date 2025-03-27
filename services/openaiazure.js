@@ -29,7 +29,7 @@ function isValidOpenAiRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos (timezone no incluido)
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang', 'ip'];
+  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -47,9 +47,6 @@ function isValidOpenAiRequest(data) {
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar ip
-  if (typeof data.ip !== 'string') return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -102,7 +99,6 @@ function sanitizeOpenAiData(data) {
     diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
     myuuid: data.myuuid.trim(),
     lang: data.lang.trim().toLowerCase(),
-    ip: data.ip.trim(),
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -312,17 +308,7 @@ async function callOpenAi(req, res) {
     }
 
     const sanitizedData = sanitizeOpenAiData(req.body);
-    const { description, diseases_list, lang, ip, timezone } = sanitizedData;
-
-    // Validar IP
-    if (!ip) {
-      try {
-        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      return res.status(200).send({ result: "blocked" });
-    }
+    const { description, diseases_list, lang, timezone } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -353,7 +339,6 @@ async function callOpenAi(req, res) {
           req.body.lang,
           req.body.description,
           translationError,
-          req.body.ip,
           requestInfo
         );
       } catch (emailError) {
@@ -556,7 +541,6 @@ async function callOpenAi(req, res) {
         req.body.lang,
         req.body.description,
         error,
-        req.body.ip,
         requestInfo
       );
     } catch (emailError) {
@@ -721,17 +705,7 @@ async function callOpenAiV2(req, res) {
     }
 
     const sanitizedData = sanitizeOpenAiData(req.body);
-    const { description, diseases_list, lang, ip, timezone } = sanitizedData;
-
-    // Validar IP
-    if (!ip) {
-      try {
-        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      return res.status(200).send({ result: "blocked" });
-    }
+    const { description, diseases_list, lang, timezone } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -763,7 +737,6 @@ async function callOpenAiV2(req, res) {
           req.body.lang,
           req.body.description,
           translationError,
-          req.body.ip,
           requestInfo
         );
       } catch (emailError) {
@@ -963,7 +936,6 @@ async function callOpenAiV2(req, res) {
         req.body.lang,
         req.body.description,
         error,
-        req.body.ip,
         requestInfo
       );
     } catch (emailError) {
@@ -979,7 +951,7 @@ function isValidQuestionRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['questionType', 'disease', 'myuuid', 'operation', 'lang', 'ip'];
+  const requiredFields = ['questionType', 'disease', 'myuuid', 'operation', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar questionType
@@ -1006,9 +978,6 @@ function isValidQuestionRequest(data) {
 
   // Validar detectedLang
   if (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2) return false;
-
-  // Validar ip
-  if (typeof data.ip !== 'string') return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -1047,7 +1016,6 @@ function sanitizeQuestionData(data) {
     medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
     myuuid: data.myuuid.trim(),
     lang: data.lang.trim().toLowerCase(),
-    ip: data.ip.trim(),
     timezone: data.timezone?.trim() || '',
     questionType: Number(data.questionType),
     detectedLang: data.detectedLang.trim().toLowerCase()
@@ -1079,15 +1047,6 @@ async function callOpenAiQuestions(req, res) {
         result: "error",
         message: "Invalid request format or content"
       });
-    }
-
-    if (req.body.ip === '' || req.body.ip === undefined) {
-      try {
-        await serviceEmail.sendMailErrorGPTIP(req.body.lang, req.body.value, "", req.body.ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      return res.status(200).send({ result: "blocked" });
     }
 
     // Sanitizar los datos
@@ -1143,7 +1102,7 @@ async function callOpenAiQuestions(req, res) {
     const result = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
     if (!result.data.choices[0].message.content) {
       try {
-        await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, ip, requestInfo);
+        await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
@@ -1282,7 +1241,6 @@ async function callOpenAiQuestions(req, res) {
             details: errorDetails
           }),
           e,
-          req.body?.ip,
           requestInfo
         );
       } catch (emailError) {
@@ -1311,7 +1269,6 @@ async function callOpenAiQuestions(req, res) {
         req.body?.lang || 'en',
         req.body,
         e,
-        req.body?.ip,
         requestInfo
       );
     } catch (emailError) {
@@ -1770,7 +1727,7 @@ function isValidFollowUpQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'diseases', 'myuuid', 'operation', 'lang', 'ip'];
+  const requiredFields = ['description', 'diseases', 'myuuid', 'operation', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1793,9 +1750,6 @@ function isValidFollowUpQuestionsRequest(data) {
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar ip
-  if (typeof data.ip !== 'string') return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -1826,7 +1780,6 @@ function sanitizeFollowUpQuestionsData(data) {
     diseases: sanitizeInput(data.diseases),
     myuuid: data.myuuid.trim(),
     lang: data.lang.trim().toLowerCase(),
-    ip: data.ip.trim(),
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -1863,17 +1816,7 @@ async function generateFollowUpQuestions(req, res) {
     }
 
     const sanitizedData = sanitizeFollowUpQuestionsData(req.body);
-    const { description, diseases, lang, ip, timezone } = sanitizedData;
-
-    // Validar IP
-    if (!ip) {
-      try {
-        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      return res.status(200).send({ result: "blocked" });
-    }
+    const { description, diseases, lang, timezone } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -1904,7 +1847,6 @@ async function generateFollowUpQuestions(req, res) {
           req.body.lang,
           req.body.description,
           translationError,
-          req.body.ip,
           requestInfo
         );
       } catch (emailError) {
@@ -2062,7 +2004,6 @@ async function generateFollowUpQuestions(req, res) {
         req.body.lang,
         req.body.description,
         error,
-        req.body.ip,
         requestInfo
       );
     } catch (emailError) {
@@ -2078,7 +2019,7 @@ function isValidProcessFollowUpRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'answers', 'myuuid', 'operation', 'lang', 'ip'];
+  const requiredFields = ['description', 'answers', 'myuuid', 'operation', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -2106,9 +2047,6 @@ function isValidProcessFollowUpRequest(data) {
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar ip
-  if (typeof data.ip !== 'string') return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -2151,7 +2089,6 @@ function sanitizeProcessFollowUpData(data) {
     })),
     myuuid: data.myuuid.trim(),
     lang: data.lang.trim().toLowerCase(),
-    ip: data.ip.trim(),
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -2188,17 +2125,7 @@ async function processFollowUpAnswers(req, res) {
     }
 
     const sanitizedData = sanitizeProcessFollowUpData(req.body);
-    const { description, answers, lang, ip, timezone } = sanitizedData;
-
-    // Validar IP
-    if (!ip) {
-      try {
-        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      return res.status(200).send({ result: "blocked" });
-    }
+    const { description, answers, lang, timezone } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -2235,7 +2162,6 @@ async function processFollowUpAnswers(req, res) {
           req.body.lang,
           req.body.description,
           translationError,
-          req.body.ip,
           requestInfo
         );
       } catch (emailError) {
@@ -2363,7 +2289,6 @@ async function processFollowUpAnswers(req, res) {
         req.body.lang,
         req.body.description,
         error,
-        req.body.ip,
         requestInfo
       );
     } catch (emailError) {
@@ -2379,7 +2304,7 @@ function isValidSummarizeRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang', 'ip'];
+  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
@@ -2397,9 +2322,6 @@ function isValidSummarizeRequest(data) {
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar ip
-  if (typeof data.ip !== 'string') return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -2465,17 +2387,7 @@ async function summarize(req, res) {
     }
 
     const sanitizedData = sanitizeOpenAiData(req.body);
-    const { description, lang, ip, timezone } = sanitizedData;
-
-    // Validar IP
-    if (!ip) {
-      try {
-        await serviceEmail.sendMailErrorGPTIP(lang, description, "", ip, requestInfo);
-      } catch (emailError) {
-        console.log('Fail sending email');
-      }
-      return res.status(200).send({ result: "blocked" });
-    }
+    const { description, lang, timezone } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -2597,7 +2509,6 @@ async function summarize(req, res) {
         req.body.lang,
         req.body.description,
         error,
-        req.body.ip,
         requestInfo
       );
     } catch (emailError) {
