@@ -90,7 +90,7 @@ function sendMailError (lang, req, response){
   return decoded
 }
 
-function sendMailErrorGPTIP (lang, req, response, ip, requestInfo){
+function sendMailErrorGPTIP (lang, req, response, requestInfo){
   
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
@@ -107,7 +107,6 @@ function sendMailErrorGPTIP (lang, req, response, ip, requestInfo){
         lang : lang,
         info: JSON.stringify(req), 
         response: JSON.stringify(response),
-        ip: ip,
         requestInfo: JSON.stringify(requestInfo),
       }
     };
