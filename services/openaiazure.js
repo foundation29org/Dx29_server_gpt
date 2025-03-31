@@ -338,7 +338,7 @@ async function callOpenAi(req, res) {
         await serviceEmail.sendMailErrorGPTIP(
           req.body.lang,
           req.body.description,
-          translationError,
+          infoErrorlang,
           requestInfo
         );
       } catch (emailError) {
@@ -467,6 +467,19 @@ async function callOpenAi(req, res) {
         model: 'gpt4o'
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          infoError,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+
       return res.status(200).send({ result: "error" });
     }
 
@@ -540,7 +553,7 @@ async function callOpenAi(req, res) {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
         req.body.description,
-        error,
+        infoError,
         requestInfo
       );
     } catch (emailError) {
@@ -736,7 +749,7 @@ async function callOpenAiV2(req, res) {
         await serviceEmail.sendMailErrorGPTIP(
           req.body.lang,
           req.body.description,
-          translationError,
+          infoErrorlang,
           requestInfo
         );
       } catch (emailError) {
@@ -861,6 +874,17 @@ async function callOpenAiV2(req, res) {
         model: 'o1'
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          infoError,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
       return res.status(200).send({ result: "error" });
     }
 
@@ -935,7 +959,7 @@ async function callOpenAiV2(req, res) {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
         req.body.description,
-        error,
+        infoError,
         requestInfo
       );
     } catch (emailError) {
@@ -1846,7 +1870,7 @@ async function generateFollowUpQuestions(req, res) {
         await serviceEmail.sendMailErrorGPTIP(
           req.body.lang,
           req.body.description,
-          translationError,
+          infoErrorlang,
           requestInfo
         );
       } catch (emailError) {
@@ -1945,6 +1969,17 @@ async function generateFollowUpQuestions(req, res) {
         rawResponse: openAiResponse.data.choices[0].message.content,
         model: 'follow-up'
       };
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          infoError,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
       
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
       return res.status(200).send({ result: "error" });
@@ -2003,7 +2038,7 @@ async function generateFollowUpQuestions(req, res) {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
         req.body.description,
-        error,
+        infoError,
         requestInfo
       );
     } catch (emailError) {
@@ -2161,7 +2196,7 @@ async function processFollowUpAnswers(req, res) {
         await serviceEmail.sendMailErrorGPTIP(
           req.body.lang,
           req.body.description,
-          translationError,
+          infoErrorlang,
           requestInfo
         );
       } catch (emailError) {
@@ -2288,7 +2323,7 @@ async function processFollowUpAnswers(req, res) {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
         req.body.description,
-        error,
+        infoError,
         requestInfo
       );
     } catch (emailError) {
@@ -2406,6 +2441,17 @@ async function summarize(req, res) {
         detectedLanguage: detectedLanguage || 'unknown',
         model: 'summarize'
       };
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          infoErrorlang,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
       
@@ -2508,7 +2554,7 @@ async function summarize(req, res) {
       await serviceEmail.sendMailErrorGPTIP(
         req.body.lang,
         req.body.description,
-        error,
+        infoError,
         requestInfo
       );
     } catch (emailError) {
