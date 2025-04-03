@@ -12,6 +12,7 @@
   "license": "MIT",
   "dependencies": {
     "@azure/openai": "^1.0.0-beta.4",
+    "@azure/service-bus": "^7.9.5",
     "@azure/storage-blob": "^12.16.0",
     "applicationinsights": "^2.7.3",
     "async": "^2.6.4",
