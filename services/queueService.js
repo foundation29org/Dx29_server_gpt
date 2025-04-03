@@ -17,10 +17,10 @@ const REGION_MAPPING = {
 };
 
 const REGION_CAPACITY = {
-  EastUS: 293,
-  India: 300,
-  Suiza: 300,
-  WestUS: 600
+  EastUS: 420,
+  India: 428,
+  Suiza: 428,
+  WestUS: 857
 };
 
 /*const REGION_CAPACITY = {
