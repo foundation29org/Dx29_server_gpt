@@ -118,38 +118,38 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
   const endpointsMap = {
     gpt4o: {
       asia: [
-        `https://apiopenai.azure-api.net/v2/as1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/as1/${suffix}/gpt4o`, // India: 428 calls/min
+        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`  // Japan: 300 calls/min
       ],
       europe: [
-        `https://apiopenai.azure-api.net/v2/eu1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/eu1/${suffix}/gpt4o`, // Suiza: 428 calls/min
+        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`  // WestUS: 857 calls/min como backup
       ],
       northamerica: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
+        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`  // EastUS2: 420 calls/min
       ],
       southamerica: [
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
+        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`  // EastUS2: 420 calls/min
       ],
       africa: [
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
+        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`  // Japan: 300 calls/min
       ],
       oceania: [
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`, // Japan: 300 calls/min
+        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`  // WestUS: 857 calls/min como backup
       ],
       other: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`,
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`
+        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
+        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`  // Japan: 300 calls/min
       ]
     },
     o1: {
       asia: [
-        'https://apiopenai.azure-api.net/v2/as2/call/o1',
-        'https://apiopenai.azure-api.net/v2/us1/call/o1'
+        'https://apiopenai.azure-api.net/v2/as1/call/o1',
+        'https://apiopenai.azure-api.net/v2/as2/call/o1'
       ],
       europe: [
         'https://apiopenai.azure-api.net/v2/eu1/call/o1',
