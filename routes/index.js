@@ -77,6 +77,7 @@ api.post('/generatefollowupquestions', corsWithOptions, checkApiKey, openAIservi
 api.post('/processfollowupanswers', corsWithOptions, checkApiKey, openAIserviceCtrl.processFollowUpAnswers)
 api.post('/summarize', corsWithOptions, checkApiKey, openAIserviceCtrl.summarize)
 api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, openAIserviceCtrl.getQueueStatus)
+api.get('/getSystemStatus', corsWithOptions, checkApiKey, openAIserviceCtrl.getSystemStatus)
 
 api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
 api.post('/feedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendFeedback)

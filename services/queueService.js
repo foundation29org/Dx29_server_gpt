@@ -453,6 +453,48 @@ class QueueService {
       }
     }
   }
+
+  async getAllRegionsStatus() {
+    try {
+      const regionsStatus = {};
+      
+      for (const [region, capacity] of Object.entries(REGION_CAPACITY)) {
+        const regionQueueName = `${queueName}-${region}`;
+        const runtimeProperties = await this.adminClient.getQueueRuntimeProperties(regionQueueName);
+        
+        regionsStatus[region] = {
+          capacity: capacity,
+          activeRequests: this.activeRequests[region] || 0,
+          queuedMessages: runtimeProperties.activeMessageCount,
+          scheduledMessages: runtimeProperties.scheduledMessageCount,
+          totalActiveMessages: (this.activeRequests[region] || 0) + 
+                             runtimeProperties.activeMessageCount + 
+                             runtimeProperties.scheduledMessageCount,
+          utilizationPercentage: (((this.activeRequests[region] || 0) + 
+                                runtimeProperties.activeMessageCount + 
+                                runtimeProperties.scheduledMessageCount) / capacity) * 100,
+          estimatedWaitTime: Math.ceil(((this.activeRequests[region] || 0) + 
+                                     runtimeProperties.activeMessageCount) * AVG_PROCESSING_TIME / 60) // en minutos
+        };
+      }
+
+      return {
+        timestamp: new Date().toISOString(),
+        regions: regionsStatus,
+        global: {
+          totalCapacity: Object.values(REGION_CAPACITY).reduce((a, b) => a + b, 0),
+          totalActiveRequests: Object.values(this.activeRequests).reduce((a, b) => a + b, 0),
+          totalQueuedMessages: Object.values(regionsStatus).reduce((a, b) => a + b.queuedMessages, 0),
+          globalUtilizationPercentage: Object.values(regionsStatus)
+            .reduce((acc, region) => acc + region.totalActiveMessages, 0) / 
+            Object.values(REGION_CAPACITY).reduce((a, b) => a + b, 0) * 100
+        }
+      };
+    } catch (error) {
+      console.error('Error getting regions status:', error);
+      throw error;
+    }
+  }
 }
 
 // Exportar una instancia de QueueService en lugar de la clase

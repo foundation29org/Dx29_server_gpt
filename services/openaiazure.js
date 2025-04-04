@@ -1,7 +1,5 @@
-const { OpenAIClient, AzureKeyCredential } = require("@azure/openai");
 const config = require('../config')
 const insights = require('../services/insights')
-const request = require('request')
 const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
 const Support = require('../models/support')
@@ -104,6 +102,71 @@ function sanitizeOpenAiData(data) {
   };
 }
 
+// Añadir esta constante al inicio del archivo, junto con las otras constantes
+const endpointsMap = {
+  gpt4o: {
+    asia: [
+      `https://apiopenai.azure-api.net/v2/as1/call/gpt4o`, // India: 428 calls/min
+      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+    ],
+    europe: [
+      `https://apiopenai.azure-api.net/v2/eu1/call/gpt4o`, // Suiza: 428 calls/min
+      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+    ],
+    northamerica: [
+      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `https://apiopenai.azure-api.net/v2/us2/call/gpt4o`  // EastUS2: 420 calls/min
+    ],
+    southamerica: [
+      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `https://apiopenai.azure-api.net/v2/us2/call/gpt4o`  // EastUS2: 420 calls/min
+    ],
+    africa: [
+      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+    ],
+    oceania: [
+      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`, // Japan: 300 calls/min
+      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+    ],
+    other: [
+      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+    ]
+  },
+  o1: {
+    asia: [
+      `https://apiopenai.azure-api.net/v2/as1/call/o1`, // India
+      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+    ],
+    europe: [
+      `https://apiopenai.azure-api.net/v2/eu1/call/o1`, // Suiza
+      `https://apiopenai.azure-api.net/v2/us1/call/o1`  // WestUS como backup
+    ],
+    northamerica: [
+      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
+      `https://apiopenai.azure-api.net/v2/us2/call/o1`  // EastUS2
+    ],
+    southamerica: [
+      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
+      `https://apiopenai.azure-api.net/v2/us2/call/o1`  // EastUS2
+    ],
+    africa: [
+      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
+      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+    ],
+    oceania: [
+      `https://apiopenai.azure-api.net/v2/as2/call/o1`, // Japan
+      `https://apiopenai.azure-api.net/v2/us1/call/o1`  // WestUS como backup
+    ],
+    other: [
+      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
+      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+    ]
+  }
+};
+
+// Modificar la función getEndpointsByTimezone para usar esta constante
 function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
   const tz = timezone?.split('/')[0]?.toLowerCase();
   const region = (() => {
@@ -116,70 +179,20 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
   })();
   const suffix = mode === 'anonymized' ? 'anonymized' : 'call';
 
-  const endpointsMap = {
-    gpt4o: {
-      asia: [
-        `https://apiopenai.azure-api.net/v2/as1/${suffix}/gpt4o`, // India: 428 calls/min
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`  // Japan: 300 calls/min
-      ],
-      europe: [
-        `https://apiopenai.azure-api.net/v2/eu1/${suffix}/gpt4o`, // Suiza: 428 calls/min
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`  // WestUS: 857 calls/min como backup
-      ],
-      northamerica: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`  // EastUS2: 420 calls/min
-      ],
-      southamerica: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
-        `https://apiopenai.azure-api.net/v2/us2/${suffix}/gpt4o`  // EastUS2: 420 calls/min
-      ],
-      africa: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`  // Japan: 300 calls/min
-      ],
-      oceania: [
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`, // Japan: 300 calls/min
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`  // WestUS: 857 calls/min como backup
-      ],
-      other: [
-        `https://apiopenai.azure-api.net/v2/us1/${suffix}/gpt4o`, // WestUS: 857 calls/min
-        `https://apiopenai.azure-api.net/v2/as2/${suffix}/gpt4o`  // Japan: 300 calls/min
-      ]
-    },
-    o1: {
-      asia: [
-        'https://apiopenai.azure-api.net/v2/as1/call/o1',
-        'https://apiopenai.azure-api.net/v2/as2/call/o1'
-      ],
-      europe: [
-        'https://apiopenai.azure-api.net/v2/eu1/call/o1',
-        'https://apiopenai.azure-api.net/v2/us2/call/o1'
-      ],
-      northamerica: [
-        'https://apiopenai.azure-api.net/v2/us1/call/o1',
-        'https://apiopenai.azure-api.net/v2/us2/call/o1'
-      ],
-      southamerica: [
-        'https://apiopenai.azure-api.net/v2/us2/call/o1',
-        'https://apiopenai.azure-api.net/v2/us1/call/o1'
-      ],
-      africa: [
-        'https://apiopenai.azure-api.net/v2/us2/call/o1',
-        'https://apiopenai.azure-api.net/v2/as2/call/o1'
-      ],
-      oceania: [
-        'https://apiopenai.azure-api.net/v2/as2/call/o1',
-        'https://apiopenai.azure-api.net/v2/us1/call/o1'
-      ],
-      other: [
-        'https://apiopenai.azure-api.net/v2/us1/call/o1',
-        'https://apiopenai.azure-api.net/v2/as2/call/o1'
-      ]
-    }
-  };
-  return endpointsMap[model]?.[region] || endpointsMap[model].other;
+  const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
+  return endpoints.map(endpoint => endpoint.replace('/call/', `/${suffix}/`));
 }
+
+// También necesitamos un mapeo de regiones para el status
+const REGION_MAPPING_STATUS = {
+  'asia': 'India',
+  'europe': 'Suiza',
+  'northamerica': 'WestUS',
+  'southamerica': 'WestUS',
+  'africa': 'WestUS',
+  'oceania': 'India',
+  'other': 'WestUS'
+};
 
 async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
   const RETRY_DELAY = 1000;
@@ -2538,6 +2551,48 @@ async function getQueueStatus(req, res) {
   }
 }
 
+// Modificar la función getSystemStatus
+async function getSystemStatus(req, res) {
+  try {
+    const status = await queueService.getAllRegionsStatus();
+    
+    // Añadir información de endpoints sin exponer las URLs
+    const endpointsStatus = {};
+    for (const [region] of Object.entries(endpointsMap.gpt4o)) {
+      const regionStatus = status.regions[REGION_MAPPING_STATUS[region]];
+      endpointsStatus[region] = {
+        capacity: regionStatus?.capacity || 'N/A',
+        utilizationPercentage: regionStatus?.utilizationPercentage || 0,
+        activeRequests: regionStatus?.activeRequests || 0,
+        queuedMessages: regionStatus?.queuedMessages || 0,
+        status: {
+          primary: regionStatus?.activeRequests > 0 ? 'active' : 'idle',
+          backup: 'standby'
+        }
+      };
+    }
+
+    return res.status(200).send({
+      result: 'success',
+      data: {
+        queues: {
+          timestamp: status.timestamp,
+          regions: status.regions,
+          global: status.global
+        },
+        endpoints: endpointsStatus,
+        lastUpdate: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error getting system status:', error);
+    return res.status(500).send({
+      result: 'error',
+      message: 'Error getting system status'
+    });
+  }
+}
+
 // Exportar la función processOpenAIRequest para que pueda ser usada por queueService
 module.exports = {
   callOpenAi,
@@ -2556,5 +2611,6 @@ module.exports = {
   processOpenAIRequest,  // Asegurarnos de que está exportada
   detectLanguageWithRetry,
   translateInvertWithRetry,
-  translateTextWithRetry
+  translateTextWithRetry,
+  getSystemStatus
 };
