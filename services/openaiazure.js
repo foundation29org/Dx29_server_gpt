@@ -190,7 +190,7 @@ const REGION_MAPPING_STATUS = {
   'northamerica': 'WestUS',
   'southamerica': 'WestUS',
   'africa': 'WestUS',
-  'oceania': 'India',
+  'oceania': 'Japan',
   'other': 'WestUS'
 };
 
@@ -292,7 +292,7 @@ async function translateInvertWithRetry(text, toLang, retries = 3, delay = 1000)
 }
 
 // Extraer la lógica principal a una función reutilizable
-async function processOpenAIRequest(data, requestInfo = null) {
+async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
   // 1. Detectar idioma y traducir a inglés si es necesario
   let englishDescription = data.description;
   let detectedLanguage = data.lang;
@@ -314,7 +314,7 @@ async function processOpenAIRequest(data, requestInfo = null) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'gpt4o'
+        model: model
       };
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
@@ -343,15 +343,22 @@ async function processOpenAIRequest(data, requestInfo = null) {
       .replace("{{description}}", englishDescription);
 
   const messages = [{ role: "user", content: prompt }];
-  const requestBody = {
-    messages,
-    temperature: 0,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0,
-  };
 
-  const openAiResponse = await callOpenAiWithFailover(requestBody, data.timezone, 'gpt4o');
+  const requestBody = {
+    messages
+  };
+  if(model == 'gpt4o'){
+    requestBody.temperature = 0;
+    requestBody.top_p = 1;
+    requestBody.frequency_penalty = 0;
+    requestBody.presence_penalty = 0;
+  }
+
+  const openAiResponse = await callOpenAiWithFailover(requestBody, data.timezone, model);
+
+  if (!openAiResponse.data.choices[0].message.content) {
+    throw new Error("No response from OpenAI");
+  }
 
   // 3. Anonimizar el texto
   let anonymizedResult = await anonymizeText(englishDescription, data.timezone);
@@ -359,8 +366,13 @@ async function processOpenAIRequest(data, requestInfo = null) {
   const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
 
   if (detectedLanguage !== 'en') {
-    anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
-    anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
+    try {
+      anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
+      anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
+    } catch (translationError) {
+      console.error('Error en la traducción inversa:', translationError.message);
+      insights.error(translationError);
+    }
   }
 
   // 4. Procesar la respuesta
@@ -371,12 +383,29 @@ async function processOpenAIRequest(data, requestInfo = null) {
       .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
 
     if (!match || !match[1]) {
-      throw new Error("Failed to match diagnosis output");
+      const error = new Error("Failed to match diagnosis output");
+      error.rawResponse = openAiResponse.data.choices[0].message.content;
+      throw error;
     }
 
-    parsedResponse = JSON.parse(match[1]);
-    parsedResponseEnglish = JSON.parse(match[1]);
+    try {
+      parsedResponse = JSON.parse(match[1]);
+      parsedResponseEnglish = JSON.parse(match[1]);
+    } catch (jsonError) {
+      const error = new Error("Failed to parse JSON");
+      error.matchedContent = match[1];
+      error.jsonError = jsonError.message;
+      throw error;
+    }
   } catch (parseError) {
+    insights.error({
+      message: "Failed to parse diagnosis output",
+      error: parseError.message,
+      rawResponse: parseError.rawResponse,
+      description: description,
+      matchedContent: parseError.matchedContent,
+      jsonError: parseError.jsonError
+    });
     if (requestInfo) {
       let infoError = {
         myuuid: data.myuuid,
@@ -384,19 +413,33 @@ async function processOpenAIRequest(data, requestInfo = null) {
         lang: data.lang,
         description: data.description,
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content,
-        model: 'gpt4o'
+        rawResponse: parseError.rawResponse,
+        matchedContent: parseError.matchedContent,
+        jsonError: parseError.jsonError,
+        model: model
       };
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          data.lang,
+          data.description,
+          infoError,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
     }
     throw parseError;
   }
 
   // 5. Traducir la respuesta si es necesario
   if (detectedLanguage !== 'en') {
-    parsedResponse = await Promise.all(
-      parsedResponse.map(async diagnosis => ({
-        diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
+    try {
+      parsedResponse = await Promise.all(
+        parsedResponse.map(async diagnosis => ({
+          diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
         description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
         symptoms_in_common: await Promise.all(
           diagnosis.symptoms_in_common.map(symptom =>
@@ -410,6 +453,11 @@ async function processOpenAIRequest(data, requestInfo = null) {
         )
       }))
     );
+    } catch (translationError) {
+      console.error('Error en la traducción inversa:', translationError.message);
+      insights.error(translationError);
+      throw translationError;
+    }
   }
 
   // 6. Guardar información de seguimiento si es una llamada directa
@@ -426,7 +474,7 @@ async function processOpenAIRequest(data, requestInfo = null) {
       topRelatedConditionsEnglish: englishDiseasesList,
       header_language: requestInfo.header_language,
       timezone: data.timezone,
-      model: 'gpt4o'
+      model: model
     };
     await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
   }
@@ -444,7 +492,6 @@ async function processOpenAIRequest(data, requestInfo = null) {
   };
 }
 
-// Modificar la función callOpenAi para usar processOpenAIRequest
 async function callOpenAi(req, res) {
   const requestInfo = {
     method: req.method,
@@ -461,6 +508,10 @@ async function callOpenAi(req, res) {
 
   try {
     if (!isValidOpenAiRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
       return res.status(400).send({
         result: "error",
         message: "Invalid request format or content"
@@ -475,7 +526,7 @@ async function callOpenAi(req, res) {
 
     if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
       // Si estamos por encima del umbral para esta región, usar su cola específica
-      const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo);
+      const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, 'gpt4o');
       return res.status(200).send({
         result: 'queued',
         queueInfo: {
@@ -492,7 +543,7 @@ async function callOpenAi(req, res) {
     const region = await queueService.registerActiveRequest(sanitizedData.timezone);
 
     try {
-      const result = await processOpenAIRequest(sanitizedData, requestInfo);
+      const result = await processOpenAIRequest(sanitizedData, requestInfo, 'gpt4o');
       await queueService.releaseActiveRequest(region);
       return res.status(200).send(result);
     } catch (error) {
@@ -652,22 +703,19 @@ function extractContent(tag, text) {
 
 async function callOpenAiV2(req, res) {
 
-  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-  const origin = req.get('origin');
-  const header_language = req.headers['accept-language'];
-
   const requestInfo = {
     method: req.method,
     url: req.url,
     headers: req.headers,
-    origin: origin,
-    body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-    ip: clientIp,
+    origin: req.get('origin'),
+    body: req.body,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
     params: req.params,
     query: req.query,
-    header_language: header_language,
+    header_language: req.headers['accept-language'],
     timezone: req.body.timezone
   };
+
   try {
     // Validar y sanitizar el request
     if (!isValidOpenAiRequest(req.body)) {
@@ -678,230 +726,13 @@ async function callOpenAiV2(req, res) {
     }
 
     const sanitizedData = sanitizeOpenAiData(req.body);
-    const { description, diseases_list, lang, timezone } = sanitizedData;
 
-    // 1. Detectar idioma y traducir a inglés si es necesario
-    let englishDescription = description;
-    let detectedLanguage = lang;
-    let englishDiseasesList = diseases_list;
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
-      if (detectedLanguage && detectedLanguage !== 'en') {
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        if (englishDiseasesList) {
-          englishDiseasesList = await translateTextWithRetry(diseases_list, detectedLanguage);
-        }
-      }
-    } catch (translationError) {
-      console.error('Translation error:', translationError.message);
-       // Registrar el error en el blob y enviar email
-      let infoErrorlang = {
-        body: req.body,
-        error: translationError.message,
-        type: translationError.code || 'TRANSLATION_ERROR',
-        detectedLanguage: detectedLanguage || 'unknown',
-        model: 'o1'
-      };
-      
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
-      
-      try {
-        await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
-          req.body.description,
-          infoErrorlang,
-          requestInfo
-        );
-      } catch (emailError) {
-        console.log('Fail sending email');
-        insights.error(emailError);
-      }
-
-      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
-        insights.error({
-          type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
-        });
-
-        return res.status(200).send({ 
-          result: "unsupported_language",
-          message: translationError.message
-        });
-      }
-
-      // Otros errores de traducción
-      insights.error({
-        type: 'TRANSLATION_ERROR',
-        message: translationError.message
-      });
-
-      return res.status(500).send({ 
-        result: "error",
-        message: "An error occurred during translation"
-      });
+      const result = await processOpenAIRequest(sanitizedData, requestInfo, 'o1');
+      return res.status(200).send(result);
+    } catch (error) {
+      throw error;
     }
-
-    // 2. Llamar a OpenAI con el texto en inglés
-    const prompt = englishDiseasesList ?
-      PROMPTS.diagnosis.withDiseases
-        .replace("{{description}}", englishDescription)
-        .replace("{{diseases_list}}", englishDiseasesList) :
-      PROMPTS.diagnosis.withoutDiseases
-        .replace("{{description}}", englishDescription);
-
-    const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
-      messages
-    };
-
-      /*const endpointUrl = timezone?.includes("America") || timezone?.includes("Asia") ?
-    'https://apiopenai.azure-api.net/dxgpt/deployments/o1-dxgptamerica' :
-    'https://apiopenai.azure-api.net/dxgpt/deployments/o1';*/
-
-    // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, timezone, 'o1');
-
-    if (!openAiResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
-    }
-
-    // 3. Anonimizar el texto en inglés
-    let anonymizedResult = await anonymizeText(englishDescription, timezone);
-    let anonymizedDescription = anonymizedResult.anonymizedText;
-    const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
-    //add translation anonimized
-    if (detectedLanguage !== 'en') {
-      try {
-        anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
-        anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
-      } catch (translationError) {
-        console.error('Error en la traducción inversa:', translationError.message);
-        insights.error(translationError);
-      }
-    }
-
-    // 4. Procesar la respuesta
-    let parsedResponse;
-    let parsedResponseEnglish;
-    try {
-      // Log the raw response for debugging
-      //console.log('Raw OpenAI response:', openAiResponse.data.choices[0].message.content);
-
-      const match = openAiResponse.data.choices[0].message.content
-        .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
-
-      if (!match || !match[1]) {
-        const error = new Error("Failed to match diagnosis output");
-        error.rawResponse = openAiResponse.data.choices[0].message.content;
-        throw error;
-      }
-
-      try {
-        parsedResponse = JSON.parse(match[1]);
-        parsedResponseEnglish = JSON.parse(match[1]);
-      } catch (jsonError) {
-        const error = new Error("Failed to parse JSON");
-        error.matchedContent = match[1];
-        error.jsonError = jsonError.message;
-        throw error;
-      }
-    } catch (parseError) {
-      console.error("Failed to parse diagnosis output:", {
-        error: parseError.message,
-        rawResponse: parseError.rawResponse,
-        description: description,
-        matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError
-      });
-      insights.error({
-        message: "Failed to parse diagnosis output",
-        error: parseError.message,
-        rawResponse: parseError.rawResponse,
-        description: description,
-        matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError
-      });
-      //save error in blob
-      let infoError = {
-        myuuid: sanitizedData.myuuid,
-        operation: sanitizedData.operation,
-        lang: sanitizedData.lang,
-        description: description,
-        error: parseError.message,
-        rawResponse: parseError.rawResponse,
-        matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError,
-        model: 'o1'
-      }
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-      try {
-        await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
-          req.body.description,
-          infoError,
-          requestInfo
-        );
-      } catch (emailError) {
-        console.log('Fail sending email');
-        insights.error(emailError);
-      }
-      return res.status(200).send({ result: "error" });
-    }
-
-    // 5. Traducir la respuesta al idioma original si es necesario
-    if (detectedLanguage !== 'en') {
-      try {
-        parsedResponse = await Promise.all(
-          parsedResponse.map(async diagnosis => ({
-            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
-            symptoms_in_common: await Promise.all(
-              diagnosis.symptoms_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
-              )
-            ),
-            symptoms_not_in_common: await Promise.all(
-              diagnosis.symptoms_not_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
-              )
-            )
-          }))
-        );
-      } catch (translationError) {
-        console.error('Translation error:', translationError);
-        throw translationError;
-        //return res.status(500).send({ result: "translation error" });
-      }
-    }
-
-    let infoTrack = {
-      value: anonymizedDescription,
-      valueEnglish: englishDescription,
-      myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
-      lang: sanitizedData.lang,
-      response: parsedResponse,
-      responseEnglish: parsedResponseEnglish,
-      topRelatedConditions: sanitizedData.diseases_list,
-      topRelatedConditionsEnglish: englishDiseasesList,
-      header_language: header_language,
-      timezone: timezone,
-      model: 'o1'
-      
-    }
-    blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
-
-    // 6. Preparar la respuesta final
-    return res.status(200).send({
-      result: 'success',
-      data: parsedResponse,
-      anonymization: {
-        hasPersonalInfo,
-        anonymizedText: anonymizedDescription,
-        anonymizedTextHtml: anonymizedResult.htmlText
-      },
-      detectedLang: detectedLanguage
-    });
 
   } catch (error) {
     console.error('Error:', error);
@@ -2593,7 +2424,6 @@ async function getSystemStatus(req, res) {
   }
 }
 
-// Exportar la función processOpenAIRequest para que pueda ser usada por queueService
 module.exports = {
   callOpenAi,
   callOpenAiV2,

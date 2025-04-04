@@ -156,7 +156,7 @@ class QueueService {
   }
 
   // Añadir a la cola de la región específica
-  async addToQueue(data, requestInfo) {
+  async addToQueue(data, requestInfo, model) {
     try {
       const region = this.getRegionFromTimezone(data.timezone);
       
@@ -176,6 +176,7 @@ class QueueService {
           region: region
         },
         requestInfo: requestInfo,
+        model: model,
         applicationProperties: {
           requestType: 'diagnosis',
           priority: 1,
@@ -415,7 +416,7 @@ class QueueService {
       this.activeRequests[region]++;
 
       try {
-        const result = await openaiazure.processOpenAIRequest(message.body, message.requestInfo);
+        const result = await openaiazure.processOpenAIRequest(message.body, message.requestInfo, message.model);
         
         // Guardar el resultado y marcar el mensaje como completado
         await this.updateTicketStatus(ticketId, {
