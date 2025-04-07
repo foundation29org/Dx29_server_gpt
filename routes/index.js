@@ -18,31 +18,37 @@ const whitelist = config.allowedOrigins;
   function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
-        if (whitelist.includes(origin)) {
+        // Si no hay origen, rechazar la petición
+        if (!origin) {
+          callback(new Error('Origin is required'));
+          return;
+        }
+
+        // Verificar si el origen está en la whitelist
+        if (whitelist.some(allowed => origin.startsWith(allowed))) {
           callback(null, true);
         } else {
-            // La IP del cliente
-            const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-            const requestInfo = {
-                method: req.method,
-                url: req.url,
-                headers: req.headers,
-                origin: origin,
-                body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-                ip: clientIp,
-                params: req.params,
-                query: req.query,
-              };
-              if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
-                try {
-                  serviceEmail.sendMailControlCall(requestInfo)
-                } catch (emailError) {
-                  console.log('Fail sending email');
-                }
-              }
-            callback(new Error('Not allowed by CORS'));
+          const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+          const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body,
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+          if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
+            try {
+              serviceEmail.sendMailControlCall(requestInfo)
+            } catch (emailError) {
+              console.log('Fail sending email');
+            }
+          }
+          callback(new Error('Not allowed by CORS'));
         }
-      },
+      }
     };
   
     cors(corsOptions)(req, res, next);
