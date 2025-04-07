@@ -18,7 +18,6 @@ const whitelist = config.allowedOrigins;
   function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
-        console.log(origin);
         if (whitelist.includes(origin)) {
           callback(null, true);
         } else {
@@ -78,6 +77,7 @@ api.post('/processfollowupanswers', corsWithOptions, checkApiKey, openAIserviceC
 api.post('/summarize', corsWithOptions, checkApiKey, openAIserviceCtrl.summarize)
 api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, openAIserviceCtrl.getQueueStatus)
 api.get('/getSystemStatus', corsWithOptions, checkApiKey, openAIserviceCtrl.getSystemStatus)
+api.get('/health', corsWithOptions, checkApiKey, openAIserviceCtrl.checkHealth)
 
 api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
 api.post('/feedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendFeedback)

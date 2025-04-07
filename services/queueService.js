@@ -1,6 +1,9 @@
 const { ServiceBusClient, ServiceBusAdministrationClient } = require("@azure/service-bus");
 const config = require('../config');
-const { v4: uuidv4 } = require('uuid');
+const Ticket = require('../models/ticket');
+const insights = require('../services/insights');
+const Metrics = require('../models/metrics');
+const metricsService = require('./metricsService');
 
 // Configuración de Service Bus
 const connectionString = config.serviceBusConnectionString;
@@ -9,45 +12,108 @@ const queueName = "diagnosis-queue";
 const REGION_MAPPING = {
   asia: 'India',
   europe: 'Suiza',
-  northamerica: 'EastUS',
-  southamerica: 'EastUS',
-  africa: 'Suiza',
-  oceania: 'India',
-  other: 'EastUS'
+  northamerica: 'WestUS',
+  southamerica: 'WestUS',
+  africa: 'WestUS',
+  oceania: 'Japan',
+  other: 'WestUS'
 };
 
-const REGION_CAPACITY = {
-  EastUS: 420,
-  India: 428,
-  Suiza: 428,
-  WestUS: 857
-};
-
-/*const REGION_CAPACITY = {
-  EastUS: 293,
-  India: 300,
-  Japan: 300,
-  Suiza: 300,
-  Swedencentral: 191,
-  WestUS: 600
-};*/
+const REGION_CAPACITY = config.REGION_CAPACITY;
 
 // Tiempo promedio de procesamiento por solicitud en segundos
 const AVG_PROCESSING_TIME = 10;
 
+// Función auxiliar para delay con backoff exponencial
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 class QueueService {
   constructor() {
-    this.sbClient = new ServiceBusClient(connectionString);
-    this.adminClient = new ServiceBusAdministrationClient(connectionString);
-    this.ticketStatus = new Map();
+    if (!connectionString) {
+      throw new Error('Service Bus connection string is required');
+    }
+
+    // 1. Inicializar estructuras de datos
+    this.receivers = new Map();
     this.regionQueues = new Map();
     this.activeRequests = {};
+    this.ticketStatus = new Map();
+
+    // 2. Inicializar las colas por región
     Object.keys(REGION_CAPACITY).forEach(region => {
       this.regionQueues.set(region, { activeRequests: 0, queueLength: 0 });
       this.activeRequests[region] = 0;
     });
-    this.initialize();
-    this.startMessageProcessing();
+
+    // 3. Inicializar Service Bus
+    this.sbClient = new ServiceBusClient(connectionString);
+    this.adminClient = new ServiceBusAdministrationClient(connectionString);
+
+    // 4. Iniciar el procesamiento de mensajes
+    this.startMessageProcessing().catch(error => {
+      console.error('Error starting message processing:', error);
+    });
+
+    // 5. Manejar el cierre graceful
+    process.on('SIGTERM', () => this.handleShutdown());
+    process.on('SIGINT', () => this.handleShutdown());
+
+    // Inicializar con manejo de errores
+    this.initialize().catch(error => {
+      console.error('Error initializing QueueService:', error);
+      insights.error({
+        message: 'Error initializing QueueService',
+        error: error.message
+      });
+      throw error;
+    });
+
+    // Iniciar tareas periódicas
+    this.startPeriodicTasks();
+  }
+
+  validateConfiguration() {
+    if (!REGION_CAPACITY || Object.keys(REGION_CAPACITY).length === 0) {
+      throw new Error('REGION_CAPACITY configuration is required');
+    }
+    if (!REGION_MAPPING || Object.keys(REGION_MAPPING).length === 0) {
+      throw new Error('REGION_MAPPING configuration is required');
+    }
+  }
+
+  startPeriodicTasks() {
+    // Limpieza de tickets antiguos
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOldTickets().catch(error => {
+        console.error('Error in cleanup task:', error);
+        insights.error({
+          message: 'Error in cleanup task',
+          error: error.message
+        });
+      });
+    }, 6 * 60 * 60 * 1000); // Cada 6 horas
+
+    // Health check periódico
+    setInterval(() => {
+      this.checkHealth().catch(async (error) => {
+        console.error('Error in health check:', error);
+        insights.error({
+          message: 'Error in health check',
+          error: error.message
+        });
+        try {
+          await serviceEmail.sendMailErrorGPTIP(
+            'es',
+            'Error in health check',
+            error.message,
+            null
+          );
+        } catch (emailError) {
+          console.log('Fail sending email');
+          insights.error(emailError);
+        }
+      });
+    }, 5 * 60 * 1000); // Cada 5 minutos
   }
 
   async initialize() {
@@ -157,13 +223,15 @@ class QueueService {
 
   // Añadir a la cola de la región específica
   async addToQueue(data, requestInfo, model) {
+    let sender;
     try {
       const region = this.getRegionFromTimezone(data.timezone);
+      console.log('Adding to queue for region:', data.timezone);
       
-      // Generamos un nuevo ticketId
-      const ticketId = data.myuuid; // Usamos el myuuid como ticketId para mantener consistencia
-      
-      // Crear el mensaje con la estructura necesaria
+      const ticketId = data.myuuid;
+      console.log('Processing ticket:', ticketId);
+
+      // Crear el mensaje
       const message = {
         body: {
           description: data.description,
@@ -185,32 +253,66 @@ class QueueService {
         }
       };
 
-      // Crear un sender específico para la región
-      const sender = this.sbClient.createSender(`${queueName}-${region}`);
+      // Crear sender y enviar mensaje
+      sender = this.sbClient.createSender(`${queueName}-${region}`);
+      console.log('Sending message to queue...');
       await sender.sendMessages(message);
-      await sender.close();
+      console.log('Message sent successfully');
 
-      // Obtener el estado actual de la cola para esta región
+      // Obtener estado de la cola
       const queueStatus = await this.getRegionQueueStatus(region);
+      console.log('Queue status:', queueStatus);
 
-      // Guardar el estado inicial del ticket
-      await this.updateTicketStatus(ticketId, {
+      // Crear el ticket en la base de datos
+      const ticket = await this.updateTicketStatus(ticketId, {
         status: 'queued',
         region: region,
         position: queueStatus.queueLength,
         timestamp: Date.now()
       });
-      
-      return {
+      console.log('Ticket created in database:', ticket);
+
+      // Preparar la respuesta
+      const response = {
         ticketId,
         region,
         queuePosition: queueStatus.queueLength,
         estimatedWaitTime: queueStatus.queueLength * AVG_PROCESSING_TIME
       };
 
+      console.log('Preparing queue response:', response);
+      
+      // Cerrar el sender antes de retornar
+      if (sender) {
+        await sender.close();
+        console.log('Sender closed successfully');
+      }
+
+      return response;
+
     } catch (error) {
       console.error('Error adding to queue:', error);
+      // Si hay un error, intentar actualizar el estado del ticket a error
+      try {
+        await this.updateTicketStatus(data.myuuid, {
+          status: 'error',
+          error: error.message,
+          timestamp: Date.now()
+        });
+      } catch (updateError) {
+        console.error('Error updating ticket status:', updateError);
+      }
       throw error;
+    } finally {
+      // Asegurarse de que el sender se cierre incluso si hay un error
+      if (sender) {
+        try {
+          await sender.close();
+          console.log('Sender closed in finally block');
+        } catch (closeError) {
+          console.error('Error closing sender:', closeError);
+        }
+      }
     }
   }
 
@@ -268,190 +370,389 @@ class QueueService {
 
   async startMessageProcessing() {
     try {
-      // Cada instancia crea receivers para cada región
+      console.log('Starting message processing...');
       for (const region of Object.keys(REGION_CAPACITY)) {
         const receiver = this.sbClient.createReceiver(`${queueName}-${region}`);
+        this.receivers.set(region, receiver);
         
         receiver.subscribe({
           processMessage: async (message) => {
-            // Usar bind para mantener el contexto correcto de 'this'
-            await this.processMessage.bind(this)(message, receiver);
+            await this.processMessage(message, receiver);
           },
           processError: async (args) => {
             console.error(`Error en el procesamiento de la cola ${region}:`, args.error);
           }
         });
+
+        console.log(`Message processing started for region ${region}`);
       }
+      console.log('Message processing started for all regions');
     } catch (error) {
-      console.error('Error iniciando el procesamiento de mensajes:', error);
-    }
-  }
-
-  async saveResult(ticketId, result) {
-    try {
-      // Validar que tenemos un resultado válido
-      if (!result || !result.data) {
-        console.error('Invalid result data for ticket:', ticketId);
-        return;
-      }
-
-      // Guardar el resultado completo en el estado del ticket
-      await this.updateTicketStatus(ticketId, {
-        status: 'completed',
-        data: result  // Guardar el resultado completo
-      });
-
-    } catch (error) {
-      console.error('Error guardando resultado:', error);
+      console.error('Error starting message processing:', error);
       throw error;
     }
   }
 
   async updateTicketStatus(ticketId, status) {
+    console.log('Attempting to update ticket status:', { ticketId, status });
+
     try {
-      // Aquí implementar la lógica para actualizar el estado
-      // Puede ser en una tabla de Azure Storage, Redis, etc.
-      // Por ahora usaremos un Map en memoria (solo para desarrollo)
+      const updateData = {
+        ticketId,
+        ...status,
+        timestamp: new Date()
+      };
+
+      console.log('Update data prepared:', updateData.ticketId);
+
+      // Usar findOneAndUpdate para actualizar o crear si no existe
+      const ticket = await Ticket.findOneAndUpdate(
+        { ticketId },
+        { $set: updateData },
+        { 
+          new: true,          // Retorna el documento actualizado
+          upsert: true,       // Crea si no existe
+          runValidators: true // Ejecuta validadores del esquema
+        }
+      );
+
+      console.log('Database operation completed. Ticket:', ticket.ticketId);
+
+      // También mantener en memoria para acceso rápido
       if (!this.ticketStatus) {
         this.ticketStatus = new Map();
       }
       this.ticketStatus.set(ticketId, status);
+
+      if (!ticket) {
+        throw new Error('Failed to create/update ticket in database');
+      }
+
+      console.log('Ticket successfully updated in database:', ticket.ticketId);
+      return ticket;
+
     } catch (error) {
-      console.error('Error actualizando estado del ticket:', error);
+      console.error('Error updating ticket status:', {
+        ticketId,
+        status,
+        error: error.message,
+        stack: error.stack
+      });
+      insights.error({
+        message: 'Error updating ticket status',
+        ticketId,
+        error: error.message
+      });
       throw error;
     }
   }
 
-  async getTicketStatus(ticketId, timezone) {
+  async getTicketStatus(ticketId) {
     try {
-      // Si tenemos el estado del ticket en memoria
-      if (this.ticketStatus && this.ticketStatus.has(ticketId)) {
-        const status = this.ticketStatus.get(ticketId);
-        
-        if (status.status === 'completed' && status.data) {
-          return {
-            result: 'success',
-            status: 'completed',
-            data: status.data
-          };
-        }
+      const ticket = await Ticket.findOne({ ticketId });
+      
+      if (!ticket) {
+        return {
+          result: 'error',
+          message: 'Ticket not found'
+        };
       }
 
-      // Si no tenemos el estado en memoria o no está completado,
-      // buscamos en la región correspondiente
-      const region = timezone ? this.getRegionFromTimezone(timezone) : null;
-      let queueStatus;
-
-      if (region) {
-        // Si tenemos timezone, buscamos solo en esa región
-        queueStatus = await this.getRegionQueueStatus(region);
-        if (queueStatus.queueLength > 0) {
-          return {
-            result: 'success',
-            status: 'queued',
-            position: queueStatus.queueLength,
-            estimatedWaitTime: Math.ceil(queueStatus.queueLength * AVG_PROCESSING_TIME / 60), // en minutos
-            region: region,
-            utilizationPercentage: (queueStatus.queueLength / REGION_CAPACITY[region]) * 100
-          };
-        }
+      if (ticket.status === 'completed') {
+        return {
+          result: 'success',
+          status: 'completed',
+          data: ticket.result || ticket.data
+        };
+      } else if (ticket.status === 'error') {
+        return {
+          result: 'error',
+          status: 'error',
+          message: ticket.error || 'An error occurred processing your request'
+        };
       } else {
-        // Si no tenemos timezone, buscamos en todas las regiones
-        for (const [currentRegion, capacity] of Object.entries(REGION_CAPACITY)) {
-          queueStatus = await this.getRegionQueueStatus(currentRegion);
-          if (queueStatus.queueLength > 0) {
-            return {
-              result: 'success',
-              status: 'queued',
-              position: queueStatus.queueLength,
-              estimatedWaitTime: Math.ceil(queueStatus.queueLength * AVG_PROCESSING_TIME / 60), // en minutos
-              region: currentRegion,
-              utilizationPercentage: (queueStatus.queueLength / capacity) * 100
-            };
-          }
-        }
+        // Obtener la posición actualizada
+        const currentPosition = await this.getCurrentPosition(ticket.region, ticketId);
+        return {
+          result: 'queued',
+          status: 'processing',
+          position: currentPosition,
+          estimatedWaitTime: Math.ceil(currentPosition * AVG_PROCESSING_TIME / 60)
+        };
       }
-
-      // Si no encontramos el ticket en ninguna cola, asumimos que está en procesamiento
-      return {
-        result: 'success',
-        status: 'processing',
-        message: 'Request is being processed'
-      };
     } catch (error) {
       console.error('Error getting ticket status:', error);
-      throw error;
+      return {
+        result: 'error',
+        message: 'Error retrieving ticket status'
+      };
     }
   }
 
   async close() {
+    console.log('Iniciando cierre de recursos...');
+    
     try {
-      await this.sender?.close();
-      await this.receiver?.close();
-      await this.sbClient?.close();
+      // Detener procesamiento de mensajes
+      if (this.cleanupInterval) {
+        clearInterval(this.cleanupInterval);
+        console.log('Cleanup interval detenido');
+      }
+
+      // Cerrar receivers
+      const receiverClosePromises = [];
+      for (const [region, receiver] of this.receivers.entries()) {
+        receiverClosePromises.push(
+          receiver.close()
+            .then(() => console.log(`Receiver cerrado para región ${region}`))
+            .catch(error => {
+              console.error(`Error cerrando receiver para región ${region}:`, error);
+              insights.error({
+                message: `Error cerrando receiver`,
+                region,
+                error: error.message
+              });
+            })
+        );
+      }
+
+      // Esperar a que todos los receivers se cierren
+      await Promise.allSettled(receiverClosePromises);
+
+      // Cerrar cliente de Service Bus
+      if (this.sbClient) {
+        await this.sbClient.close();
+        console.log('Service Bus client cerrado');
+      }
+
+      // Limpiar estructuras de datos
+      this.ticketStatus?.clear();
+      this.regionQueues?.clear();
+      this.receivers?.clear();
+      this.activeRequests = {};
+
+      console.log('Todos los recursos liberados correctamente');
     } catch (error) {
-      console.error('Error closing Service Bus client:', error);
+      console.error('Error durante el cierre de recursos:', error);
+      insights.error({
+        message: 'Error durante el cierre de recursos',
+        error: error.message
+      });
+      
+      // Intentar limpieza forzada
+      this.forceCleanup();
     }
   }
 
-  async processMessage(message, receiver) {
-    const region = message.applicationProperties.region;
-    const ticketId = message.body.myuuid; // Usar myuuid como ticketId
-    
+  forceCleanup() {
+    console.log('Iniciando limpieza forzada...');
     try {
-      console.log(`Procesando mensaje: ${ticketId}`);
-      
-      // Importar openaiazure dinámicamente dentro de la función
-      const openaiazure = require('./openaiazure');
-      
-      // Actualizar el estado del ticket a 'processing'
-      await this.updateTicketStatus(ticketId, {
-        status: 'processing',
-        message: 'Request is being processed',
-        region: region,
-        timestamp: Date.now()
+      this.ticketStatus?.clear();
+      this.regionQueues?.clear();
+      this.receivers?.clear();
+      this.activeRequests = {};
+      this.sbClient = null;
+      console.log('Limpieza forzada completada');
+    } catch (error) {
+      console.error('Error en limpieza forzada:', error);
+      insights.error({
+        message: 'Error en limpieza forzada',
+        error: error.message
       });
+    }
+  }
 
-      // Incrementar el contador de peticiones activas
-      this.activeRequests[region]++;
+  async processMessageWithRetry(message, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const openaiazure = require('./openaiazure');
+        const result = await openaiazure.processOpenAIRequest(message.body, message.requestInfo, message.model);
+        return result;
+      } catch (error) {
+        if (!this.isRecoverableError(error) || attempt === maxRetries) {
+          throw error;
+        }
+        const backoffTime = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+        console.log(`Reintentando en ${backoffTime}ms...`);
+        await delay(backoffTime);
+      }
+    }
+  }
+
+  isRecoverableError(error) {
+    // Lista de códigos de error recuperables
+    const recoverableErrors = [
+      'ETIMEDOUT',
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'EAGAIN',
+      'EBUSY',
+      'NETWORK_ERROR',
+      'RATE_LIMIT_EXCEEDED',
+      '429', // Too Many Requests
+      '503', // Service Unavailable
+      '504'  // Gateway Timeout
+    ];
+
+    // Verificar el código de error
+    if (error.code && recoverableErrors.includes(error.code)) {
+      return true;
+    }
+
+    // Verificar el status code si es un error de HTTP
+    if (error.response && error.response.status) {
+      return recoverableErrors.includes(error.response.status.toString());
+    }
+
+    // Verificar mensajes específicos de error
+    const recoverableMessages = [
+      'timeout',
+      'rate limit',
+      'too many requests',
+      'service unavailable',
+      'gateway timeout',
+      'network error',
+      'connection reset',
+      'connection refused'
+    ];
+
+    return recoverableMessages.some(msg => 
+      error.message.toLowerCase().includes(msg)
+    );
+  }
+
+  // Modificar processMessage para reflejar el cambio
+  async processMessage(message, receiver) {
+    try {
+      this.validateMessage(message);
+      
+      const region = message.applicationProperties.region;
+      const ticketId = message.body.myuuid;
+      const startTime = Date.now();
 
       try {
-        const result = await openaiazure.processOpenAIRequest(message.body, message.requestInfo, message.model);
+        const result = await this.processMessageWithRetry(message);
         
-        // Guardar el resultado y marcar el mensaje como completado
+        // Completar el mensaje
+        await receiver.completeMessage(message);
+
+        const processingTime = Date.now() - startTime;
+        const queueStatus = await this.getRegionQueueStatus(region);
+
+        // Registrar métricas detalladas
+        await metricsService.recordMetric(region, {
+          period: 'minute',
+          messagesProcessed: 1,
+          messagesFailed: 0,
+          averageProcessingTime: processingTime,
+          queueLength: queueStatus.queueLength,
+          utilizationPercentage: (queueStatus.queueLength / REGION_CAPACITY[region]) * 100
+        });
+
+        // Actualizar el ticket
         await this.updateTicketStatus(ticketId, {
           status: 'completed',
-          data: result,
-          region: region,
-          timestamp: Date.now()
-        });
-
-        await receiver.completeMessage(message);
-      } finally {
-        // Asegurarnos de decrementar el contador incluso si hay error
-        this.activeRequests[region]--;
-      }
-
-    } catch (error) {
-      console.error('Error processing message:', error);
-      
-      try {
-        // Actualizar el estado del ticket a 'error'
-        await this.updateTicketStatus(ticketId, {
-          status: 'error',
-          message: 'An error occurred while processing the request',
+          result: result,
           region: region,
           timestamp: Date.now(),
-          error: error.message
+          processingTime
         });
 
-        // Solo intentar abandonar el mensaje si el receiver está disponible
-        if (receiver && message.lockToken) {
+        console.log('Message processed successfully:', {
+          region,
+          status: 'success',
+          processingTime,
+          queueLength: queueStatus.queueLength
+        });
+
+      } catch (error) {
+        console.error('Error processing message:', error);
+        
+        const queueStatus = await this.getRegionQueueStatus(region);
+        
+        // Registrar métricas de error
+        await metricsService.recordMetric(region, {
+          period: 'minute',
+          messagesProcessed: 0,
+          messagesFailed: 1,
+          queueLength: queueStatus.queueLength,
+          utilizationPercentage: (queueStatus.queueLength / REGION_CAPACITY[region]) * 100
+        });
+
+        await this.updateTicketStatus(ticketId, {
+          status: 'error',
+          error: error.message,
+          region: region,
+          timestamp: Date.now(),
+          processingTime: Date.now() - startTime
+        });
+        
+        if (!error.message.includes('already settled')) {
           await receiver.abandonMessage(message);
         }
-      } catch (abandonError) {
-        console.error('Error abandoning message:', abandonError);
       }
+    } catch (error) {
+      console.error('Fatal error in processMessage:', error);
+    }
+  }
+
+  // Añadir nuevo método para actualizar posiciones
+  async updateQueuePositions(region) {
+    try {
+      // Obtener tickets sin ordenar
+      const queuedTickets = await Ticket.find({
+        region: region,
+        status: { $in: ['queued', 'processing'] }
+      });
+
+      // Ordenar en memoria
+      const sortedTickets = queuedTickets.sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // Actualizar posiciones
+      for (let i = 0; i < sortedTickets.length; i++) {
+        const ticket = sortedTickets[i];
+        if (ticket.position !== i + 1) {
+          await Ticket.updateOne(
+            { ticketId: ticket.ticketId },
+            { 
+              $set: { 
+                position: i + 1,
+                estimatedWaitTime: (i + 1) * AVG_PROCESSING_TIME
+              }
+            }
+          );
+          console.log(`Updated position for ticket ${ticket.ticketId} to ${i + 1}`);
+        }
+      }
+
+      return sortedTickets.length;
+    } catch (error) {
+      console.error('Error updating queue positions:', error);
+      return 0;
+    }
+  }
+
+  // Método auxiliar para obtener la posición actual
+  async getCurrentPosition(region, ticketId) {
+    try {
+      // Obtener todos los tickets en cola sin ordenar
+      const queuedTickets = await Ticket.find({
+        region: region,
+        status: { $in: ['queued', 'processing'] }
+      });
+
+      // Ordenar en memoria por timestamp
+      const sortedTickets = queuedTickets.sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      const position = sortedTickets.findIndex(t => t.ticketId === ticketId) + 1;
+      return position > 0 ? position : 1;
+    } catch (error) {
+      console.error('Error getting current position:', error);
+      return 1;
     }
   }
 
@@ -494,6 +795,216 @@ class QueueService {
     } catch (error) {
       console.error('Error getting regions status:', error);
       throw error;
+    }
+  }
+
+  async cleanupOldTickets() {
+    try {
+      // Eliminar tickets completados o con error más antiguos de 24 horas
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      await Ticket.deleteMany({
+        status: { $in: ['completed', 'error'] },
+        timestamp: { $lt: oneDayAgo }
+      });
+
+      // Limpiar también la memoria caché
+      if (this.ticketStatus) {
+        for (const [ticketId, status] of this.ticketStatus.entries()) {
+          if (['completed', 'error'].includes(status.status) && 
+              status.timestamp < oneDayAgo) {
+            this.ticketStatus.delete(ticketId);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error cleaning up old tickets:', error);
+      insights.error({
+        message: 'Error cleaning up old tickets',
+        error: error.message
+      });
+    }
+  }
+
+  // Modificar getSystemStatus para quitar la referencia al circuit breaker
+  async getSystemStatus(req, res) {
+    try {
+      const status = await this.getAllRegionsStatus();
+
+      return res.status(200).send({
+        result: 'success',
+        data: {
+          currentStatus: {
+            timestamp: status.timestamp,
+            regions: status.regions,
+            global: status.global
+          },
+          lastUpdate: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      console.error('Error getting system status:', error);
+      return res.status(500).send({
+        result: 'error',
+        message: 'Error getting system status'
+      });
+    }
+  }
+
+  validateMessage(message) {
+    if (!message) {
+      throw new Error('Message is required');
+    }
+    if (!message.body) {
+      throw new Error('Message body is required');
+    }
+    if (!message.body.myuuid) {
+      throw new Error('Message myuuid is required');
+    }
+    if (!message.applicationProperties?.region) {
+      throw new Error('Message region is required');
+    }
+    if (!REGION_CAPACITY[message.applicationProperties.region]) {
+      throw new Error(`Invalid region: ${message.applicationProperties.region}`);
+    }
+    return true;
+  }
+
+  async checkHealth() {
+    const health = {
+        status: 'checking',
+        checks: {},
+        timestamp: new Date().toISOString()
+    };
+
+    try {
+        // Verificar conexión Service Bus
+        health.checks.servicebus = await this.checkServiceBusConnection();
+        
+        // Verificar estado de colas
+        health.checks.queues = await this.checkQueuesHealth();
+
+        // Verificar estado de métricas
+        health.checks.metrics = await this.checkMetricsHealth();
+
+        // Determinar estado general
+        const allChecksHealthy = 
+            health.checks.servicebus.status === 'healthy' &&
+            Object.values(health.checks.queues)
+                .every(queue => queue.status === 'healthy') &&
+            health.checks.metrics.status === 'healthy';
+
+        health.status = allChecksHealthy ? 'healthy' : 'unhealthy';
+
+        // Añadir información adicional
+        health.summary = {
+            servicebus: health.checks.servicebus.status,
+            metrics: health.checks.metrics.status,
+            queues: Object.entries(health.checks.queues).reduce((acc, [region, status]) => {
+                acc[region] = status.status;
+                return acc;
+            }, {})
+        };
+
+        // Añadir información específica de métricas para el cliente
+        if (health.checks.metrics.count !== undefined) {
+            health.checks.metrics.metricsLastHour = health.checks.metrics.count;
+        }
+
+    } catch (error) {
+        health.status = 'error';
+        health.error = error.message;
+        console.error('Error checking health:', error);
+    }
+
+    return health;
+  }
+
+  async checkServiceBusConnection() {
+    try {
+      // Intentar una operación simple
+      await this.adminClient.getQueueRuntimeProperties(`${queueName}-${Object.keys(REGION_CAPACITY)[0]}`);
+      return { status: 'healthy' };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        error: error.message
+      };
+    }
+  }
+
+  async checkQueuesHealth() {
+    const queuesHealth = {};
+    
+    for (const region of Object.keys(REGION_CAPACITY)) {
+      try {
+        const status = await this.getRegionQueueStatus(region);
+        queuesHealth[region] = {
+          status: 'healthy',
+          activeMessages: status.activeRequests,
+          queuedMessages: status.queueLength
+        };
+      } catch (error) {
+        queuesHealth[region] = {
+          status: 'unhealthy',
+          error: error.message
+        };
+      }
+    }
+
+    return queuesHealth;
+  }
+
+  async checkMetricsHealth() {
+    try {
+        const lastHour = new Date(Date.now() - 60 * 60 * 1000);
+        
+        // Verificar si Metrics está disponible
+        if (!Metrics || typeof Metrics.find !== 'function') {
+            console.error('Metrics model not properly initialized');
+            return {
+                status: 'unhealthy',
+                error: 'Metrics service not properly initialized',
+                count: 0,
+                metricsLastHour: 0
+            };
+        }
+
+        // Usar find().count() en lugar de countDocuments
+        const metricsCount = await Metrics.find({
+            timestamp: { $gte: lastHour }
+        }).count();
+
+        const status = metricsCount > 0 ? 'healthy' : 'warning';
+        console.log('Metrics health check:', { status, count: metricsCount });
+
+        return {
+            status,
+            message: metricsCount > 0 ? 
+                `Metrics system healthy, ${metricsCount} records in the last hour` : 
+                'No metrics recorded in the last hour',
+            count: metricsCount,
+            metricsLastHour: metricsCount
+        };
+    } catch (error) {
+        console.error('Error checking metrics health:', error);
+        return {
+            status: 'unhealthy',
+            error: error.message || 'Unknown error checking metrics health',
+            count: 0,
+            metricsLastHour: 0
+        };
+    }
+  }
+
+  async handleShutdown() {
+    console.log('Iniciando cierre graceful...');
+    try {
+        await this.close();
+        process.exit(0);
+    } catch (error) {
+        console.error('Error durante el cierre:', error);
+        process.exit(1);
     }
   }
 }

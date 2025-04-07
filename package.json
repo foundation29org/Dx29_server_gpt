@@ -59,5 +59,21 @@
   },
   "volta": {
     "node": "18.20.6"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "node_modules/*",
+      ".git/*",
+      "*.log",
+      "logs/*"
+    ],
+    "delay": "2500",
+    "watch": [
+      "*.js",
+      "routes/*",
+      "services/*",
+      "models/*",
+      "config/*"
+    ]
   }
 }
