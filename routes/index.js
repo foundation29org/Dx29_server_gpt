@@ -18,14 +18,19 @@ const whitelist = config.allowedOrigins;
   function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
-        // Si no hay origen, rechazar la petición
+        // Si no hay origin y el host es uno de nuestros dominios permitidos, permitir la petición
         if (!origin) {
-          callback(new Error('Origin is required'));
-          return;
+          const host = req.headers.host;
+          if (whitelist.some(allowed => allowed.includes(host))) {
+            callback(null, true);
+            return;
+          }else{
+            callback(new Error('Not allowed by CORS'));
+          }
         }
 
-        // Verificar si el origen está en la whitelist
-        if (whitelist.some(allowed => origin.startsWith(allowed))) {
+        // Para peticiones con origin, verificar whitelist
+        if (whitelist.includes(origin)) {
           callback(null, true);
         } else {
           const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
