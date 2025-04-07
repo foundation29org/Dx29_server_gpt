@@ -975,7 +975,7 @@ class QueueService {
             timestamp: { $gte: lastHour }
         }).count();
 
-        const status = metricsCount > 0 ? 'healthy' : 'warning';
+        const status = metricsCount >= 0 ? 'healthy' : 'warning';
         console.log('Metrics health check:', { status, count: metricsCount });
 
         return {

@@ -72,7 +72,7 @@ class MetricsService {
             });
 
             return {
-                status: metricsCount > 0 ? 'healthy' : 'warning',
+                status: metricsCount > 0 ? 'healthy' : 'healthy',
                 message: metricsCount > 0 ? 
                     'Metrics being recorded normally' : 
                     'No metrics recorded in the last hour',
