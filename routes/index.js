@@ -18,32 +18,42 @@ const whitelist = config.allowedOrigins;
   function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
-        console.log(origin);
+        // Si no hay origin y el host es uno de nuestros dominios permitidos, permitir la petición
+        if (!origin) {
+          const host = req.headers.host;
+          if (whitelist.some(allowed => allowed.includes(host))) {
+            callback(null, true);
+            return;
+          }else{
+            callback(new Error('Not allowed by CORS'));
+          }
+        }
+
+        // Para peticiones con origin, verificar whitelist
         if (whitelist.includes(origin)) {
           callback(null, true);
         } else {
-            // La IP del cliente
-            const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-            const requestInfo = {
-                method: req.method,
-                url: req.url,
-                headers: req.headers,
-                origin: origin,
-                body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
-                ip: clientIp,
-                params: req.params,
-                query: req.query,
-              };
-              if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
-                try {
-                  serviceEmail.sendMailControlCall(requestInfo)
-                } catch (emailError) {
-                  console.log('Fail sending email');
-                }
-              }
-            callback(new Error('Not allowed by CORS'));
+          const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+          const requestInfo = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            origin: origin,
+            body: req.body,
+            ip: clientIp,
+            params: req.params,
+            query: req.query,
+          };
+          if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
+            try {
+              serviceEmail.sendMailControlCall(requestInfo)
+            } catch (emailError) {
+              console.log('Fail sending email');
+            }
+          }
+          callback(new Error('Not allowed by CORS'));
         }
-      },
+      }
     };
   
     cors(corsOptions)(req, res, next);
@@ -76,6 +86,9 @@ api.post('/callopenaiquestions', corsWithOptions, checkApiKey, openAIserviceCtrl
 api.post('/generatefollowupquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.generateFollowUpQuestions)
 api.post('/processfollowupanswers', corsWithOptions, checkApiKey, openAIserviceCtrl.processFollowUpAnswers)
 api.post('/summarize', corsWithOptions, checkApiKey, openAIserviceCtrl.summarize)
+api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, openAIserviceCtrl.getQueueStatus)
+api.get('/getSystemStatus', corsWithOptions, checkApiKey, openAIserviceCtrl.getSystemStatus)
+api.get('/health', corsWithOptions, checkApiKey, openAIserviceCtrl.checkHealth)
 
 api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
 api.post('/feedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendFeedback)

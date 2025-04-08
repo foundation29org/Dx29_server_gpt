@@ -8,6 +8,7 @@ const config = require('./config')
 const mongoose = require('mongoose');
 const app = require('./app')
 let appInsights = require('applicationinsights');
+const queueService = app.get('queueService');
 
 if(config.client_server!='http://localhost:4200'){
 	appInsights.setup(config.INSIGHTS)
@@ -25,6 +26,27 @@ if(config.client_server!='http://localhost:4200'){
 
 mongoose.Promise = global.Promise
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
 	console.log(`API REST corriendo en http://localhost:${config.port}`)
 })
+
+// Manejar cierre graceful
+process.on('SIGTERM', () => handleShutdown());
+process.on('SIGINT', () => handleShutdown());
+
+async function handleShutdown() {
+    console.log('Iniciando cierre del servidor...');
+    try {
+        if (queueService) {
+            await queueService.close();
+        }
+        await mongoose.connection.close();
+        server.close(() => {
+            console.log('Servidor cerrado correctamente');
+            process.exit(0);
+        });
+    } catch (error) {
+        console.error('Error durante el cierre:', error);
+        process.exit(1);
+    }
+}

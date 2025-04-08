@@ -1,0 +1,9 @@
+node_modules/*
+.git/*
+*.log
+logs/*
+*.json
+temp/*
+.env
+metrics/*
+*.tmp 
