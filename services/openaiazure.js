@@ -334,11 +334,19 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
         insights.error(emailError);
       }
     }
-    throw {
-      result: 'translation error',
-      message: translationError.message,
-      code: translationError.code || 'TRANSLATION_ERROR'
-    };
+    if(translationError.code === 'UNSUPPORTED_LANGUAGE'){
+      throw { 
+        result: "unsupported_language",
+        message: translationError.message
+      };
+    }else{
+      throw {
+        result: 'translation error',
+        message: translationError.message,
+        code: translationError.code || 'TRANSLATION_ERROR'
+      };
+    }
+    
     //throw translationError;
     }
 
@@ -596,6 +604,12 @@ async function callOpenAi(req, res) {
         message: error.message,
         code: error.code || 'TRANSLATION_ERROR'
       });
+    }else if (error.result === 'unsupported_language') {
+      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
+        result: "unsupported_language",
+        message: error.message,
+        code: error.code || 'UNSUPPORTED_LANGUAGE'
+      });
     }
     return res.status(500).send({ result: "error" });
   }
@@ -782,6 +796,19 @@ async function callOpenAiV2(req, res) {
       );
     } catch (emailError) {
       console.log('Fail sending email');
+    }
+    if (error.result === 'translation error') {
+      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
+        result: "translation error",
+        message: error.message,
+        code: error.code || 'TRANSLATION_ERROR'
+      });
+    }else if (error.result === 'unsupported_language') {
+      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
+        result: "unsupported_language",
+        message: error.message,
+        code: error.code || 'UNSUPPORTED_LANGUAGE'
+      });
     }
     return res.status(500).send({ result: "error" });
   }
