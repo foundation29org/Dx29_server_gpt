@@ -581,7 +581,23 @@ async function callOpenAi(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+    insights.error({
+      message: error.message || 'Unknown error in callOpenAi',
+      stack: error.stack,
+      code: error.code,
+      result: error.result,
+      timestamp: new Date().toISOString(),
+      endpoint: 'callOpenAi',
+      requestInfo: {
+        method: requestInfo.method,
+        url: requestInfo.url,
+        origin: requestInfo.origin,
+        ip: requestInfo.ip,
+        timezone: requestInfo.timezone,
+        header_language: requestInfo.header_language
+      },
+      requestData: req.body
+    });
     let infoError = {
       body: req.body,
       error: error.message,
