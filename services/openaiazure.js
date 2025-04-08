@@ -418,7 +418,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
         message: "Failed to parse diagnosis output",
         error: parseError.message,
         rawResponse: parseError.rawResponse,
-        description: description,
+        description: data.description,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError
       });
