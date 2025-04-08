@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "serve": "nodemon index.js",
+    "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
     "test": "jasmine"
   },
   "author": "LOA",
@@ -62,18 +63,12 @@
   },
   "nodemonConfig": {
     "ignore": [
+      "*.log",
+      "logs/*",
       "node_modules/*",
       ".git/*",
-      "*.log",
-      "logs/*"
+      ".env"
     ],
-    "delay": "2500",
-    "watch": [
-      "*.js",
-      "routes/*",
-      "services/*",
-      "models/*",
-      "config/*"
-    ]
+    "delay": "2500"
   }
 }

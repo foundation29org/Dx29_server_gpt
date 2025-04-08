@@ -334,7 +334,12 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
         insights.error(emailError);
       }
     }
-    throw translationError;
+    throw {
+      result: 'translation error',
+      message: translationError.message,
+      code: translationError.code || 'TRANSLATION_ERROR'
+    };
+    //throw translationError;
     }
 
     // 2. Llamar a OpenAI con el texto en inglés
@@ -584,6 +589,13 @@ async function callOpenAi(req, res) {
       );
     } catch (emailError) {
       console.log('Fail sending email');
+    }
+    if (error.result === 'translation error') {
+      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
+        result: "translation error",
+        message: error.message,
+        code: error.code || 'TRANSLATION_ERROR'
+      });
     }
     return res.status(500).send({ result: "error" });
   }

@@ -8,6 +8,7 @@ const config = require('./config')
 const mongoose = require('mongoose');
 const app = require('./app')
 let appInsights = require('applicationinsights');
+const queueService = app.get('queueService');
 
 if(config.client_server!='http://localhost:4200'){
 	appInsights.setup(config.INSIGHTS)
@@ -36,7 +37,10 @@ process.on('SIGINT', () => handleShutdown());
 async function handleShutdown() {
     console.log('Iniciando cierre del servidor...');
     try {
-        await queueService.close();
+        if (queueService) {
+            await queueService.close();
+        }
+        await mongoose.connection.close();
         server.close(() => {
             console.log('Servidor cerrado correctamente');
             process.exit(0);
