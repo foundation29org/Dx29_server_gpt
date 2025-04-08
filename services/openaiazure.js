@@ -387,7 +387,16 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
         anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
       } catch (translationError) {
         console.error('Error en la traducción inversa:', translationError.message);
-        insights.error(translationError);
+        insights.error({
+          message: translationError.message,
+          stack: translationError.stack,
+          code: translationError.code,
+          phase: 'translation',
+          detectedLanguage: detectedLanguage,
+          requestData: data,
+          model: model
+        });
+        throw translationError;
       }
     }
 
@@ -417,10 +426,14 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
       insights.error({
         message: "Failed to parse diagnosis output",
         error: parseError.message,
+        stack: parseError.stack,
         rawResponse: parseError.rawResponse,
         description: data.description,
         matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError
+        jsonError: parseError.jsonError,
+        phase: 'parsing',
+        model: model,
+        requestData: data
       });
     if (requestInfo) {
       let infoError = {
@@ -471,7 +484,15 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
         );
       } catch (translationError) {
       console.error('Error en la traducción inversa:', translationError.message);
-      insights.error(translationError);
+      insights.error({
+        message: translationError.message,
+        stack: translationError.stack,
+        code: translationError.code,
+        phase: 'translation',
+        detectedLanguage: detectedLanguage,
+        requestData: data,
+        model: model
+      });
         throw translationError;
       }
     }
@@ -588,6 +609,7 @@ async function callOpenAi(req, res) {
       result: error.result,
       timestamp: new Date().toISOString(),
       endpoint: 'callOpenAi',
+      phase: error.phase || 'unknown',
       requestInfo: {
         method: requestInfo.method,
         url: requestInfo.url,
@@ -596,7 +618,8 @@ async function callOpenAi(req, res) {
         timezone: requestInfo.timezone,
         header_language: requestInfo.header_language
       },
-      requestData: req.body
+      requestData: req.body,
+      model: 'gpt4o'
     });
     let infoError = {
       body: req.body,
