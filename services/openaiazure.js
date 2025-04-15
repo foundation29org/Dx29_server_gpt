@@ -1794,17 +1794,28 @@ async function generateFollowUpQuestions(req, res) {
     
     Based on this description, the system has identified these potential conditions: ${englishDiseases}
     
-    The patient has indicated that none of these conditions seem to match their experience. Please generate 5 specific follow-up questions that would help clarify the patient's condition and potentially lead to a more accurate diagnosis.
+    The patient has indicated that none of these conditions seem to match their experience. Please generate 5-8 specific follow-up questions that would help clarify the patient's condition and potentially lead to a more accurate diagnosis.
+    
+    First, identify what critical information is missing from the description, which may include:
+    - Age, sex/gender, height, weight (if not already mentioned)
+    - Duration and progression of symptoms
+    - Severity, frequency, and triggers
+    - Associated symptoms that would help differentiate between the suggested conditions
+    - Relevant medical history, pre-existing conditions
+    - Family history if potentially relevant
+    - Current medications
+    - Previous treatments tried
     
     The questions should:
-    1. Focus on getting more specific details about symptoms already mentioned
-    2. Explore potential related symptoms that haven't been mentioned
-    3. Ask about timing, severity, triggers, or alleviating factors
-    4. Be clear, concise, and easy for a patient to understand
-    5. Avoid medical jargon when possible
+    1. Focus first on missing demographic information (age, sex/gender) if not provided in the description
+    2. Get more specific details about symptoms already mentioned
+    3. Explore potential related symptoms that haven't been mentioned but could help differentiate between conditions
+    4. Ask about timing, severity, triggers, or alleviating factors
+    5. Be clear, concise, and easy for a patient to understand
+    6. Avoid medical jargon when possible
     
     Format your response as a JSON array of strings, with each string being a question. Example:
-    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]
+    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
     
     Your response should be ONLY the JSON array, nothing else.`;
 
@@ -1897,6 +1908,306 @@ async function generateFollowUpQuestions(req, res) {
     };
     
     blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
+
+    // 6. Preparar la respuesta final
+    return res.status(200).send({
+      result: 'success',
+      data: {
+        questions: questions
+      },
+      detectedLang: detectedLanguage
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    insights.error(error);
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      model: 'follow-up'
+    };
+    
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    try {
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body.lang,
+        req.body.description,
+        infoError,
+        requestInfo
+      );
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
+    return res.status(500).send({ result: "error" });
+  }
+}
+
+
+function isValidERQuestionsRequest(data) {
+  // Validar estructura básica
+  if (!data || typeof data !== 'object') return false;
+
+  // Validar campos requeridos
+  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar description
+  if (typeof data.description !== 'string' ||
+    data.description.length < 10 ||
+    data.description.length > 8000) return false;
+
+  // Validar myuuid
+  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    return false;
+  }
+
+  // Validar operation
+  if (data.operation !== 'generate ER questions') return false;
+
+  // Validar lang
+  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+
+  // Validar timezone si existe
+  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
+    return false;
+  }
+
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    /\{\{[^}]*\}\}/g,  // Handlebars syntax
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
+    /\$\{[^}]*\}/g,    // Template literals
+    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+  ];
+
+  // Normalizar el texto para la validación
+  const normalizedDescription = data.description.replace(/\n/g, ' ');
+
+  return !suspiciousPatterns.some(pattern => {
+    return pattern.test(normalizedDescription);
+  });
+}
+
+function sanitizeERQuestionsData(data) {
+  return {
+    ...data,
+    description: sanitizeInput(data.description),
+    myuuid: data.myuuid.trim(),
+    lang: data.lang.trim().toLowerCase(),
+    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+  };
+}
+async function generateERQuestions(req, res) {
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+  const origin = req.get('origin');
+  const header_language = req.headers['accept-language'];
+
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: origin,
+    body: req.body,
+    ip: clientIp,
+    params: req.params,
+    query: req.query,
+    header_language: header_language,
+    timezone: req.body.timezone
+  };
+
+  try {
+    // Validar y sanitizar el request
+    if (!isValidERQuestionsRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content for ER questions",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeERQuestionsData(req.body);
+    const { description, lang, timezone } = sanitizedData;
+
+    // 1. Detectar idioma y traducir a inglés si es necesario
+    let englishDescription = description;
+    let detectedLanguage = lang;
+    try {
+      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      if (detectedLanguage && detectedLanguage !== 'en') {
+        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+      }
+    } catch (translationError) {
+      console.error('Translation error:', translationError.message);
+      let infoErrorlang = {
+        body: req.body,
+        error: translationError.message,
+        type: translationError.code || 'TRANSLATION_ERROR',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: 'follow-up'
+      };
+      
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          infoErrorlang,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+      
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        insights.error({
+          type: 'UNSUPPORTED_LANGUAGE',
+          message: translationError.message
+        });
+
+        return res.status(200).send({ 
+          result: "unsupported_language",
+          message: translationError.message
+        });
+      }
+
+      // Otros errores de traducción
+      insights.error({
+        type: 'TRANSLATION_ERROR',
+        message: translationError.message
+      });
+
+      return res.status(500).send({ 
+        result: "error",
+        message: "An error occurred during translation"
+      });
+    }
+
+    // 2. Construir el prompt para generar preguntas iniciales
+    const prompt = `
+    You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following initial description of their symptoms:
+    
+    "${englishDescription}"
+    
+    Please analyze this description and generate 5-8 relevant follow-up questions to complete the patient's clinical profile. 
+    
+    First, identify what critical information is missing from the description, which may include:
+    - Age, sex/gender, height, weight (if not already mentioned)
+    - Duration and progression of symptoms
+    - Severity, frequency, and triggers
+    - Associated symptoms not yet mentioned
+    - Relevant medical history, pre-existing conditions
+    - Family history if potentially relevant
+    - Current medications
+    - Previous treatments tried
+    
+    The questions should:
+    1. Focus first on missing demographic information (age, sex/gender) if not provided in the description
+    2. Get more specific details about symptoms already mentioned
+    3. Explore potential related symptoms that haven't been mentioned but could help differentiate between conditions
+    4. Ask about timing, severity, triggers, or alleviating factors
+    5. Be clear, concise, and easy for a patient to understand
+    6. Avoid medical jargon when possible
+    
+    Format your response as a JSON array of strings, with each string being a question. Example:
+    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
+
+    
+    Your response should be ONLY the JSON array, nothing else.`;
+
+    const messages = [{ role: "user", content: prompt }];
+    const requestBody = {
+      messages,
+      temperature: 0.7,
+      max_tokens: 1000,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+    // Reemplazar la llamada directa a axios con nuestra función de failover
+    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+
+    if (!openAiResponse.data.choices[0].message.content) {
+      throw new Error('Empty OpenAI response');
+    }
+
+    // 3. Procesar la respuesta
+    let questions;
+    try {
+      // Limpiar la respuesta para asegurar que es un JSON válido
+      const content = openAiResponse.data.choices[0].message.content.trim();
+      const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
+      questions = JSON.parse(jsonContent);
+      
+      if (!Array.isArray(questions)) {
+        throw new Error('Response is not an array');
+      }
+    } catch (parseError) {
+      console.error("Failed to parse questions:", parseError);
+      insights.error({
+        message: "Failed to parse follow-up questions",
+        error: parseError.message,
+        rawResponse: openAiResponse.data.choices[0].message.content
+      });
+      
+      let infoError = {
+        myuuid: sanitizedData.myuuid,
+        operation: sanitizedData.operation,
+        lang: sanitizedData.lang,
+        description: description,
+        error: parseError.message,
+        rawResponse: openAiResponse.data.choices[0].message.content,
+        model: 'follow-up'
+      };
+      try {
+        await serviceEmail.sendMailErrorGPTIP(
+          req.body.lang,
+          req.body.description,
+          infoError,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+      
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      return res.status(200).send({ result: "error" });
+    }
+
+    // 4. Traducir las preguntas al idioma original si es necesario
+    if (detectedLanguage !== 'en') {
+      try {
+        questions = await Promise.all(
+          questions.map(question => translateInvertWithRetry(question, detectedLanguage))
+        );
+      } catch (translationError) {
+        console.error('Translation error:', translationError);
+        throw translationError;
+      }
+    }
+
+    // 5. Guardar información para seguimiento
+    let infoTrack = {
+      value: description,
+      valueEnglish: englishDescription,
+      myuuid: sanitizedData.myuuid,
+      operation: sanitizedData.operation,
+      lang: sanitizedData.lang,
+      questions: questions,
+      header_language: header_language,
+      timezone: timezone,
+      model: 'er-questions'
+    };
+    
+    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -2532,6 +2843,7 @@ module.exports = {
   sendGeneralFeedback,
   getFeedBack,
   generateFollowUpQuestions,
+  generateERQuestions,
   processFollowUpAnswers,
   summarize,
   getQueueStatus,
