@@ -1787,7 +1787,7 @@ async function generateFollowUpQuestions(req, res) {
     }
 
     // 2. Construir el prompt para generar preguntas de seguimiento
-    const prompt = `
+    const promptOld = `
     You are a medical assistant helping to gather more information from a patient. The patient has provided the following description of their symptoms:
     
     "${englishDescription}"
@@ -1818,6 +1818,86 @@ async function generateFollowUpQuestions(req, res) {
     ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
     
     Your response should be ONLY the JSON array, nothing else.`;
+
+    const prompt = `
+    You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following description of their symptoms:
+
+    "${englishDescription}"
+
+    The system has already suggested the following possible conditions: ${englishDiseases}.
+    The patient indicated that none of these seem to match their experience.
+
+    Please prioritize follow-up questions that would help clarify or rule out these conditions, focusing on symptoms or details that are commonly used to differentiate them.
+
+    Analyze this description and generate 5–8 relevant follow-up questions to complete the patient's clinical profile.
+
+    When formulating your questions, identify any critical information missing from the description, which may include:
+    - Age, sex/gender, height, weight (if not already mentioned)
+    - Duration and progression of symptoms
+    - Severity, frequency, and triggers
+    - Associated symptoms not yet mentioned
+    - Relevant medical history or pre-existing conditions
+    - Family history if potentially relevant
+    - Current medications
+    - Previous treatments tried
+    - Potential risk factors or exposures (e.g. travel, smoking, occupational hazards, drug use, recent contact with sick individuals)
+    - **Any red-flag signs** (confusion, significant weakness, severe pain, hypotension, etc.) if the description suggests an urgent condition
+    - **Immunization status or immunosuppression** if indicated by the symptoms
+
+    If the patient is a child, frame your questions as if speaking to a caregiver. Include questions about developmental milestones, immunizations, and relevant birth/early childhood history.
+    Do not ask for personal identifiers such as name, address, phone number, email, or ID numbers.
+
+    Your questions should:
+    1. Focus first on missing demographic details (age, sex/gender) if not already provided.
+    2. Gather more specific details about the symptoms mentioned, including timing, severity, triggers, and alleviating factors.
+    3. Explore related or secondary symptoms that haven’t been mentioned but could differentiate between conditions.
+    4. Ask about relevant medical history, family history, current medications, and any treatments tried.
+    5. Incorporate risk factors, exposures, and any red-flag or emergency indicators suggested by the symptoms.
+    6. Be clear, concise, and easy for the patient to understand.
+    7. Avoid medical jargon whenever possible.
+
+    Format your response as a JSON array of strings. Example:
+    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
+
+    Your response should be ONLY the JSON array, with no additional text or explanation.
+    `;
+
+    const prompt2 = `
+You are a medical assistant helping to gather more information from a patient after an initial diagnostic suggestion. The patient has provided the following description of their symptoms:
+
+"${englishDescription}"
+
+The system previously suggested the following possible conditions: ${englishDiseases}.
+The patient indicated that none of these seem to match their experience.
+
+Please generate 5–8 follow-up questions aimed at refining the diagnostic process. Your goal is to uncover missing or unclear information that could help confirm or rule out the listed conditions, or suggest alternative possibilities.
+
+When formulating your questions, consider:
+- Age, sex/gender, height, weight (if not already mentioned)
+- Duration and progression of symptoms
+- Severity, frequency, timing, and known triggers
+- Associated symptoms not yet mentioned (especially those relevant to the suggested conditions)
+- Relevant medical history, pre-existing conditions, or family history
+- Current medications, supplements, or treatments already tried (and their outcomes)
+- Risk factors or exposures (e.g. travel, smoking, occupational/environmental risks, drug use, recent contact with illness)
+- Red-flag signs (confusion, severe weakness, chest pain, hypotension, etc.)
+- Immunization status or known immunosuppression
+
+If the patient is a child, frame your questions as if speaking to a caregiver. Include questions about developmental milestones, immunizations, and relevant birth/early childhood history.
+
+Do not ask for personal identifiers such as name, address, phone number, email, or ID numbers.
+
+Your questions should:
+1. Start with any missing demographic info if clearly absent.
+2. Clarify key symptoms already mentioned and explore differentiating features.
+3. Ask concise, patient-friendly questions using non-technical language.
+4. Focus only on medically relevant information needed to refine the diagnosis.
+
+Format your response strictly as a JSON array of strings, with each string being a single question. Do not include any explanations, introductions, or formatting.
+
+Example output:
+["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
+`;
 
     const messages = [{ role: "user", content: prompt }];
     const requestBody = {
@@ -2090,36 +2170,45 @@ async function generateERQuestions(req, res) {
     }
 
     // 2. Construir el prompt para generar preguntas iniciales
-    const prompt = `
-    You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following initial description of their symptoms:
-    
-    "${englishDescription}"
-    
-    Please analyze this description and generate 5-8 relevant follow-up questions to complete the patient's clinical profile. 
-    
-    First, identify what critical information is missing from the description, which may include:
-    - Age, sex/gender, height, weight (if not already mentioned)
-    - Duration and progression of symptoms
-    - Severity, frequency, and triggers
-    - Associated symptoms not yet mentioned
-    - Relevant medical history, pre-existing conditions
-    - Family history if potentially relevant
-    - Current medications
-    - Previous treatments tried
-    
-    The questions should:
-    1. Focus first on missing demographic information (age, sex/gender) if not provided in the description
-    2. Get more specific details about symptoms already mentioned
-    3. Explore potential related symptoms that haven't been mentioned but could help differentiate between conditions
-    4. Ask about timing, severity, triggers, or alleviating factors
-    5. Be clear, concise, and easy for a patient to understand
-    6. Avoid medical jargon when possible
-    
-    Format your response as a JSON array of strings, with each string being a question. Example:
-    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
 
-    
-    Your response should be ONLY the JSON array, nothing else.`;
+    const prompt = `
+You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following initial description of their symptoms:
+
+"${englishDescription}"
+
+Analyze this description and generate 5-8 relevant follow-up questions to complete the patient's clinical profile.
+
+When formulating your questions, identify any critical information missing from the description, which may include:
+- Age, sex/gender, height, weight (if not already mentioned)
+- Duration and progression of symptoms
+- Severity, frequency, and triggers
+- Associated symptoms not yet mentioned
+- Relevant medical history or pre-existing conditions
+- Family history if potentially relevant
+- Current medications
+- Previous treatments tried
+- Potential risk factors or exposures (e.g. travel, smoking, occupational hazards, drug use, recent contact with sick individuals)
+- **Any red-flag signs** (confusion, significant weakness, severe pain, hypotension, etc.) if the description suggests an urgent condition
+- **Immunization status or immunosuppression** if indicated by the symptoms
+
+If the patient appears to be a child or infant, frame the questions as if speaking to a caregiver (parent or guardian). In that case, also include questions about developmental milestones, pediatric immunizations, and relevant birth or early childhood history.
+
+Your questions should:
+1. Focus first on missing demographic details (age, sex/gender) if not already provided.
+2. Gather more specific details about the symptoms mentioned, including timing, severity, triggers, and alleviating factors.
+3. Explore related or secondary symptoms that haven’t been mentioned but could differentiate between conditions.
+4. Ask about relevant medical history, family history, current medications, and any treatments tried.
+5. Incorporate risk factors, exposures, and any red-flag or emergency indicators suggested by the symptoms.
+6. Be clear, concise, and easy for the patient to understand.
+7. Avoid medical jargon whenever possible.
+
+Do not ask for personal identifiers such as full name, address, phone number, email, or national ID. Focus only on medically relevant information.
+Format your response as a JSON array of strings, with each string being a question. For example:
+["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
+
+Your response should be ONLY the JSON array, with no additional text or explanation.
+`;
+
 
     const messages = [{ role: "user", content: prompt }];
     const requestBody = {
