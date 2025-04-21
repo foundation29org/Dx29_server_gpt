@@ -379,6 +379,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
   // 3. Anonimizar el texto
   let anonymizedResult = await anonymizeText(englishDescription, data.timezone);
     let anonymizedDescription = anonymizedResult.anonymizedText;
+    let anonymizedDescriptionEnglish = anonymizedDescription;
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
 
     if (detectedLanguage !== 'en') {
@@ -501,7 +502,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
   if (requestInfo) {
     let infoTrack = {
       value: anonymizedDescription,
-      valueEnglish: englishDescription,
+      valueEnglish: anonymizedDescriptionEnglish,
       myuuid: data.myuuid,
       operation: data.operation,
       lang: data.lang,
@@ -2706,7 +2707,7 @@ async function summarize(req, res) {
     }
 
     const sanitizedData = sanitizeOpenAiData(req.body);
-    const { description, lang, timezone } = sanitizedData;
+    const { description, lang } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -2797,22 +2798,6 @@ async function summarize(req, res) {
         throw translationError;
       }
     }
-
-    // 6. Guardar información para seguimiento
-    let infoTrack = {
-      originalText: description,
-      originalTextEnglish: englishDescription,
-      myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
-      lang: sanitizedData.lang,
-      summary: summary,
-      summaryEnglish: summaryEnglish,
-      header_language: header_language,
-      timezone: timezone,
-      model: 'summarize'
-    };
-    
-    blobOpenDx29Ctrl.createBlobSummarize(infoTrack);
 
     // 7. Preparar la respuesta final
     return res.status(200).send({
