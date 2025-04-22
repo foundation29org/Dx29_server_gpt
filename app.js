@@ -14,7 +14,7 @@ const api = require ('./routes')
 const path = require('path')
 const allowedOrigins = config.allowedOrigins;
 
-function setCrossDomain2(req, res, next) {
+function setCrossDomain(req, res, next) {
   //instead of * you can define ONLY the sources that we allow.
   //res.header('Access-Control-Allow-Origin', '*');
   const origin = req.headers.origin;
@@ -48,29 +48,12 @@ function setCrossDomain2(req, res, next) {
   
 }
 
-function setCrossDomain(req, res, next) {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
-  }
-  next();
-}
-
 app.use(bodyParser.urlencoded({limit: '50mb', extended: false}))
 app.use(bodyParser.json({limit: '50mb'}))
 app.use(setCrossDomain);
 
 
 // use the forward slash with the module api api folder created routes
-app.options('*', (req, res) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
-  res.sendStatus(200);
-});
 app.use('/api',api)
 
 app.use('/apidoc',express.static('apidoc', {'index': ['index.html']}))
