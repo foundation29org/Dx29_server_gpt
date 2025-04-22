@@ -97,5 +97,11 @@ api.post('/feedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceC
 api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
 //api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
+api.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+  res.sendStatus(200);
+});
 
 module.exports = api
