@@ -10,6 +10,7 @@ const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
 const config= require('../config')
+const needsLimiter = require('../services/rateLimiter')
 const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
 const whitelist = config.allowedOrigins;
@@ -74,26 +75,26 @@ const whitelist = config.allowedOrigins;
   };
 
 // lang routes, using the controller lang, this controller has methods
-api.get('/langs/',  langCtrl.getLangs)
+api.get('/langs/', needsLimiter, langCtrl.getLangs)
 
 //Support
-api.post('/homesupport/', corsWithOptions, checkApiKey, supportCtrl.sendMsgLogoutSupport)
+api.post('/homesupport/', corsWithOptions, checkApiKey, needsLimiter, supportCtrl.sendMsgLogoutSupport)
 
 //services OPENAI
-api.post('/callopenai', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAi)
-api.post('/callopenaiV2', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiV2)
-api.post('/callopenaiquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.callOpenAiQuestions)
-api.post('/generatefollowupquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.generateFollowUpQuestions)
-api.post('/generateerquestions', corsWithOptions, checkApiKey, openAIserviceCtrl.generateERQuestions)
-api.post('/processfollowupanswers', corsWithOptions, checkApiKey, openAIserviceCtrl.processFollowUpAnswers)
-api.post('/summarize', corsWithOptions, checkApiKey, openAIserviceCtrl.summarize)
-api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, openAIserviceCtrl.getQueueStatus)
-api.get('/getSystemStatus', corsWithOptions, checkApiKey, openAIserviceCtrl.getSystemStatus)
-api.get('/health', corsWithOptions, checkApiKey, openAIserviceCtrl.checkHealth)
+api.post('/callopenai', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAi)
+api.post('/callopenaiV2', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAiV2)
+api.post('/callopenaiquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAiQuestions)
+api.post('/generatefollowupquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.generateFollowUpQuestions)
+api.post('/generateerquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.generateERQuestions)
+api.post('/processfollowupanswers', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.processFollowUpAnswers)
+api.post('/summarize', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.summarize)
+api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getQueueStatus)
+api.get('/getSystemStatus', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getSystemStatus)
+api.get('/health', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.checkHealth)
 
-api.post('/opinion', corsWithOptions, checkApiKey, openAIserviceCtrl.opinion)
-api.post('/feedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendFeedback)
-api.post('/generalfeedback', corsWithOptions, checkApiKey, openAIserviceCtrl.sendGeneralFeedback)
+api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
+api.post('/feedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendFeedback)
+api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
 //api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
 
