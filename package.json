@@ -25,6 +25,7 @@
     "cors": "^2.8.5",
     "express": "^4.16.2",
     "express-handlebars": "^3.0.0",
+    "express-rate-limit": "^7.5.0",
     "fs-extra": "^5.0.0",
     "helmet": "^8.0.0",
     "jasmine": "^3.5.0",
