@@ -19,14 +19,14 @@ function setCrossDomain(req, res, next) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
 
   // Evitar alertas o bloqueos por IPs internas de Azure o sin IP válida
-  const isInternalIp = ip => {
+  /*const isInternalIp = ip => {
     return !ip || ip.startsWith('::ffff:169.254.') || ip.startsWith('169.254.');
   };
 
   if (isInternalIp(clientIp)) {
     // Opcional: puedes hacer un next() aquí si quieres permitir health checks internos
     return res.status(401).json({ error: 'Blocked internal or missing IP' });
-  }
+  }*/
 
   if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD') {
     res.header('Access-Control-Allow-Origin', origin);
