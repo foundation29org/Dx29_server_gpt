@@ -10,7 +10,7 @@ const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
 const config= require('../config')
-const needsLimiter = require('../services/rateLimiter')
+const { needsLimiter, healthLimiter } = require('../services/rateLimiter')
 const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
 const whitelist = config.allowedOrigins;
@@ -61,16 +61,11 @@ const whitelist = config.allowedOrigins;
   }
 
   const checkApiKey = (req, res, next) => {
-    // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
-    if (req.method === 'OPTIONS') {
+    const apiKey = req.get('x-api-key');
+    if (apiKey && apiKey === myApiKey) {
       return next();
     } else {
-      const apiKey = req.get('x-api-key');
-      if (apiKey && apiKey === myApiKey) {
-        return next();
-      } else {
-        return res.status(401).json({ error: 'API Key no válida o ausente' });
-      }
+      return res.status(401).json({ error: 'API Key no válida o ausente' });
     }
   };
 
@@ -90,7 +85,7 @@ api.post('/processfollowupanswers', corsWithOptions, checkApiKey, needsLimiter, 
 api.post('/summarize', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.summarize)
 api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getQueueStatus)
 api.get('/getSystemStatus', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getSystemStatus)
-api.get('/health', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.checkHealth)
+api.get('/health', corsWithOptions, checkApiKey, healthLimiter, openAIserviceCtrl.checkHealth)
 
 api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
 api.post('/feedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendFeedback)
