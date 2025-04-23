@@ -36,7 +36,7 @@ function setCrossDomain(req, res, next) {
         params: req.params,
         query: req.query,
       };
-      if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
+      if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1 && req.url !== '/admin'){
         try {
           serviceEmail.sendMailControlCall(requestInfo)
         } catch (emailError) {
