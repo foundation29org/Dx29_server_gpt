@@ -25,7 +25,7 @@ function setCrossDomain(req, res, next) {
     next();
   }else{
     //send email
-    const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    /*const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
     const requestInfo = {
         method: req.method,
         url: req.url,
@@ -42,7 +42,7 @@ function setCrossDomain(req, res, next) {
         } catch (emailError) {
           console.log('Fail sending email');
         }
-      }
+      }*/
     res.status(401).json({ error: 'Origin not allowed' });
   }
   
@@ -52,6 +52,18 @@ app.use(bodyParser.urlencoded({limit: '50mb', extended: false}))
 app.use(bodyParser.json({limit: '50mb'}))
 app.use(setCrossDomain);
 
+app.options('*', (req, res) => {
+  console.log(`[CORS PRE-FLIGHT] ${req.method} ${req.path} from ${req.headers.origin}`);
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'HEAD,GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+    return res.sendStatus(200);
+  } else {
+    return res.sendStatus(403);
+  }
+});
 
 // use the forward slash with the module api api folder created routes
 app.use('/api',api)
