@@ -1,13 +1,14 @@
-const mongoose = require('mongoose');
+'use strict';
+
+const mongoose = require('../db_connect'); // <- usamos la conexión centralizada
 const Schema = mongoose.Schema;
-const { conndbaccounts } = require('../db_connect')
 
 const TicketSchema = new Schema({
   ticketId: {
     type: String,
     required: true,
     unique: true,
-    index: true  // Indexamos para búsquedas más rápidas
+    index: true
   },
   status: {
     type: String,
@@ -19,33 +20,21 @@ const TicketSchema = new Schema({
     type: String,
     required: true
   },
-  position: {
-    type: Number
-  },
-  data: {
-    type: Schema.Types.Mixed  // Para almacenar la respuesta de OpenAI
-  },
-  error: {
-    type: Schema.Types.Mixed  // Para almacenar detalles del error si ocurre
-  },
+  position: Number,
+  data: Schema.Types.Mixed,
+  error: Schema.Types.Mixed,
   timestamp: {
     type: Date,
     default: Date.now
   },
-  requestInfo: {
-    type: Schema.Types.Mixed  // Para almacenar información adicional de la solicitud
-  },
-  utilizationPercentage: {
-    type: Number
-  },
-  estimatedWaitTime: {
-    type: Number
-  },
+  requestInfo: Schema.Types.Mixed,
+  utilizationPercentage: Number,
+  estimatedWaitTime: Number,
   result: Schema.Types.Mixed,
   processingTime: Number
 });
 
-// Índice compuesto para búsquedas frecuentes
+// Índice compuesto
 TicketSchema.index({ status: 1, region: 1 });
 
-module.exports = conndbaccounts.model('Ticket', TicketSchema); 
+module.exports = mongoose.model('Ticket', TicketSchema);

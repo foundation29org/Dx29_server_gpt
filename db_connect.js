@@ -1,10 +1,9 @@
-'use strict'
+'use strict';
 
-const mongoose = require ('mongoose')
-const config = require('./config')
+const mongoose = require('mongoose');
+const config = require('./config');
 
-const conndbaccounts = mongoose.createConnection(config.dbaccounts, { useMongoClient: true })
+// Conexión principal
+mongoose.connect(config.dbaccounts);
 
-module.exports = {
-	conndbaccounts
-}
+module.exports = mongoose;

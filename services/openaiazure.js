@@ -684,15 +684,14 @@ async function anonymizeText(text, timezone) {
   Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
   full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. 
   However, it's essential to maintain all medical specifics, such as medical history, diagnosis, treatment plans, and lab results, as they are not classified as PII. 
+  Note: Do not anonymize age, as it is not considered PII in this context. 
   The anonymized document should retain the integrity of the original content, apart from the replaced PII. 
   Avoid including any information that wasn't part of the original document and ensure the output reflects the original content structure and intent, albeit anonymized. 
   If any part of the text is already anonymized (represented by asterisks or [ANON-N]), do not anonymize it again. 
-  Here is the original document between the triple quotes:
-  ----------------------------------------
-  """
+  Here is the original document:
+
   {{text}}
-  """
-  ----------------------------------------
+
   ANONYMIZED DOCUMENT:"`;
 
   const messages = [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }];
@@ -1306,156 +1305,6 @@ async function opinion(req, res) {
   }
 }
 
-function isValidFeedbackData(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos
-  const requiredFields = ['email', 'myuuid', 'lang', 'info', 'value'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar email
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(data.email)) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
-  }
-
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar info (feedback text)
-  if (typeof data.info !== 'string' || data.info.length > 2000) return false;
-
-  // Validar value (texto médico)
-  if (typeof data.value !== 'string' || data.value.length > 10000) return false;
-
-  if (typeof data.isNewModel !== 'boolean') return false;
-
-  // Verificar patrones sospechosos en textos
-  const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
-
-  if (suspiciousPatterns.some(pattern =>
-    pattern.test(data.info) ||
-    pattern.test(data.value)
-  )) {
-    return false;
-  }
-
-  // Validar topRelatedConditions si existe
-  if (data.topRelatedConditions) {
-    if (!Array.isArray(data.topRelatedConditions)) return false;
-    if (!data.topRelatedConditions.every(condition =>
-      typeof condition === 'object' &&
-      typeof condition.name === 'string' &&
-      condition.name.length < 200
-    )) return false;
-  }
-
-  // Validar subscribe
-  if (data.subscribe !== undefined && typeof data.subscribe !== 'boolean') {
-    return false;
-  }
-
-  return true;
-}
-
-function sanitizeFeedbackData(data) {
-  return {
-    ...data,
-    email: data.email.trim().toLowerCase(),
-    myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
-    info: data.info
-      .replace(/[<>]/g, '')
-      .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt:|system:|assistant:|user:/gi, '')
-      .trim(),
-    value: data.value
-      .replace(/[<>]/g, '')
-      .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt:|system:|assistant:|user:/gi, '')
-      .trim(),
-    topRelatedConditions: data.topRelatedConditions?.map(condition => ({
-      ...condition,
-      name: condition.name
-        .replace(/[<>]/g, '')
-        .replace(/(\{|\}|\||\\)/g, '')
-        .trim()
-    })),
-    subscribe: !!data.subscribe,
-    isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
-  };
-}
-
-async function sendFeedback(req, res) {
-
-
-  try {
-    // Validar los datos de entrada
-    if (!isValidFeedbackData(req.body)) {
-      return res.status(400).send({
-        result: "error",
-        message: "Invalid request format or content"
-      });
-    }
-
-
-    // Sanitizar los datos
-    const sanitizedData = sanitizeFeedbackData(req.body);
-
-    // Guardar feedback en blob storage
-    await blobOpenDx29Ctrl.createBlobFeedbackVoteDown(sanitizedData);
-    serviceEmail.sendMailFeedback(sanitizedData.email, sanitizedData.lang, sanitizedData)
-      .then(response => {
-
-      })
-      .catch(response => {
-        //create user, but Failed sending email.
-        insights.error(response);
-        console.log('Fail sending email');
-      })
-
-
-    let support = new Support()
-    //support.type = 'Home form'
-    support.subject = 'DxGPT vote down'
-    support.subscribe = sanitizedData.subscribe
-    support.email = sanitizedData.email
-    support.description = sanitizedData.info
-    var d = new Date(Date.now());
-    var a = d.toString();
-    support.date = a;
-
-
-    supportService.sendFlow(support, sanitizedData.lang)
-    support.save((err, supportStored) => {
-    })
-
-    res.status(200).send({ send: true })
-  } catch (e) {
-    insights.error(e);
-    console.error("[ERROR] OpenAI responded with status: " + e);
-
-    try {
-      await serviceEmail.sendMailError(req.body.lang, req.body.value, e);
-    } catch (emailError) {
-      insights.error(emailError);
-      console.log('Fail sending email');
-    }
-
-    return res.status(500).send('error');
-  }
-}
-
 function isValidGeneralFeedbackData(data) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
@@ -1598,36 +1447,6 @@ async function sendFlow(generalfeedback, lang) {
     console.error('Error al enviar datos:', error.message);
     insights.error(error);
   }
-
-}
-
-function getFeedBack(req, res) {
-
-  Generalfeedback.find({}, function (err, generalfeedbackList) {
-    let frecuenciasP1 = {};
-    let frecuenciasP2 = {};
-    generalfeedbackList.forEach(function (doc) {
-      let p1 = doc.pregunta1;
-      let p2 = doc.pregunta2;
-
-      if (frecuenciasP1[p1]) {
-        frecuenciasP1[p1]++;
-      } else {
-        frecuenciasP1[p1] = 1;
-      }
-
-      if (frecuenciasP2[p2]) {
-        frecuenciasP2[p2]++;
-      } else {
-        frecuenciasP2[p2] = 1;
-      }
-    });
-
-    res.status(200).send({
-      pregunta1: frecuenciasP1,
-      pregunta2: frecuenciasP2
-    });
-  })
 
 }
 
@@ -2913,9 +2732,7 @@ module.exports = {
   callOpenAiV2,
   callOpenAiQuestions,
   opinion,
-  sendFeedback,
   sendGeneralFeedback,
-  getFeedBack,
   generateFollowUpQuestions,
   generateERQuestions,
   processFollowUpAnswers,

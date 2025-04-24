@@ -1,21 +1,17 @@
-// Support schema
-'use strict'
+'use strict';
 
-const mongoose = require ('mongoose');
-const Schema = mongoose.Schema
+const mongoose = require('../db_connect'); // importamos mongoose directamente
+const Schema = mongoose.Schema;
 
-const { conndbaccounts } = require('../db_connect')
+const GeneralfeedbackSchema = new Schema({
+  myuuid: String,
+  pregunta1: String,
+  pregunta2: String,
+  userType: String,
+  moreFunct: String,
+  freeText: String,
+  email: String,
+  date: { type: Date, default: Date.now }
+});
 
-const GeneralfeedbackSchema = Schema({
-	myuuid: String,
-	pregunta1: String,
-	pregunta2: String,
-	userType: String,
-	moreFunct: String,
-	freeText: String,
-	email: String,
-	date: {type: Date, default: Date.now}
-})
-
-module.exports = conndbaccounts.model('Generalfeedback',GeneralfeedbackSchema)
-// we need to export the model so that it is accessible in the rest of the app
+module.exports = mongoose.model('Generalfeedback', GeneralfeedbackSchema);

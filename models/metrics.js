@@ -1,7 +1,9 @@
-const mongoose = require('mongoose');
-const { conndbaccounts } = require('../db_connect');
+'use strict';
 
-const MetricsSchema = new mongoose.Schema({
+const mongoose = require('../db_connect'); // usamos mongoose completo desde la conexión central
+const Schema = mongoose.Schema;
+
+const MetricsSchema = new Schema({
   timestamp: {
     type: Date,
     default: Date.now,
@@ -40,7 +42,7 @@ const MetricsSchema = new mongoose.Schema({
   }
 });
 
-// Índices para búsquedas eficientes
+// Índice compuesto
 MetricsSchema.index({ timestamp: 1, region: 1, period: 1 });
 
-module.exports = conndbaccounts.model('Metrics', MetricsSchema); 
+module.exports = mongoose.model('Metrics', MetricsSchema);

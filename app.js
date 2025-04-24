@@ -56,7 +56,6 @@ app.use(setCrossDomain);
 
 // API y rutas
 app.use('/api', api);
-app.use('/apidoc', express.static('apidoc', { 'index': ['index.html'] }));
 
 // Frontend Angular
 app.use(express.static(path.join(__dirname, 'dist')));
