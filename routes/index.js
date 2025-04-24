@@ -34,7 +34,7 @@ const whitelist = config.allowedOrigins;
         if (whitelist.includes(origin)) {
           callback(null, true);
         } else {
-          const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+          /*const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
           const requestInfo = {
             method: req.method,
             url: req.url,
@@ -51,7 +51,7 @@ const whitelist = config.allowedOrigins;
             } catch (emailError) {
               console.log('Fail sending email');
             }
-          }
+          }*/
           callback(new Error('Not allowed by CORS'));
         }
       }
