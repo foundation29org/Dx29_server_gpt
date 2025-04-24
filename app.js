@@ -34,13 +34,13 @@ function setCrossDomain(req, res, next) {
   const origin = req.headers.origin;
   const clientIp = getRealIp(req);
 
-  // ⚠️ Bloqueo de IPs internas
+  // Bloqueo IPs internas
   if (isInternalIp(clientIp)) {
     console.warn(`⛔ Bloqueada IP interna o no válida: ${clientIp}`);
     return res.status(401).json({ error: 'Blocked internal or missing IP' });
   }
 
-  // 🌍 Bloqueo por país (opcional)
+  // Geobloqueo
   const geo = geoip.lookup(clientIp);
   const blockedCountries = ['RU', 'BY', 'KP'];
   if (geo && blockedCountries.includes(geo.country)) {
@@ -48,16 +48,22 @@ function setCrossDomain(req, res, next) {
     return res.status(403).json({ error: 'Access denied by geo-block' });
   }
 
-  // ✅ CORS válido
-  if (allowedOrigins.includes(origin) || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+  // CORS: solo si el origen está permitido
+  if (allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
+    res.header('Access-Control-Allow-Credentials', 'true');
+
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+
     return next();
-  } else {
-    console.warn(`❌ Origin no permitido: ${origin}`);
-    return res.status(401).json({ error: 'Origin not allowed' });
   }
+
+  console.warn(`❌ Origin no permitido: ${origin}`);
+  return res.status(403).json({ error: 'Origin not allowed' });
 }
 
 // Middlewares básicos
@@ -65,19 +71,6 @@ app.use(bodyParser.urlencoded({ limit: '50mb', extended: false }));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(setCrossDomain);
 
-// Opciones CORS preflight
-app.options('*', (req, res) => {
-  console.log(`[CORS PRE-FLIGHT] ${req.method} ${req.path} from ${req.headers.origin}`);
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'HEAD,GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
-    return res.sendStatus(200);
-  } else {
-    return res.sendStatus(403);
-  }
-});
 
 // API y rutas
 app.use('/api', api);
