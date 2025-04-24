@@ -88,9 +88,7 @@ api.get('/getSystemStatus', corsWithOptions, checkApiKey, needsLimiter, openAIse
 api.get('/health', corsWithOptions, checkApiKey, healthLimiter, openAIserviceCtrl.checkHealth)
 
 api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
-api.post('/feedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendFeedback)
 api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
-//api.get('/generalfeedback', openAIserviceCtrl.getFeedBack)
 
 
 module.exports = api

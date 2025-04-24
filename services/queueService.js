@@ -972,8 +972,8 @@ class QueueService {
 
         // Usar find().count() en lugar de countDocuments
         const metricsCount = await Metrics.find({
-            timestamp: { $gte: lastHour }
-        }).count();
+          timestamp: { $gte: lastHour }
+        }).countDocuments();
 
         const status = metricsCount >= 0 ? 'healthy' : 'warning';
         console.log('Metrics health check:', { status, count: metricsCount });

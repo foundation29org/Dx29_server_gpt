@@ -128,42 +128,6 @@ function sendMailErrorGPTIP (lang, req, response, requestInfo){
   return decoded
 }
 
-function sendMailFeedback (email, lang, info){
-  const decoded = new Promise((resolve, reject) => {
-    var maillistbcc = [
-      TRANSPORTER_OPTIONS.auth.user
-    ];
-
-    var mailOptions = {
-      to: TRANSPORTER_OPTIONS.auth.user,
-      from: TRANSPORTER_OPTIONS.auth.user,
-      bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DxGPT - Feedback Down',
-      template: 'mail_feedback/_es',
-      context: {
-        email : email,
-        lang : lang,
-        info: JSON.stringify(info)
-      }
-    };
-
-    transporter.sendMail(mailOptions, function(error, info){
-      if (error) {
-        insights.error(error);
-        console.log(error);
-        reject({
-          status: 401,
-          message: 'Fail sending email'
-        })
-      } else {
-        resolve("ok")
-      }
-    });
-
-  });
-  return decoded
-}
-
 function sendMailGeneralFeedback (info, myuuid){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
@@ -243,7 +207,6 @@ module.exports = {
   sendMailSupport,
   sendMailError,
   sendMailErrorGPTIP,
-  sendMailFeedback,
   sendMailGeneralFeedback,
   sendMailControlCall
 }

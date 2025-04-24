@@ -1,19 +1,15 @@
-// Support schema
-'use strict'
+'use strict';
 
-const mongoose = require ('mongoose');
-const Schema = mongoose.Schema
+const mongoose = require('../db_connect'); // importa el mongoose completo desde la conexión
+const Schema = mongoose.Schema;
 
-const { conndbaccounts } = require('../db_connect')
+const SupportSchema = new Schema({
+  subject: String,
+  description: String,
+  status: { type: String, default: 'unread' },
+  email: String,
+  subscribe: { type: Boolean, default: false },
+  date: { type: Date, default: Date.now }
+});
 
-const SupportSchema = Schema({
-	subject: String,
-	description: String,
-	status: {type: String, default: 'unread'},
-	email: String,
-	subscribe: {type: Boolean, default: false},
-	date: {type: Date, default: Date.now}
-})
-
-module.exports = conndbaccounts.model('Support',SupportSchema)
-// we need to export the model so that it is accessible in the rest of the app
+module.exports = mongoose.model('Support', SupportSchema);
