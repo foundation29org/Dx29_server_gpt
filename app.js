@@ -25,7 +25,7 @@ function setCrossDomain(req, res, next) {
     next();
   }else{
     //send email
-    const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    /*const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
     const requestInfo = {
         method: req.method,
         url: req.url,
@@ -42,7 +42,7 @@ function setCrossDomain(req, res, next) {
         } catch (emailError) {
           console.log('Fail sending email');
         }
-      }
+      }*/
     res.status(401).json({ error: 'Origin not allowed' });
   }
   
