@@ -6,64 +6,46 @@
 const express = require('express');
 const compression = require('compression');
 const bodyParser = require('body-parser');
-const geoip = require('geoip-lite');
 const config = require('./config');
 const app = express();
-
 app.use(compression());
 const serviceEmail = require('./services/email');
 const api = require('./routes');
 const path = require('path');
-
 const allowedOrigins = config.allowedOrigins;
 
-function getRealIp(req) {
-  return (req.headers['x-forwarded-for']?.split(',')[0] || req.connection.remoteAddress || '').trim();
-}
-
-function isInternalIp(ip) {
-  return (
-    !ip ||
-    ip.startsWith('::ffff:169.254.') ||
-    ip.startsWith('169.254.') ||
-    ip === '::1'
-  );
-}
-
 function setCrossDomain(req, res, next) {
+  //instead of * you can define ONLY the sources that we allow.
+  //res.header('Access-Control-Allow-Origin', '*');
   const origin = req.headers.origin;
-  const clientIp = getRealIp(req);
-
-  // Bloqueo IPs internas
-  if (isInternalIp(clientIp)) {
-    console.warn(`⛔ Bloqueada IP interna o no válida: ${clientIp}`);
-    return res.status(401).json({ error: 'Blocked internal or missing IP' });
-  }
-
-  // Geobloqueo
-  const geo = geoip.lookup(clientIp);
-  const blockedCountries = ['RU', 'BY', 'KP'];
-  if (geo && blockedCountries.includes(geo.country)) {
-    console.warn(`🌍 Acceso bloqueado desde país: ${geo.country} (${clientIp})`);
-    return res.status(403).json({ error: 'Access denied by geo-block' });
-  }
-
-  // CORS: solo si el origen está permitido
-  if (allowedOrigins.includes(origin)) {
+  if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD')  {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
-    res.header('Access-Control-Allow-Credentials', 'true');
-
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
-
-    return next();
+    next();
+  }else{
+    //send email
+    const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    const requestInfo = {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        origin: origin,
+        body: req.body, // Asegúrate de que el middleware para parsear el cuerpo ya haya sido usado
+        ip: clientIp,
+        params: req.params,
+        query: req.query,
+      };
+      if(req.url.indexOf('.well-known/private-click-measurement/report-attribution') === -1){
+        try {
+          serviceEmail.sendMailControlCall(requestInfo)
+        } catch (emailError) {
+          console.log('Fail sending email');
+        }
+      }
+    res.status(401).json({ error: 'Origin not allowed' });
   }
-
-  console.warn(`❌ Origin no permitido: ${origin}`);
-  return res.status(403).json({ error: 'Origin not allowed' });
+  
 }
 
 // Middlewares básicos
