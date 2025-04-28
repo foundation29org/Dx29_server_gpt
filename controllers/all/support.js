@@ -95,11 +95,13 @@ function isValidSupportData(data) {
 	  sendFlow(support, sanitizedData.lang);
   
 	  // Guardar en base de datos (sin esperar respuesta)
-	  support.save((err, supportStored) => {
-		if (err) {
+	  support.save()
+		.then(supportStored => {
+		  // Aquí puedes manejar el caso exitoso si es necesario
+		})
+		.catch(err => {
 		  console.log('Error saving support:', err);
-		}
-	  });
+		});
   
 	  // Enviar email
 	  try {
