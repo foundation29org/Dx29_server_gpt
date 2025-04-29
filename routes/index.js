@@ -10,17 +10,18 @@ const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
 const config= require('../config')
-const { needsLimiter, healthLimiter } = require('../services/rateLimiter')
+const { needsLimiter, healthLimiter, globalLimiter } = require('../services/rateLimiter')
 const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
 const whitelist = config.allowedOrigins;
+api.use(globalLimiter);
 
   // Middleware personalizado para CORS
   function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
         // Si no hay origin y el host es uno de nuestros dominios permitidos, permitir la petición
-        if (!origin) {
+        /*if (!origin) {
           const host = req.headers.host;
           if (whitelist.some(allowed => allowed.includes(host))) {
             callback(null, true);
@@ -28,8 +29,11 @@ const whitelist = config.allowedOrigins;
           }else{
             callback(new Error('Not allowed by CORS'));
           }
-        }
+        }*/
 
+        if (!origin) {
+          return callback(new Error('Missing Origin header')); // Bloquear sin origin
+        }
         // Para peticiones con origin, verificar whitelist
         if (whitelist.includes(origin)) {
           callback(null, true);
@@ -89,6 +93,18 @@ api.get('/health', corsWithOptions, checkApiKey, healthLimiter, openAIserviceCtr
 
 api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
 api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
-
+api.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    // Dejar pasar los OPTIONS (preflight) para CORS
+    return next();
+  }
+  
+  if (req.originalUrl.startsWith('/admin') || req.originalUrl.startsWith('/host')) {
+    return res.status(403).send('Forbidden');
+  }
+  
+  // El resto ➔ 404 Not Found
+  res.status(404).send('Not found');
+});
 
 module.exports = api
