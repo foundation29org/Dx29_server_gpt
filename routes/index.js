@@ -88,8 +88,8 @@ api.post('/generateerquestions', corsWithOptions, checkApiKey, needsLimiter, ope
 api.post('/processfollowupanswers', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.processFollowUpAnswers)
 api.post('/summarize', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.summarize)
 api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getQueueStatus)
-api.get('/getSystemStatus', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getSystemStatus)
-api.get('/health', corsWithOptions, checkApiKey, healthLimiter, openAIserviceCtrl.checkHealth)
+api.get('/getSystemStatus', checkApiKey, needsLimiter, openAIserviceCtrl.getSystemStatus)
+api.get('/health', checkApiKey, healthLimiter, openAIserviceCtrl.checkHealth)
 
 api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
 api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
