@@ -10,7 +10,8 @@ async function getLangs(req, res) {
 	  const langs = await Lang.find({});
 	  const listLangs = langs
 		.filter(lang => lang.code !== 'nl')
-		.map(lang => ({ name: lang.name, code: lang.code }));
+		.map(lang => ({ name: lang.name, code: lang.code }))
+        .sort((a, b) => a.name.localeCompare(b.name));
   
 	  res.status(200).send(listLangs);
 	} catch (err) {
