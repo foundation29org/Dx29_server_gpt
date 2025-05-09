@@ -514,7 +514,11 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
       timezone: data.timezone,
       model: model
     };
-    await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
+    if(model == 'gpt4o'){
+      await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
+    }else{
+      await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+    }
   }
 
   // 7. Retornar el resultado
