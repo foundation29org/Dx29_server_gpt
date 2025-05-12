@@ -59,8 +59,8 @@ api.use(globalLimiter);
           callback(new Error('Not allowed by CORS'));
         }
       },
-      methods: 'GET,POST,PUT,DELETE,OPTIONS',
-      allowedHeaders: 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key'
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Origin', 'Accept', 'Accept-Language', 'Origin', 'User-Agent', 'x-api-key']
     };
   
     cors(corsOptions)(req, res, next);
