@@ -58,9 +58,9 @@ app.use(setCrossDomain);
 app.use('/api', api);
 
 // Frontend Angular
-app.use(express.static(path.join(__dirname, 'dist')));
+/*app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', function (req, res, next) {
   res.sendFile('dist/index.html', { root: __dirname });
-});
+});*/
 
 module.exports = app;
