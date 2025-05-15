@@ -40,3 +40,109 @@ The client code is here: [Dx29 client](https://github.com/foundation29org/Dx29_c
 		</p>
 	</div>
 <div>
+
+# DxGPT API Server
+
+## Contenerización y Despliegue
+
+Este proyecto está configurado para funcionar con Docker y se puede desplegar en Azure Container Apps con gestión segura de secretos mediante los secretos nativos de Container Apps.
+
+### Requisitos
+
+- Docker y Docker Compose instalados
+- Node.js 18.x (para desarrollo local sin Docker)
+- Una suscripción de Azure (para despliegue en Azure Container Apps)
+- Azure CLI instalado y configurado
+
+### Variables de Entorno
+
+El proyecto utiliza archivos de variables de entorno para cada entorno:
+
+- `env.local`: Para desarrollo local
+- `env.dev`: Para el entorno de desarrollo en Azure
+- `env.prod`: Para el entorno de producción en Azure
+
+Se ha creado un archivo `env.example` con todas las variables de entorno necesarias. Copia este archivo para crear los archivos específicos para cada entorno:
+
+```bash
+# Para desarrollo local
+cp env.example env.local
+
+# Para desarrollo en Azure
+cp env.example env.dev
+
+# Para producción en Azure
+cp env.example env.prod
+```
+
+Luego edita cada archivo con los valores correspondientes para cada entorno. Asegúrate de incluir todas las variables necesarias como `API_MANAGEMENT_KEY`, `INSIGHTS`, `SERVER_KEY`, `TRANSLATION_KEY`, y sus variantes para cada entorno.
+
+#### Gestión de Secretos en Azure Container Apps
+
+Para el despliegue en Azure, todas las variables sensibles se gestionan de forma segura mediante los secretos nativos de Azure Container Apps:
+
+1. Las variables sensibles se almacenan como secretos internos en Container Apps y se referencian mediante `keyvaultref`.
+2. Las aplicaciones referencian estos secretos mediante la sintaxis `keyvaultref` para asegurar que las credenciales no se exponen en los logs ni en las configuraciones.
+3. Los secretos están protegidos y no se exponen en los logs ni en las configuraciones.
+
+### Despliegue en Azure Container Apps
+
+1. Edita las variables en el archivo `azure-deploy-dev.sh` o `azure-deploy-prod.sh` según el entorno:
+   - `ACR_NAME`: Nombre del Azure Container Registry
+   - `RESOURCE_GROUP`: Nombre del grupo de recursos
+   - `LOCATION`: Ubicación de Azure (ej. eastus)
+   - `CONTAINER_APP_ENV`: Nombre del entorno de Container Apps
+
+2. Asegúrate de tener los archivos `env.dev` y `env.prod` configurados con todas las variables necesarias.
+
+3. Ejecuta el script de despliegue correspondiente al entorno:
+
+```bash
+# En Linux/macOS
+chmod +x azure-deploy-dev.sh
+./azure-deploy-dev.sh
+
+# Para producción
+chmod +x azure-deploy-prod.sh
+./azure-deploy-prod.sh
+
+# En Windows (PowerShell)
+# Necesitarás adaptar el script a PowerShell o usar WSL
+```
+
+El script:
+- Creará un grupo de recursos si no existe
+- Creará un Azure Container Registry si no existe
+- Creará un entorno de Container Apps si no existe
+- Construirá y publicará las imágenes Docker
+- Desplegará las aplicaciones con los secretos configurados
+- Configurará las variables de entorno para referenciar los secretos
+
+### Seguridad
+
+Las credenciales y secretos se almacenan de forma segura como secretos internos de Container Apps y se referencian en las variables de entorno mediante `keyvaultref`. Esto mantiene las credenciales protegidas y separadas del código de la aplicación.
+
+### Ejecución Local con Docker
+
+Para ejecutar el proyecto localmente usando Docker:
+
+```bash
+# Entorno de desarrollo local (puerto 8443)
+docker-compose up app-local
+
+# Entorno de desarrollo para Azure
+docker-compose up app-dev
+
+# Entorno de producción
+docker-compose up app-prod
+```
+
+### Construcción de Imágenes
+
+```bash
+# Construir imagen de desarrollo
+docker build -t dxgpt-api:dev -f Dockerfile.dev .
+
+# Construir imagen de producción
+docker build -t dxgpt-api:prod -f Dockerfile .
+```
