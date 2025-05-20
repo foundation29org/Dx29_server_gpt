@@ -241,7 +241,7 @@ class QueueService {
         body: {
           description: data.description,
           myuuid: data.myuuid,
-          operation: data.operation,
+          operation: 'find disease',
           lang: data.lang,
           diseases_list: data.diseases_list,
           timestamp: new Date().toISOString(),

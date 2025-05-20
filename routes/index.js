@@ -73,25 +73,30 @@ api.use(globalLimiter);
     }
   };
 
-// lang routes, using the controller lang, this controller has methods
 api.get('/langs/', needsLimiter, langCtrl.getLangs)
 
-//Support
 api.post('/homesupport/', corsWithOptions, checkApiKey, needsLimiter, supportCtrl.sendMsgLogoutSupport)
 
-//services OPENAI
 api.post('/callopenai', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAi)
 api.post('/callopenaiV2', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAiV2)
+
+
 api.post('/callopenaiquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAiQuestions)
+
 api.post('/generatefollowupquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.generateFollowUpQuestions)
 api.post('/generateerquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.generateERQuestions)
 api.post('/processfollowupanswers', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.processFollowUpAnswers)
+
+
 api.post('/summarize', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.summarize)
+
 api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getQueueStatus)
+
 api.get('/getSystemStatus', checkApiKey, needsLimiter, openAIserviceCtrl.getSystemStatus)
 api.get('/health', checkApiKey, healthLimiter, openAIserviceCtrl.checkHealth)
 
 api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
+
 api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {

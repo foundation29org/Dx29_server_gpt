@@ -14,6 +14,23 @@ const serviceEmail = require('./services/email');
 const api = require('./routes');
 const path = require('path');
 const allowedOrigins = config.allowedOrigins;
+const swaggerUi = require('swagger-ui-express');
+const YAML = require('yaml');
+const fs = require('fs');
+
+// Cargar la especificación OpenAPI desde el archivo YAML
+const openApiPath = path.join(__dirname, 'docs/dxgpt-api.yaml');
+let swaggerSpec = {};
+
+// Intentar cargar el archivo si existe
+if (fs.existsSync(openApiPath)) {
+  try {
+    const fileContents = fs.readFileSync(openApiPath, 'utf8');
+    swaggerSpec = YAML.parse(fileContents);
+  } catch (err) {
+    console.error('Error loading OpenAPI specification:', err);
+  }
+}
 
 function setCrossDomain(req, res, next) {
   //instead of * you can define ONLY the sources that we allow.
@@ -54,14 +71,16 @@ app.use(bodyParser.urlencoded({ limit: '50mb', extended: false }));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(setCrossDomain);
 
-
 // API y rutas
 app.use('/api', api);
 
-// Frontend Angular
-/*app.use(express.static(path.join(__dirname, 'dist')));
-app.get('*', function (req, res, next) {
-  res.sendFile('dist/index.html', { root: __dirname });
-});*/
+// Serve Swagger documentation if specification is available
+if (Object.keys(swaggerSpec).length > 0) {
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  app.get('/swagger.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 module.exports = app;

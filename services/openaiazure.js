@@ -28,7 +28,7 @@ function isValidOpenAiRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos (timezone no incluido)
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'myuuid', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -40,9 +40,6 @@ function isValidOpenAiRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'find disease') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
@@ -439,7 +436,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     if (requestInfo) {
       let infoError = {
         myuuid: data.myuuid,
-        operation: data.operation,
+        operation: 'find disease',
         lang: data.lang,
         description: data.description,
         error: parseError.message,
@@ -504,7 +501,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
       value: anonymizedDescription,
       valueEnglish: anonymizedDescriptionEnglish,
       myuuid: data.myuuid,
-      operation: data.operation,
+      operation: 'find disease',
       lang: data.lang,
       response: parsedResponse,
       responseEnglish: parsedResponseEnglish,
@@ -863,7 +860,7 @@ function isValidQuestionRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['questionType', 'disease', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['questionType', 'disease', 'myuuid', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar questionType
@@ -881,9 +878,6 @@ function isValidQuestionRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'info disease') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
@@ -1205,16 +1199,13 @@ function isValidOpinionData(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'operation', 'lang', 'vote'];
+  const requiredFields = ['value', 'myuuid', 'lang', 'vote'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar myuuid
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'vote') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
@@ -1459,7 +1450,7 @@ function isValidFollowUpQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'diseases', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'diseases', 'myuuid', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1476,9 +1467,6 @@ function isValidFollowUpQuestionsRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'generate follow-up questions') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
@@ -1761,7 +1749,7 @@ Example output:
       
       let infoError = {
         myuuid: sanitizedData.myuuid,
-        operation: sanitizedData.operation,
+        operation: 'follow-up',
         lang: sanitizedData.lang,
         description: description,
         error: parseError.message,
@@ -1801,7 +1789,7 @@ Example output:
       value: description,
       valueEnglish: englishDescription,
       myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
+      operation: 'follow-up',
       lang: sanitizedData.lang,
       diseases: diseases,
       diseasesEnglish: englishDiseases,
@@ -1854,7 +1842,7 @@ function isValidERQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'myuuid', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1866,9 +1854,6 @@ function isValidERQuestionsRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'generate ER questions') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
@@ -2072,7 +2057,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       
       let infoError = {
         myuuid: sanitizedData.myuuid,
-        operation: sanitizedData.operation,
+        operation: 'er-questions',
         lang: sanitizedData.lang,
         description: description,
         error: parseError.message,
@@ -2112,7 +2097,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       value: description,
       valueEnglish: englishDescription,
       myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
+      operation: 'er-questions',
       lang: sanitizedData.lang,
       questions: questions,
       header_language: header_language,
@@ -2162,7 +2147,7 @@ function isValidProcessFollowUpRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'answers', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'answers', 'myuuid', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -2184,9 +2169,6 @@ function isValidProcessFollowUpRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'process follow-up answers') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
@@ -2395,7 +2377,7 @@ async function processFollowUpAnswers(req, res) {
       originalDescription: description,
       originalDescriptionEnglish: englishDescription,
       myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
+      operation: 'process-follow-up',
       lang: sanitizedData.lang,
       answers: answers,
       answersEnglish: englishAnswers,
@@ -2447,7 +2429,7 @@ function isValidSummarizeRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'myuuid', 'lang'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
@@ -2459,9 +2441,6 @@ function isValidSummarizeRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'summarize text') return false;
 
   // Validar lang
   if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;

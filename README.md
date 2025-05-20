@@ -43,106 +43,105 @@ The client code is here: [Dx29 client](https://github.com/foundation29org/Dx29_c
 
 # DxGPT API Server
 
-## Contenerización y Despliegue
+## Containerization and Deployment
 
-Este proyecto está configurado para funcionar con Docker y se puede desplegar en Azure Container Apps con gestión segura de secretos mediante los secretos nativos de Container Apps.
+This project is configured to work with Docker and can be deployed on Azure Container Apps with secure secret management using native Container Apps secrets.
 
-### Requisitos
+### Deployment on Azure Container Apps
 
-- Docker y Docker Compose instalados
-- Node.js 18.x (para desarrollo local sin Docker)
-- Una suscripción de Azure (para despliegue en Azure Container Apps)
-- Azure CLI instalado y configurado
+The project uses Azure Container Apps with Azure Key Vault for secure secret management through RBAC (Role-Based Access Control).
 
-### Variables de Entorno
+#### Requirements
 
-El proyecto utiliza archivos de variables de entorno para cada entorno:
+- Docker and Docker Compose installed
+- Node.js 18.x (for local development without Docker)
+- An Azure subscription
+- Azure CLI installed and configured
+- Azure Key Vault with RBAC enabled
+- Admin permissions in Azure to configure RBAC
 
-- `env.local`: Para desarrollo local
-- `env.dev`: Para el entorno de desarrollo en Azure
-- `env.prod`: Para el entorno de producción en Azure
+#### Environment Variables
 
-Se ha creado un archivo `env.example` con todas las variables de entorno necesarias. Copia este archivo para crear los archivos específicos para cada entorno:
+The project uses environment variable files for each environment. An `env.example` file has been created with all the necessary variables. Copy this file to create specific files for each environment:
 
 ```bash
-# Para desarrollo local
+# For local development
 cp env.example env.local
 
-# Para desarrollo en Azure
+# For development on Azure
 cp env.example env.dev
 
-# Para producción en Azure
+# For production on Azure
 cp env.example env.prod
 ```
 
-Luego edita cada archivo con los valores correspondientes para cada entorno. Asegúrate de incluir todas las variables necesarias como `API_MANAGEMENT_KEY`, `INSIGHTS`, `SERVER_KEY`, `TRANSLATION_KEY`, y sus variantes para cada entorno.
+Then edit each file with the corresponding values for each environment.
 
-#### Gestión de Secretos en Azure Container Apps
+#### Secret Management
 
-Para el despliegue en Azure, todas las variables sensibles se gestionan de forma segura mediante los secretos nativos de Azure Container Apps:
+The system implements multiple layers of security:
 
-1. Las variables sensibles se almacenan como secretos internos en Container Apps y se referencian mediante `keyvaultref`.
-2. Las aplicaciones referencian estos secretos mediante la sintaxis `keyvaultref` para asegurar que las credenciales no se exponen en los logs ni en las configuraciones.
-3. Los secretos están protegidos y no se exponen en los logs ni en las configuraciones.
+1. RBAC for granular access control
+2. Managed identities for secure authentication
+3. Secure references to secrets via URIs
+4. Secret protection in Key Vault
+5. Environment isolation through separate resources
 
-### Despliegue en Azure Container Apps
+#### Local Execution with Docker
 
-1. Edita las variables en el archivo `azure-deploy-dev.sh` o `azure-deploy-prod.sh` según el entorno:
-   - `ACR_NAME`: Nombre del Azure Container Registry
-   - `RESOURCE_GROUP`: Nombre del grupo de recursos
-   - `LOCATION`: Ubicación de Azure (ej. eastus)
-   - `CONTAINER_APP_ENV`: Nombre del entorno de Container Apps
-
-2. Asegúrate de tener los archivos `env.dev` y `env.prod` configurados con todas las variables necesarias.
-
-3. Ejecuta el script de despliegue correspondiente al entorno:
+To run the project locally using Docker:
 
 ```bash
-# En Linux/macOS
-chmod +x azure-deploy-dev.sh
-./azure-deploy-dev.sh
-
-# Para producción
-chmod +x azure-deploy-prod.sh
-./azure-deploy-prod.sh
-
-# En Windows (PowerShell)
-# Necesitarás adaptar el script a PowerShell o usar WSL
-```
-
-El script:
-- Creará un grupo de recursos si no existe
-- Creará un Azure Container Registry si no existe
-- Creará un entorno de Container Apps si no existe
-- Construirá y publicará las imágenes Docker
-- Desplegará las aplicaciones con los secretos configurados
-- Configurará las variables de entorno para referenciar los secretos
-
-### Seguridad
-
-Las credenciales y secretos se almacenan de forma segura como secretos internos de Container Apps y se referencian en las variables de entorno mediante `keyvaultref`. Esto mantiene las credenciales protegidas y separadas del código de la aplicación.
-
-### Ejecución Local con Docker
-
-Para ejecutar el proyecto localmente usando Docker:
-
-```bash
-# Entorno de desarrollo local (puerto 8443)
+# Local development environment
 docker-compose up app-local
 
-# Entorno de desarrollo para Azure
+# Development environment for Azure
 docker-compose up app-dev
 
-# Entorno de producción
+# Production environment
 docker-compose up app-prod
 ```
 
-### Construcción de Imágenes
+#### Image Building
 
 ```bash
-# Construir imagen de desarrollo
+# Build development image
 docker build -t dxgpt-api:dev -f Dockerfile.dev .
 
-# Construir imagen de producción
+# Build production image
 docker build -t dxgpt-api:prod -f Dockerfile .
 ```
+
+## OpenAPI Specification
+
+The project includes an OpenAPI specification that defines all the API endpoints. This specification is located in `docs/dxgpt-api.yaml`.
+
+### Direct Swagger/OpenAPI Editing
+
+Instead of using JSDoc annotations, we work directly with the OpenAPI specification file. This gives more control and allows using visual editors:
+
+1. **Edit OpenAPI File Directly**: Modify the `docs/dxgpt-api.yaml` file directly
+2. **Use Swagger Editor**: Import/export your specification at [Swagger Editor](https://editor.swagger.io)
+
+### Validation
+
+To validate the OpenAPI specification, run:
+
+```
+npm run validate-openapi
+```
+
+### Swagger UI
+
+There are two ways to view the API documentation:
+
+1. **Within the Main Application**: Documentation is available at the `/docs` endpoint when the server is running
+2. **Standalone Swagger UI Server**: Run a dedicated documentation server:
+
+```
+npm run swagger-ui
+```
+
+This will start a server at http://localhost:3000 dedicated to displaying your API documentation.
+
+This specification is necessary to integrate the API with Azure API Management (APIM) and generate the developer portal.

@@ -1,0 +1,1005 @@
+openapi: 3.0.0
+info:
+  title: DXGPT API
+  version: 1.0.0
+  description: API for DXGPT services
+  contact:
+    name: DXGPT Support
+servers:
+  - url: /v1
+    description: API Version 1
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+  schemas:
+    Language:
+      type: object
+      properties:
+        code:
+          type: string
+          example: en
+        name:
+          type: string
+          example: English
+    SupportRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        message:
+          type: string
+      required:
+        - email
+        - message
+    OpenAIRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's medical description
+          minLength: 10
+          maxLength: 8000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head."
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+        diseases_list:
+          type: string
+          description: List of previously identified diseases (optional)
+          maxLength: 1000
+          example: "Migraine, Tension headache, Cluster headache"
+      required:
+        - description
+        - myuuid
+        - lang
+    OpenAIResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, translation error, unsupported_language, queued]
+          example: "success"
+        data:
+          type: object
+          description: Response data (only when result is success)
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  diagnosis:
+                    type: string
+                    example: "Migraine"
+                  description:
+                    type: string
+                    example: "A neurological condition characterized by recurrent moderate to severe headaches, often with associated symptoms like nausea, vomiting, and sensitivity to light and sound."
+                  symptoms_in_common:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Throbbing headache", "Light sensitivity", "Nausea"]
+                  symptoms_not_in_common:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Visual auras", "Vomiting", "Sound sensitivity"]
+        anonymization:
+          type: object
+          properties:
+            hasPersonalInfo:
+              type: boolean
+              example: true
+            anonymizedText:
+              type: string
+              example: "Patient presents with headache for the past 3 weeks..."
+            anonymizedTextHtml:
+              type: string
+              example: "Patient presents with headache for the past 3 weeks..."
+        detectedLang:
+          type: string
+          example: "en"
+        queueInfo:
+          type: object
+          description: Queue information (only when result is queued)
+          properties:
+            ticketId:
+              type: string
+              example: "ticket-123456"
+            position:
+              type: integer
+              example: 3
+            estimatedWaitTime:
+              type: integer
+              description: Estimated wait time in minutes
+              example: 5
+            region:
+              type: string
+              example: "WestUS"
+            utilizationPercentage:
+              type: number
+              format: float
+              example: 85.5
+    QuestionsRequest:
+      type: object
+      properties:
+        questionType:
+          type: integer
+          description: |
+            Type of questions or information to generate:
+            - 0: Common symptoms associated with the disease
+            - 1: Detailed information about the disease (for medical professionals)
+            - 2: Diagnostic tests for the disease
+            - 3: Potential symptoms not mentioned by patient for differential diagnosis (requires medicalDescription)
+            - 4: Analysis of why patient might have the disease (requires medicalDescription)
+          minimum: 0
+          maximum: 4
+          example: 1
+        disease:
+          type: string
+          description: Disease to generate questions about
+          minLength: 2
+          maxLength: 100
+          example: "Multiple Sclerosis"
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        detectedLang:
+          type: string
+          description: Detected language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+        medicalDescription:
+          type: string
+          description: Medical description (required for questionType 3 and 4)
+          minLength: 10
+          maxLength: 8000
+          example: "Patient presents with fatigue, numbness in limbs, and vision problems for the last 6 months."
+      required:
+        - questionType
+        - disease
+        - myuuid
+        - lang
+        - detectedLang
+    QuestionsResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error]
+          example: "success"
+        data:
+          type: object
+          description: Response data
+          properties:
+            type:
+              type: string
+              enum: [differential, general]
+              description: Type of response data (differential for questionType 3, general for others)
+              example: "general"
+            content:
+              type: string
+              description: HTML content with questions/answers (for general type)
+              example: "<p>Common symptoms of Multiple Sclerosis include...</p>"
+            symptoms:
+              type: array
+              description: List of symptoms (for differential type)
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: "Double vision"
+                  checked:
+                    type: boolean
+                    example: false
+        detectedLang:
+          type: string
+          example: "en"
+    FollowUpQuestionsRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's medical description
+          minLength: 10
+          maxLength: 8000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
+        diseases:
+          type: string
+          description: List of suggested diseases that didn't match the patient's experience
+          minLength: 2
+          maxLength: 1000
+          example: "Migraine, Tension headache, Cluster headache"
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - diseases
+        - myuuid
+        - lang
+    FollowUpQuestionsResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, translation error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          properties:
+            questions:
+              type: array
+              description: List of generated follow-up questions
+              items:
+                type: string
+              example: ["What is your age and gender?", "How long have you been experiencing these symptoms?", "Do you have any prior medical conditions?"]
+        detectedLang:
+          type: string
+          description: Detected language of the patient's description
+          example: "en"
+    ERQuestionsRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's initial medical description
+          minLength: 10
+          maxLength: 8000
+          example: "I've been experiencing fatigue and shortness of breath for the last two weeks, especially when climbing stairs."
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - myuuid
+        - lang
+    ERQuestionsResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, translation error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          properties:
+            questions:
+              type: array
+              description: List of generated initial questions
+              items:
+                type: string
+              example: ["What is your age and gender?", "Do you have any history of heart or lung conditions?", "Are you experiencing any pain along with the shortness of breath?"]
+        detectedLang:
+          type: string
+          description: Detected language of the patient's description
+          example: "en"
+    FollowUpAnswersRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's initial medical description
+          minLength: 10
+          maxLength: 8000
+          example: "I've been experiencing persistent headache for the past 3 weeks, accompanied by sensitivity to light."
+        answers:
+          type: array
+          description: Array of questions and their corresponding answers
+          items:
+            type: object
+            properties:
+              question:
+                type: string
+                description: The follow-up question
+                example: "What is your age and gender?"
+              answer:
+                type: string
+                description: The patient's answer to the question
+                example: "I am a 35-year-old female."
+            required:
+              - question
+              - answer
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - answers
+        - myuuid
+        - lang
+    FollowUpAnswersResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          description: Response data (only when result is success)
+          properties:
+            updatedDescription:
+              type: string
+              description: Updated medical description with incorporated follow-up answers
+              example: "I'm a 35-year-old female experiencing persistent headache for the past 3 weeks. The headaches are throbbing in nature, primarily on the right side, and are accompanied by sensitivity to light. I've noticed that the headaches worsen after prolonged screen use and are partially relieved by over-the-counter pain medication."
+        detectedLang:
+          type: string
+          description: Detected language of the provided description
+          example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
+    SummarizeRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Text to be summarized (medical description)
+          minLength: 10
+          maxLength: 400000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head."
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - myuuid
+        - lang
+    SummarizeResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          description: Response data (only when result is success)
+          properties:
+            summary:
+              type: string
+              description: The summarized text
+              example: "40-year-old male with 3-week history of right-sided throbbing headaches, photophobia, and occasional nausea."
+        detectedLang:
+          type: string
+          description: Detected language of the provided text
+          example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
+    QueueStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - completed
+            - failed
+        position:
+          type: integer
+        estimatedTime:
+          type: integer
+          description: Estimated time in seconds
+    SystemStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - online
+            - degraded
+            - offline
+        services:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+              - online
+              - degraded
+              - offline
+    OpinionRequest:
+      type: object
+      properties:
+        text:
+          type: string
+      required:
+        - text
+    OpinionResponse:
+      type: object
+      properties:
+        sentiment:
+          type: string
+          enum:
+            - positive
+            - neutral
+            - negative
+        score:
+          type: number
+          format: float
+    GeneralFeedbackRequest:
+      type: object
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+      required:
+        - rating
+    GeneralFeedbackResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+  responses:
+    UnauthorizedError:
+      description: Invalid or missing API Key
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Invalid or missing API Key
+    TooManyRequestsError:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Too many requests, please try again later
+paths:
+  /langs:
+    get:
+      summary: Get available languages
+      description: Returns a list of all available languages
+      tags:
+        - Languages
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: List of available languages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Language"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /homesupport:
+    post:
+      summary: Send support message
+      description: Submit a support message from users
+      tags:
+        - Support
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportRequest"
+      responses:
+        "200":
+          description: Message sent successfully
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /callopenai:
+    post:
+      summary: Call OpenAI
+      description: |
+        Analyzes a patient's medical description and provides a list of possible disease diagnoses. This endpoint prioritizes speed over complexity.
+        
+        For best results:
+        - Provide relevant patient details such as age, gender, main symptoms, and when they started
+        - Include relevant medical history or family history if available
+        - A length of 200-2000 characters is recommended for optimal results
+        
+        If the optional parameter `diseases_list` is provided, these diseases will be excluded from the results.
+        
+        Example of effective input: "Female, 42 years old, severe headaches for 3 months, dizziness, light sensitivity, family history of migraines."
+        
+        **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description.
+        
+        **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count). Medical details such as symptoms, diagnosis, and treatment information are preserved.
+      tags:
+        - OpenAI
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenAIRequest"
+      responses:
+        "200":
+          description: OpenAI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /callopenaiV2:
+    post:
+      summary: Call OpenAI (V2)
+      description: |
+        Analyzes a patient's medical description and provides a list of possible disease diagnoses. This endpoint uses more advanced capabilities, offering more comprehensive analysis at the cost of slightly longer processing times.
+        
+        For best results:
+        - Provide relevant patient details such as age, gender, main symptoms, and when they started
+        - Include relevant medical history or family history if available
+        - A length of 200-2000 characters is recommended for optimal results
+        
+        If the optional parameter `diseases_list` is provided, these diseases will be excluded from the results.
+        
+        Example of effective input: "Female, 42 years old, severe headaches for 3 months, dizziness, light sensitivity, family history of migraines."
+        
+        **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description.
+        
+        **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count). Medical details such as symptoms, diagnosis, and treatment information are preserved.
+      tags:
+        - OpenAI
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenAIRequest"
+      responses:
+        "200":
+          description: OpenAI response (V2)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /callopenaiquestions:
+    post:
+      summary: Generate questions with OpenAI
+      description: |
+        Generate a set of questions or information about a specific disease based on the questionType parameter.
+        
+        The questionType parameter determines what type of content will be generated:
+        - 0: List of common symptoms associated with the disease, ordered by probability
+        - 1: Detailed information about the disease (intended for medical professionals)
+        - 2: Information about diagnostic tests for the disease
+        - 3: List of potential symptoms not mentioned in the patient's description that could help in making a differential diagnosis (requires medicalDescription)
+        - 4: Analysis of why the patient might have the specified disease, comparing symptoms present and absent (requires medicalDescription)
+        
+        Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
+      tags:
+        - OpenAI
+        - Questions
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestionsRequest"
+      responses:
+        "200":
+          description: Generated questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionsResponse"
+        "400":
+          description: Invalid request format or content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid question type
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /generatefollowupquestions:
+    post:
+      summary: Generate follow-up questions
+      description: Generate follow-up questions based on context and previous questions
+      tags:
+        - OpenAI
+        - Questions
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FollowUpQuestionsRequest"
+      responses:
+        "200":
+          description: Generated follow-up questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowUpQuestionsResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /generateerquestions:
+    post:
+      summary: Generate ER questions
+      description: Generate ER-related questions based on context
+      tags:
+        - OpenAI
+        - Questions
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ERQuestionsRequest"
+      responses:
+        "200":
+          description: Generated ER questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ERQuestionsResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /processfollowupanswers:
+    post:
+      summary: Process follow-up answers
+      description: Updates a patient's medical description by incorporating information from follow-up question answers
+      tags:
+        - OpenAI
+        - Questions
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FollowUpAnswersRequest"
+      responses:
+        "200":
+          description: Processed answers with updated patient description
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowUpAnswersResponse"
+        "400":
+          description: Invalid request format or content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid request format or content
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /summarize:
+    post:
+      summary: Summarize medical description
+      description: Generate a concise summary of a medical description while preserving essential clinical information
+      tags:
+        - OpenAI
+        - Content
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SummarizeRequest"
+      responses:
+        "200":
+          description: Summarized content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SummarizeResponse"
+        "400":
+          description: Invalid request format or content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid request format or content
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /queue-status/{ticketId}:
+    post:
+      summary: Get queue status
+      description: Get the status of a request in the processing queue
+      tags:
+        - Queue
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatusResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /getSystemStatus:
+    get:
+      summary: Get system status
+      description: Retrieve the current status of the system and its components
+      tags:
+        - System
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: System status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatusResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /health:
+    get:
+      summary: Check system health
+      description: Simple health check endpoint to verify the API is running
+      tags:
+        - System
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /opinion:
+    post:
+      summary: Send opinion
+      description: Submit user opinion about content
+      tags:
+        - Feedback
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpinionRequest"
+      responses:
+        "200":
+          description: Opinion sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpinionResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /generalfeedback:
+    post:
+      summary: Send general feedback
+      description: Submit general feedback about the application
+      tags:
+        - Feedback
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneralFeedbackRequest"
+      responses:
+        "200":
+          description: Feedback sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneralFeedbackResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+tags: []
