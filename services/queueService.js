@@ -6,7 +6,12 @@ const Metrics = require('../models/metrics');
 const metricsService = require('./metricsService');
 
 // Configuración de Service Bus
-const connectionString = config.serviceBusConnectionString;
+function clean(s) {
+  return s.replace(/[\r\n"' ]/g, '');
+}
+const namespace = clean(config.serviceBusName);
+const key       = clean(config.serviceBusKey);
+const connectionString = `Endpoint=sb://${namespace}.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=${key}`;
 const queueName = "diagnosis-queue";
 
 const REGION_MAPPING = {

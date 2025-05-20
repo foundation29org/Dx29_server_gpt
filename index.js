@@ -10,8 +10,10 @@ const app = require('./app')
 let appInsights = require('applicationinsights');
 const queueService = app.get('queueService');
 
+const insightsKey = config.insightsKey;
+const url = "InstrumentationKey="+insightsKey+";IngestionEndpoint=https://westeurope-5.in.applicationinsights.azure.com/;LiveEndpoint=https://westeurope.livediagnostics.monitor.azure.com/"
 if(config.client_server!='http://localhost:4200'){
-	appInsights.setup(config.INSIGHTS)
+	appInsights.setup(url)
     .setAutoDependencyCorrelation(true)
     .setAutoCollectRequests(true)
     .setAutoCollectPerformance(true, true)
