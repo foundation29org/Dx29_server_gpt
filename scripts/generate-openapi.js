@@ -55,7 +55,7 @@ const swaggerOptions = {
           },
           required: ['email', 'message']
         },
-        OpenAIRequest: {
+        DiagnoseRequest: {
           type: 'object',
           properties: {
             prompt: {
@@ -73,7 +73,7 @@ const swaggerOptions = {
           },
           required: ['prompt']
         },
-        OpenAIResponse: {
+        DiagnoseResponse: {
           type: 'object',
           properties: {
             text: {

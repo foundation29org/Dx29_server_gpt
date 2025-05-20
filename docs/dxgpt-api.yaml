@@ -35,7 +35,7 @@ components:
       required:
         - email
         - message
-    OpenAIRequest:
+    DiagnoseRequest:
       type: object
       properties:
         description:
@@ -75,7 +75,7 @@ components:
         - description
         - myuuid
         - lang
-    OpenAIResponse:
+    DiagnoseResponse:
       type: object
       properties:
         result:
@@ -628,11 +628,15 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /callopenai:
+  /diagnose:
     post:
-      summary: Call OpenAI
+      summary: Unified diagnosis endpoint
       description: |
-        Analyzes a patient's medical description and provides a list of possible disease diagnoses. This endpoint prioritizes speed over complexity.
+        Analyzes a patient's medical description and provides a list of possible disease diagnoses. This unified endpoint allows choosing between different models through the optional "model" parameter.
+        
+        Available models:
+        - "gpt4o" (default): Faster processing with good accuracy
+        - "o1": More comprehensive analysis with longer processing time
         
         For best results:
         - Provide relevant patient details such as age, gender, main symptoms, and when they started
@@ -646,8 +650,10 @@ paths:
         **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description.
         
         **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count). Medical details such as symptoms, diagnosis, and treatment information are preserved.
+        
+        **Queue System**: When using the default "gpt4o" model, requests may be queued during high traffic. A queue status will be returned for tracking.
       tags:
-        - OpenAI
+        - Diagnosis
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -655,60 +661,69 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OpenAIRequest"
+              allOf:
+                - $ref: "#/components/schemas/DiagnoseRequest"
+                - type: object
+                  properties:
+                    model:
+                      type: string
+                      description: Model to use for diagnosis
+                      enum: ["gpt4o", "o1"]
+                      default: "gpt4o"
+                      example: "gpt4o"
       responses:
         "200":
-          description: OpenAI response
+          description: Diagnosis response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OpenAIResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/DiagnoseResponse"
+                  - type: object
+                    properties:
+                      result:
+                        type: string
+                        example: "queued"
+                      queueInfo:
+                        type: object
+                        properties:
+                          ticketId:
+                            type: string
+                            example: "ticket-123456"
+                          position:
+                            type: integer
+                            example: 3
+                          estimatedWaitTime:
+                            type: integer
+                            description: Estimated wait time in minutes
+                            example: 5
+                          region:
+                            type: string
+                            example: "WestUS"
+                          utilizationPercentage:
+                            type: number
+                            format: float
+                            example: 85.5
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: "error"
+                  message:
+                    type: string
+                    example: "Invalid request format or content"
         "401":
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /callopenaiV2:
+  /disease/info:
     post:
-      summary: Call OpenAI (V2)
-      description: |
-        Analyzes a patient's medical description and provides a list of possible disease diagnoses. This endpoint uses more advanced capabilities, offering more comprehensive analysis at the cost of slightly longer processing times.
-        
-        For best results:
-        - Provide relevant patient details such as age, gender, main symptoms, and when they started
-        - Include relevant medical history or family history if available
-        - A length of 200-2000 characters is recommended for optimal results
-        
-        If the optional parameter `diseases_list` is provided, these diseases will be excluded from the results.
-        
-        Example of effective input: "Female, 42 years old, severe headaches for 3 months, dizziness, light sensitivity, family history of migraines."
-        
-        **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description.
-        
-        **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count). Medical details such as symptoms, diagnosis, and treatment information are preserved.
-      tags:
-        - OpenAI
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OpenAIRequest"
-      responses:
-        "200":
-          description: OpenAI response (V2)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OpenAIResponse"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-  /callopenaiquestions:
-    post:
-      summary: Generate questions with OpenAI
+      summary: Generate questions
       description: |
         Generate a set of questions or information about a specific disease based on the questionType parameter.
         
@@ -721,8 +736,7 @@ paths:
         
         Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
       tags:
-        - OpenAI
-        - Questions
+        - MedicalInfo
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -755,12 +769,11 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /generatefollowupquestions:
+  /questions/followup:
     post:
       summary: Generate follow-up questions
       description: Generate follow-up questions based on context and previous questions
       tags:
-        - OpenAI
         - Questions
       security:
         - ApiKeyAuth: []
@@ -781,12 +794,11 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /generateerquestions:
+  /questions/emergency:
     post:
       summary: Generate ER questions
       description: Generate ER-related questions based on context
       tags:
-        - OpenAI
         - Questions
       security:
         - ApiKeyAuth: []
@@ -807,13 +819,12 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /processfollowupanswers:
+  /patient/update:
     post:
       summary: Process follow-up answers
       description: Updates a patient's medical description by incorporating information from follow-up question answers
       tags:
-        - OpenAI
-        - Questions
+        - Patient
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -846,12 +857,11 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /summarize:
+  /medical/summarize:
     post:
       summary: Summarize medical description
       description: Generate a concise summary of a medical description while preserving essential clinical information
       tags:
-        - OpenAI
         - Content
       security:
         - ApiKeyAuth: []
@@ -885,7 +895,7 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /queue-status/{ticketId}:
+  /status/{ticketId}:
     post:
       summary: Get queue status
       description: Get the status of a request in the processing queue

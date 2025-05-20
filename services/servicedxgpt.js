@@ -23,7 +23,7 @@ function sanitizeInput(input) {
     .trim();
 }
 
-function isValidOpenAiRequest(data) {
+function isValidDiagnoseRequest(data) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
@@ -292,7 +292,7 @@ async function translateInvertWithRetry(text, toLang, retries = 3, delay = 1000)
 }
 
 // Extraer la lógica principal a una función reutilizable
-async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
+async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
   // 1. Detectar idioma y traducir a inglés si es necesario
   let englishDescription = data.description;
   let detectedLanguage = data.lang;
@@ -367,9 +367,9 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     requestBody.presence_penalty = 0;
   }
 
-  const openAiResponse = await callOpenAiWithFailover(requestBody, data.timezone, model);
+  const diagnoseResponse = await callOpenAiWithFailover(requestBody, data.timezone, model);
 
-    if (!openAiResponse.data.choices[0].message.content) {
+    if (!diagnoseResponse.data.choices[0].message.content) {
     throw new Error("No response from OpenAI");
     }
 
@@ -402,12 +402,12 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     let parsedResponse;
     let parsedResponseEnglish;
     try {
-      const match = openAiResponse.data.choices[0].message.content
+      const match = diagnoseResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
 
       if (!match || !match[1]) {
         const error = new Error("Failed to match diagnosis output");
-        error.rawResponse = openAiResponse.data.choices[0].message.content;
+        error.rawResponse = diagnoseResponse.data.choices[0].message.content;
         throw error;
       }
 
@@ -531,130 +531,6 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
   };
 }
 
-async function callOpenAi(req, res) {
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    origin: req.get('origin'),
-    body: req.body,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    params: req.params,
-    query: req.query,
-    header_language: req.headers['accept-language'],
-    timezone: req.body.timezone
-  };
-
-  try {
-    if (!isValidOpenAiRequest(req.body)) {
-      insights.error({
-        message: "Invalid request format or content",
-        request: req.body
-      });
-      return res.status(400).send({
-        result: "error",
-        message: "Invalid request format or content"
-      });
-    }
-
-    const sanitizedData = sanitizeOpenAiData(req.body);
-
-    // Verificar el estado de la cola específica de la región
-    const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
-    console.log('queueProperties for region:', queueProperties);
-    console.log('queueUtilizationThreshold:', config.queueUtilizationThreshold);
-    console.log('queueProperties.utilizationPercentage:', queueProperties.utilizationPercentage);
-    if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-      // Si estamos por encima del umbral para esta región, usar su cola específica
-      console.log('Adding to queue for region:', sanitizedData.timezone);
-      const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, 'gpt4o');
-      console.log('Queue info received:', queueInfo); // Añadir log para debug
-
-      if (!queueInfo || !queueInfo.ticketId) {
-          console.error('Invalid queue info received:', queueInfo);
-          return res.status(500).send({
-              result: 'error',
-              message: 'Error adding request to queue'
-          });
-      }
-
-      return res.status(200).send({
-        result: 'queued',
-        queueInfo: {
-          ticketId: queueInfo.ticketId,
-          position: queueInfo.queuePosition,
-          estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
-          region: queueInfo.region,
-          utilizationPercentage: queueProperties.utilizationPercentage
-        }
-      });
-    }
-
-    // Si no usamos la cola, registrar la petición activa en la región correspondiente
-    const region = await queueService.registerActiveRequest(sanitizedData.timezone);
-
-    try {
-      const result = await processOpenAIRequest(sanitizedData, requestInfo, 'gpt4o');
-      await queueService.releaseActiveRequest(region);
-      return res.status(200).send(result);
-    } catch (error) {
-      await queueService.releaseActiveRequest(region);
-      throw error;
-    }
-
-  } catch (error) {
-    console.error('Error:', error);
-    insights.error({
-      message: error.message || 'Unknown error in callOpenAi',
-      stack: error.stack,
-      code: error.code,
-      result: error.result,
-      timestamp: new Date().toISOString(),
-      endpoint: 'callOpenAi',
-      phase: error.phase || 'unknown',
-      requestInfo: {
-        method: requestInfo.method,
-        url: requestInfo.url,
-        origin: requestInfo.origin,
-        ip: requestInfo.ip,
-        timezone: requestInfo.timezone,
-        header_language: requestInfo.header_language
-      },
-      requestData: req.body,
-      model: 'gpt4o'
-    });
-    let infoError = {
-      body: req.body,
-      error: error.message,
-      model: 'gpt4o'
-    };
-    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-    try {
-      await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
-        req.body.description,
-        infoError,
-        requestInfo
-      );
-    } catch (emailError) {
-      console.log('Fail sending email');
-    }
-    if (error.result === 'translation error') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "translation error",
-        message: error.message,
-        code: error.code || 'TRANSLATION_ERROR'
-      });
-    }else if (error.result === 'unsupported_language') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "unsupported_language",
-        message: error.message,
-        code: error.code || 'UNSUPPORTED_LANGUAGE'
-      });
-    }
-    return res.status(500).send({ result: "error" });
-  }
-}
 
 function calculateMaxTokens(jsonText) {
   const enc = encodingForModel("gpt-4o");
@@ -782,78 +658,6 @@ function extractContent(tag, text) {
   return match ? match[1].trim() : '';
 }
 
-async function callOpenAiV2(req, res) {
-
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    origin: req.get('origin'),
-    body: req.body,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    params: req.params,
-    query: req.query,
-    header_language: req.headers['accept-language'],
-    timezone: req.body.timezone
-  };
-
-  try {
-    // Validar y sanitizar el request
-    if (!isValidOpenAiRequest(req.body)) {
-      return res.status(400).send({
-        result: "error",
-        message: "Invalid request format or content"
-      });
-    }
-
-    const sanitizedData = sanitizeOpenAiData(req.body);
-
-    try {
-      const result = await processOpenAIRequest(sanitizedData, requestInfo, 'o1');
-      return res.status(200).send(result);
-    } catch (error) {
-        throw error;
-      }
-
-  } catch (error) {
-    console.error('Error:', error);
-    insights.error(error);
-    let infoError = {
-      body: req.body,
-      error: error.message,
-      rawResponse: error.rawResponse,
-      matchedContent: error.matchedContent,
-      jsonError: error.jsonError,
-      model: 'o1'
-    }
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-    try {
-      await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
-        req.body.description,
-        infoError,
-        requestInfo
-      );
-    } catch (emailError) {
-      console.log('Fail sending email');
-    }
-    if (error.result === 'translation error') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "translation error",
-        message: error.message,
-        code: error.code || 'TRANSLATION_ERROR'
-      });
-    }else if (error.result === 'unsupported_language') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "unsupported_language",
-        message: error.message,
-        code: error.code || 'UNSUPPORTED_LANGUAGE'
-      });
-    }
-    return res.status(500).send({ result: "error" });
-  }
-}
-
 
 function isValidQuestionRequest(data) {
   // Validar estructura básica
@@ -929,7 +733,7 @@ function sanitizeQuestionData(data) {
 }
 
 
-async function callOpenAiQuestions(req, res) {
+async function callInfoDisease(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
@@ -1012,7 +816,7 @@ async function callOpenAiQuestions(req, res) {
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      insights.error('error openai callOpenAiQuestions');
+      insights.error('error openai callInfoDisease');
       let infoError = {
         error: result.data,
         requestInfo: requestInfo
@@ -1115,7 +919,7 @@ async function callOpenAiQuestions(req, res) {
     console.log(e);
     const errorDetails = {
       timestamp: new Date().toISOString(),
-      endpoint: 'callOpenAiQuestions',
+      endpoint: 'callInfoDisease',
       requestData: {
         body: req.body,
         questionType: req.body?.questionType,
@@ -1130,7 +934,7 @@ async function callOpenAiQuestions(req, res) {
     };
     console.error('Detailed API Error:', JSON.stringify(errorDetails, null, 2));
     insights.error({
-      message: 'API Error in callOpenAiQuestions',
+      message: 'API Error in callInfoDisease',
       details: errorDetails
     });
     blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails);
@@ -1164,7 +968,7 @@ async function callOpenAiQuestions(req, res) {
     } else {
       console.error('Non-API Error:', JSON.stringify(errorDetails, null, 2));
       insights.error({
-        message: 'Non-API Error in callOpenAiQuestions',
+        message: 'Non-API Error in callInfoDisease',
         details: errorDetails
       });
     }
@@ -1662,7 +1466,7 @@ async function generateFollowUpQuestions(req, res) {
     Your questions should:
     1. Focus first on missing demographic details (age, sex/gender) if not already provided.
     2. Gather more specific details about the symptoms mentioned, including timing, severity, triggers, and alleviating factors.
-    3. Explore related or secondary symptoms that haven’t been mentioned but could differentiate between conditions.
+    3. Explore related or secondary symptoms that haven't been mentioned but could differentiate between conditions.
     4. Ask about relevant medical history, family history, current medications, and any treatments tried.
     5. Incorporate risk factors, exposures, and any red-flag or emergency indicators suggested by the symptoms.
     6. Be clear, concise, and easy for the patient to understand.
@@ -1722,9 +1526,9 @@ Example output:
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
-    if (!openAiResponse.data.choices[0].message.content) {
+    if (!diagnoseResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
     }
 
@@ -1732,7 +1536,7 @@ Example output:
     let questions;
     try {
       // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = openAiResponse.data.choices[0].message.content.trim();
+      const content = diagnoseResponse.data.choices[0].message.content.trim();
       const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
       questions = JSON.parse(jsonContent);
       
@@ -1744,7 +1548,7 @@ Example output:
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content
       });
       
       let infoError = {
@@ -1753,7 +1557,7 @@ Example output:
         lang: sanitizedData.lang,
         description: description,
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content,
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
         model: 'follow-up'
       };
       try {
@@ -2005,7 +1809,7 @@ If the patient appears to be a child or infant, frame the questions as if speaki
 Your questions should:
 1. Focus first on missing demographic details (age, sex/gender) if not already provided.
 2. Gather more specific details about the symptoms mentioned, including timing, severity, triggers, and alleviating factors.
-3. Explore related or secondary symptoms that haven’t been mentioned but could differentiate between conditions.
+3. Explore related or secondary symptoms that haven't been mentioned but could differentiate between conditions.
 4. Ask about relevant medical history, family history, current medications, and any treatments tried.
 5. Incorporate risk factors, exposures, and any red-flag or emergency indicators suggested by the symptoms.
 6. Be clear, concise, and easy for the patient to understand.
@@ -2030,9 +1834,9 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
-    if (!openAiResponse.data.choices[0].message.content) {
+    if (!diagnoseResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
     }
 
@@ -2040,7 +1844,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     let questions;
     try {
       // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = openAiResponse.data.choices[0].message.content.trim();
+      const content = diagnoseResponse.data.choices[0].message.content.trim();
       const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
       questions = JSON.parse(jsonContent);
       
@@ -2052,7 +1856,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content
       });
       
       let infoError = {
@@ -2061,7 +1865,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         lang: sanitizedData.lang,
         description: description,
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content,
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
         model: 'follow-up'
       };
       try {
@@ -2353,14 +2157,14 @@ async function processFollowUpAnswers(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
-    if (!openAiResponse.data.choices[0].message.content) {
+    if (!diagnoseResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
     }
 
     // 3. Obtener la descripción actualizada
-    let updatedDescription = openAiResponse.data.choices[0].message.content.trim();
+    let updatedDescription = diagnoseResponse.data.choices[0].message.content.trim();
 
     // 4. Traducir la descripción actualizada al idioma original si es necesario
     if (detectedLanguage !== 'en') {
@@ -2576,19 +2380,19 @@ async function summarize(req, res) {
     // 3. Llamar a OpenAI con failover
 
     let endpoint= 'https://apiopenai.azure-api.net/v2/eu1/summarize/gpt-4o-mini';
-    const openAiResponse = await axios.post(endpoint, requestBody, {
+    const diagnoseResponse = await axios.post(endpoint, requestBody, {
       headers: {
         'Content-Type': 'application/json',
         'Ocp-Apim-Subscription-Key': ApiManagementKey,
       }
     });
 
-    if (!openAiResponse.data.choices[0].message.content) {
+    if (!diagnoseResponse.data.choices[0].message.content) {
       throw new Error('Empty OpenAI response');
     }
 
     // 4. Obtener el resumen
-    let summary = openAiResponse.data.choices[0].message.content.trim();
+    let summary = diagnoseResponse.data.choices[0].message.content.trim();
     let summaryEnglish = summary;
 
     // 5. Traducir el resumen al idioma original si es necesario
@@ -2710,10 +2514,151 @@ async function checkHealth(req, res) {
   return res.status(200).send(health);
 }
 
+async function diagnose(req, res) {
+  // Extraer el modelo de la solicitud o usar gpt4o como predeterminado
+  const model = req.body.model || 'gpt4o';
+  const useQueue = model === 'gpt4o'; // Solo usar colas para el modelo principal (rápido)
+  
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: req.get('origin'),
+    body: req.body,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    params: req.params,
+    query: req.query,
+    header_language: req.headers['accept-language'],
+    timezone: req.body.timezone
+  };
+
+  try {
+    if (!isValidDiagnoseRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeOpenAiData(req.body);
+
+    // Sistema de colas (solo para gpt4o)
+    if (useQueue) {
+      // Verificar el estado de la cola específica de la región
+      const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
+      console.log('queueProperties for region:', queueProperties);
+      console.log('queueUtilizationThreshold:', config.queueUtilizationThreshold);
+      console.log('queueProperties.utilizationPercentage:', queueProperties.utilizationPercentage);
+      
+      if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
+        // Si estamos por encima del umbral para esta región, usar su cola específica
+        console.log('Adding to queue for region:', sanitizedData.timezone);
+        const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
+        console.log('Queue info received:', queueInfo);
+
+        if (!queueInfo || !queueInfo.ticketId) {
+          console.error('Invalid queue info received:', queueInfo);
+          return res.status(500).send({
+            result: 'error',
+            message: 'Error adding request to queue'
+          });
+        }
+
+        return res.status(200).send({
+          result: 'queued',
+          queueInfo: {
+            ticketId: queueInfo.ticketId,
+            position: queueInfo.queuePosition,
+            estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
+            region: queueInfo.region,
+            utilizationPercentage: queueProperties.utilizationPercentage
+          }
+        });
+      }
+
+      // Si no usamos la cola, registrar la petición activa en la región
+      const region = await queueService.registerActiveRequest(sanitizedData.timezone);
+
+      try {
+        const result = await processAIRequest(sanitizedData, requestInfo, model);
+        await queueService.releaseActiveRequest(region);
+        return res.status(200).send(result);
+      } catch (error) {
+        await queueService.releaseActiveRequest(region);
+        throw error;
+      }
+    } else {
+      // Para otros modelos (o1), procesamiento directo sin cola
+      const result = await processAIRequest(sanitizedData, requestInfo, model);
+      return res.status(200).send(result);
+    }
+
+  } catch (error) {
+    console.error('Error:', error);
+    insights.error({
+      message: error.message || 'Unknown error in diagnose',
+      stack: error.stack,
+      code: error.code,
+      result: error.result,
+      timestamp: new Date().toISOString(),
+      endpoint: 'diagnose',
+      phase: error.phase || 'unknown',
+      requestInfo: {
+        method: requestInfo.method,
+        url: requestInfo.url,
+        origin: requestInfo.origin,
+        ip: requestInfo.ip,
+        timezone: requestInfo.timezone,
+        header_language: requestInfo.header_language
+      },
+      requestData: req.body,
+      model: model
+    });
+    
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      model: model
+    };
+    
+    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    try {
+      await serviceEmail.sendMailErrorGPTIP(
+        req.body.lang,
+        req.body.description,
+        infoError,
+        requestInfo
+      );
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
+    if (error.result === 'translation error') {
+      return res.status(200).send({
+        result: "translation error",
+        message: error.message,
+        code: error.code || 'TRANSLATION_ERROR'
+      });
+    } else if (error.result === 'unsupported_language') {
+      return res.status(200).send({
+        result: "unsupported_language",
+        message: error.message,
+        code: error.code || 'UNSUPPORTED_LANGUAGE'
+      });
+    }
+    
+    return res.status(500).send({ result: "error" });
+  }
+}
+
 module.exports = {
-  callOpenAi,
-  callOpenAiV2,
-  callOpenAiQuestions,
+  diagnose,
+  callInfoDisease,
   opinion,
   sendGeneralFeedback,
   generateFollowUpQuestions,
@@ -2721,9 +2666,9 @@ module.exports = {
   processFollowUpAnswers,
   summarize,
   getQueueStatus,
-  callOpenAiWithFailover,  // Añadir esta exportación
-  anonymizeText,           // Añadir esta exportación
-  processOpenAIRequest,  // Asegurarnos de que está exportada
+  callOpenAiWithFailover,
+  anonymizeText,
+  processAIRequest,
   detectLanguageWithRetry,
   translateInvertWithRetry,
   translateTextWithRetry,

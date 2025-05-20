@@ -570,8 +570,8 @@ class QueueService {
   async processMessageWithRetry(message, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const openaiazure = require('./openaiazure');
-        const result = await openaiazure.processOpenAIRequest(message.body, message.requestInfo, message.model);
+        const servicedxgpt = require('./servicedxgpt');
+        const result = await servicedxgpt.processAIRequest(message.body, message.requestInfo, message.model);
         return result;
       } catch (error) {
         if (!this.isRecoverableError(error) || attempt === maxRetries) {

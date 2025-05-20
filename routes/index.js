@@ -5,7 +5,7 @@ const express = require('express')
 
 const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
-const openAIserviceCtrl = require('../services/openaiazure')
+const serviceDxGPTCtrl = require('../services/servicedxgpt')
 const cors = require('cors');
 const serviceEmail = require('../services/email')
 const api = express.Router()
@@ -77,27 +77,27 @@ api.get('/langs/', needsLimiter, langCtrl.getLangs)
 
 api.post('/homesupport/', corsWithOptions, checkApiKey, needsLimiter, supportCtrl.sendMsgLogoutSupport)
 
-api.post('/callopenai', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAi)
-api.post('/callopenaiV2', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAiV2)
+api.post('/diagnose', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.diagnose)
+
+api.post('/disease/info', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.callInfoDisease)
+
+api.post('/questions/followup', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
+api.post('/questions/emergency', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.generateERQuestions)
+api.post('/patient/update', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
 
 
-api.post('/callopenaiquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.callOpenAiQuestions)
+api.post('/medical/summarize', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.summarize)
 
-api.post('/generatefollowupquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.generateFollowUpQuestions)
-api.post('/generateerquestions', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.generateERQuestions)
-api.post('/processfollowupanswers', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.processFollowUpAnswers)
+api.post('/status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.getQueueStatus)
+
+api.get('/getSystemStatus', checkApiKey, needsLimiter, serviceDxGPTCtrl.getSystemStatus)
+api.get('/health', checkApiKey, healthLimiter, serviceDxGPTCtrl.checkHealth)
+
+api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.opinion)
+
+api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
 
 
-api.post('/summarize', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.summarize)
-
-api.post('/queue-status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.getQueueStatus)
-
-api.get('/getSystemStatus', checkApiKey, needsLimiter, openAIserviceCtrl.getSystemStatus)
-api.get('/health', checkApiKey, healthLimiter, openAIserviceCtrl.checkHealth)
-
-api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.opinion)
-
-api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, openAIserviceCtrl.sendGeneralFeedback)
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     // Dejar pasar los OPTIONS (preflight) para CORS
