@@ -39,7 +39,7 @@ function setCrossDomain(req, res, next) {
   if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD')  {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, x-api-key');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent');
     next();
   }else{
     //send email

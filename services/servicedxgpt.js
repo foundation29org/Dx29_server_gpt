@@ -31,6 +31,11 @@ function isValidDiagnoseRequest(data) {
   const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
+  // Validar lang
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
+
   // Validar description
   if (typeof data.description !== 'string' ||
     data.description.length < 10 ||
@@ -993,7 +998,7 @@ function isValidOpinionData(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'lang', 'vote'];
+  const requiredFields = ['value', 'myuuid', 'vote'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar myuuid
@@ -1001,8 +1006,10 @@ function isValidOpinionData(data) {
     return false;
   }
 
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+   // Validar lang
+   if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar vote
   if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) return false;
@@ -1047,7 +1054,7 @@ function sanitizeOpinionData(data) {
       .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim(),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     topRelatedConditions: data.topRelatedConditions?.map(condition => ({
       ...condition,
       name: condition.name
@@ -1080,7 +1087,8 @@ async function opinion(req, res) {
   } catch (e) {
     insights.error(e);
     console.error("[ERROR] opinion responded with status: " + e)
-    serviceEmail.sendMailError(req.body.lang, req.body.value, e)
+    let lang = req.body.lang ? req.body.lang : 'en';
+    serviceEmail.sendMailError(lang, req.body.value, e)
       .then(response => {
 
       })
@@ -1099,7 +1107,7 @@ function isValidGeneralFeedbackData(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'lang'];
+  const requiredFields = ['value', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar myuuid
@@ -1108,7 +1116,9 @@ function isValidGeneralFeedbackData(data) {
   }
 
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar value (objeto del formulario)
   if (!data.value || typeof data.value !== 'object') return false;
@@ -1145,7 +1155,7 @@ function sanitizeGeneralFeedbackData(data) {
   return {
     ...data,
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     value: {
       ...data.value,
       userType: sanitizeText(data.value.userType),
@@ -1198,7 +1208,8 @@ async function sendGeneralFeedback(req, res) {
     insights.error(e);
     console.error("[ERROR] sendGeneralFeedback responded with status: " + e)
     try {
-      await serviceEmail.sendMailError(req.body.lang, req.body, e);
+      let lang = req.body.lang ? req.body.lang : 'en';
+      await serviceEmail.sendMailError(lang, req.body, e);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');
@@ -1244,7 +1255,7 @@ function isValidFollowUpQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'diseases', 'myuuid', 'lang'];
+  const requiredFields = ['description', 'diseases', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1263,7 +1274,9 @@ function isValidFollowUpQuestionsRequest(data) {
   }
 
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -1293,7 +1306,7 @@ function sanitizeFollowUpQuestionsData(data) {
     description: sanitizeInput(data.description),
     diseases: sanitizeInput(data.diseases),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -1358,7 +1371,7 @@ async function generateFollowUpQuestions(req, res) {
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -1393,37 +1406,6 @@ async function generateFollowUpQuestions(req, res) {
     }
 
     // 2. Construir el prompt para generar preguntas de seguimiento
-    const promptOld = `
-    You are a medical assistant helping to gather more information from a patient. The patient has provided the following description of their symptoms:
-    
-    "${englishDescription}"
-    
-    Based on this description, the system has identified these potential conditions: ${englishDiseases}
-    
-    The patient has indicated that none of these conditions seem to match their experience. Please generate 5-8 specific follow-up questions that would help clarify the patient's condition and potentially lead to a more accurate diagnosis.
-    
-    First, identify what critical information is missing from the description, which may include:
-    - Age, sex/gender, height, weight (if not already mentioned)
-    - Duration and progression of symptoms
-    - Severity, frequency, and triggers
-    - Associated symptoms that would help differentiate between the suggested conditions
-    - Relevant medical history, pre-existing conditions
-    - Family history if potentially relevant
-    - Current medications
-    - Previous treatments tried
-    
-    The questions should:
-    1. Focus first on missing demographic information (age, sex/gender) if not provided in the description
-    2. Get more specific details about symptoms already mentioned
-    3. Explore potential related symptoms that haven't been mentioned but could help differentiate between conditions
-    4. Ask about timing, severity, triggers, or alleviating factors
-    5. Be clear, concise, and easy for a patient to understand
-    6. Avoid medical jargon when possible
-    
-    Format your response as a JSON array of strings, with each string being a question. Example:
-    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
-    
-    Your response should be ONLY the JSON array, nothing else.`;
 
     const prompt = `
     You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following description of their symptoms:
@@ -1467,43 +1449,6 @@ async function generateFollowUpQuestions(req, res) {
 
     Your response should be ONLY the JSON array, with no additional text or explanation.
     `;
-
-    const prompt2 = `
-You are a medical assistant helping to gather more information from a patient after an initial diagnostic suggestion. The patient has provided the following description of their symptoms:
-
-"${englishDescription}"
-
-The system previously suggested the following possible conditions: ${englishDiseases}.
-The patient indicated that none of these seem to match their experience.
-
-Please generate 5–8 follow-up questions aimed at refining the diagnostic process. Your goal is to uncover missing or unclear information that could help confirm or rule out the listed conditions, or suggest alternative possibilities.
-
-When formulating your questions, consider:
-- Age, sex/gender, height, weight (if not already mentioned)
-- Duration and progression of symptoms
-- Severity, frequency, timing, and known triggers
-- Associated symptoms not yet mentioned (especially those relevant to the suggested conditions)
-- Relevant medical history, pre-existing conditions, or family history
-- Current medications, supplements, or treatments already tried (and their outcomes)
-- Risk factors or exposures (e.g. travel, smoking, occupational/environmental risks, drug use, recent contact with illness)
-- Red-flag signs (confusion, severe weakness, chest pain, hypotension, etc.)
-- Immunization status or known immunosuppression
-
-If the patient is a child, frame your questions as if speaking to a caregiver. Include questions about developmental milestones, immunizations, and relevant birth/early childhood history.
-
-Do not ask for personal identifiers such as name, address, phone number, email, or ID numbers.
-
-Your questions should:
-1. Start with any missing demographic info if clearly absent.
-2. Clarify key symptoms already mentioned and explore differentiating features.
-3. Ask concise, patient-friendly questions using non-technical language.
-4. Focus only on medically relevant information needed to refine the diagnosis.
-
-Format your response strictly as a JSON array of strings, with each string being a single question. Do not include any explanations, introductions, or formatting.
-
-Example output:
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
-`;
 
     const messages = [{ role: "user", content: prompt }];
     const requestBody = {
@@ -1552,7 +1497,7 @@ Example output:
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          sanitizedData.lang,
           req.body.description,
           infoError,
           requestInfo
@@ -1616,8 +1561,9 @@ Example output:
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -1636,7 +1582,7 @@ function isValidERQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'lang'];
+  const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1650,7 +1596,9 @@ function isValidERQuestionsRequest(data) {
   }
 
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -1678,7 +1626,7 @@ function sanitizeERQuestionsData(data) {
     ...data,
     description: sanitizeInput(data.description),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -1738,7 +1686,7 @@ async function generateERQuestions(req, res) {
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -1860,7 +1808,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          sanitizedData.lang,
           req.body.description,
           infoError,
           requestInfo
@@ -1922,8 +1870,9 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -1941,7 +1890,7 @@ function isValidProcessFollowUpRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'answers', 'myuuid', 'lang'];
+  const requiredFields = ['description', 'answers', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1965,7 +1914,9 @@ function isValidProcessFollowUpRequest(data) {
   }
 
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -2007,7 +1958,7 @@ function sanitizeProcessFollowUpData(data) {
       answer: sanitizeInput(answer.answer)
     })),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -2078,7 +2029,7 @@ async function processFollowUpAnswers(req, res) {
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -2203,9 +2154,10 @@ async function processFollowUpAnswers(req, res) {
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
+    let lang = req.body.lang ? req.body.lang : 'en';
     try {
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -2223,7 +2175,7 @@ function isValidSummarizeRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'lang'];
+  const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
@@ -2237,7 +2189,9 @@ function isValidSummarizeRequest(data) {
   }
 
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -2324,7 +2278,7 @@ async function summarize(req, res) {
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -2416,8 +2370,9 @@ async function summarize(req, res) {
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -2434,6 +2389,7 @@ async function summarize(req, res) {
 async function getQueueStatus(req, res) {
   try {
     const ticketId = req.params.ticketId;
+    const timezone = req.body.timezone; // Opcional: obtener timezone de query params
 
     if (!ticketId) {
       return res.status(400).send({ 
@@ -2617,8 +2573,9 @@ async function diagnose(req, res) {
     await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo

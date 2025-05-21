@@ -10,10 +10,10 @@ servers:
     description: API Version 1
 components:
   securitySchemes:
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: x-api-key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     Language:
       type: object
@@ -263,7 +263,7 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         lang:
           type: string
-          description: Two-letter language code
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the follow-up questions will be returned in this language.
           minLength: 2
           maxLength: 2
           example: "en"
@@ -319,7 +319,7 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         lang:
           type: string
-          description: Two-letter language code
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the questions will be returned in this language.
           minLength: 2
           maxLength: 2
           example: "en"
@@ -337,7 +337,6 @@ components:
       required:
         - description
         - myuuid
-        - lang
     ERQuestionsResponse:
       type: object
       properties:
@@ -411,7 +410,6 @@ components:
         - description
         - answers
         - myuuid
-        - lang
     FollowUpAnswersResponse:
       type: object
       properties:
@@ -452,7 +450,7 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         lang:
           type: string
-          description: Two-letter language code
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the summarized text will be returned in this language.
           minLength: 2
           maxLength: 2
           example: "en"
@@ -470,7 +468,6 @@ components:
       required:
         - description
         - myuuid
-        - lang
     SummarizeResponse:
       type: object
       properties:
@@ -530,33 +527,107 @@ components:
     OpinionRequest:
       type: object
       properties:
-        text:
+        value:
           type: string
+          description: Medical text being rated
+          maxLength: 10000
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        vote:
+          type: string
+          description: User's rating of the diagnosis
+          enum: [up, down]
+        lang:
+          type: string
+          description: Two-letter language code (optional, only used for error reporting)
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        isNewModel:
+          type: boolean
+          description: Whether the feedback is for the new model
+        topRelatedConditions:
+          type: array
+          description: List of conditions related to the diagnosis
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                maxLength: 200
       required:
-        - text
+        - value
+        - myuuid
+        - vote
+        - isNewModel
     OpinionResponse:
       type: object
       properties:
-        sentiment:
-          type: string
-          enum:
-            - positive
-            - neutral
-            - negative
-        score:
-          type: number
-          format: float
+        send:
+          type: boolean
+          description: Indicates if the opinion was successfully recorded
+          example: true
     GeneralFeedbackRequest:
       type: object
       properties:
-        rating:
-          type: integer
-          minimum: 1
-          maximum: 5
-        comment:
+        value:
+          type: object
+          description: Feedback data object
+          properties:
+            pregunta1:
+              type: number
+              description: Rating for question 1 (0-5)
+              minimum: 0
+              maximum: 5
+              example: 4
+            pregunta2:
+              type: number
+              description: Rating for question 2 (0-5)
+              minimum: 0
+              maximum: 5
+              example: 5
+            userType:
+              type: string
+              description: Type of user
+              maxLength: 100
+              example: "patient"
+            moreFunct:
+              type: string
+              description: Requested functionality
+              maxLength: 1000
+              example: "I would like to see more information about treatments"
+            freeText:
+              type: string
+              description: Additional feedback (optional)
+              maxLength: 2000
+              example: "Great application, very helpful for my needs"
+            email:
+              type: string
+              description: User email for follow-up (optional)
+              format: email
+              example: "user@example.com"
+          required:
+            - pregunta1
+            - pregunta2
+            - userType
+            - moreFunct
+        myuuid:
           type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the updated description will be returned in this language.
+          minLength: 2
+          maxLength: 2
+          example: "en"
       required:
-        - rating
+        - value
+        - myuuid
     GeneralFeedbackResponse:
       type: object
       properties:
@@ -592,7 +663,7 @@ paths:
       tags:
         - Languages
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       responses:
         "200":
           description: List of available languages
@@ -613,7 +684,7 @@ paths:
       tags:
         - Support
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -642,19 +713,37 @@ paths:
         - Include relevant medical history or family history if available
         - A length of 200-2000 characters is recommended for optimal results
         
-        If the optional parameter `diseases_list` is provided, these diseases will be excluded from the results.
+        **Detailed Response Format**: For each potential diagnosis, the system returns:
+        - Diagnosis name: The specific condition being suggested
+        - Description: A brief explanation of the disease or disorder
+        - Symptoms in common: List of symptoms from the patient's description that match this diagnosis
+        - Symptoms not in common: Symptoms mentioned by the patient that are NOT typically associated with this diagnosis
         
-        Example of effective input: "Female, 42 years old, severe headaches for 3 months, dizziness, light sensitivity, family history of migraines."
+        This comprehensive format helps in differential diagnosis by showing not just what matches, but also what doesn't match each suggested condition.
         
-        **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description.
+        **Using diseases_list parameter**: If you provide a list of diseases in the optional `diseases_list` parameter, the system will exclude these from the results and provide alternative diagnoses. This is useful when:
+        - Initial diagnoses weren't accurate and you want to explore other possibilities
+        - You want to compare against known conditions to get a wider differential diagnosis
+        - You're looking for less common conditions that might match the symptoms
         
-        **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count). Medical details such as symptoms, diagnosis, and treatment information are preserved.
+        Example input with diseases list: 
+        ```json
+        {
+          "description": "13-month-old patient. First focal seizure at three months. Multiple tonic-clonic seizures. Febrile seizures. One status epilepticus at eight months.", 
+          "diseases_list": "Dravet syndrome, Lennox-Gastaut syndrome, Febrile seizures Plus (FS+)", 
+          "myuuid": "01dd5910-de38-48df-9840-091bc918c943"
+        }
+        ```
+        
+        **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description. If the optional parameter `lang` is not provided, the default language for responses will be English.
+        
+        **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Importantly, age is NOT considered PII in this context and is preserved. All medical specifics (symptoms, diagnosis, treatment plans, and lab results) are maintained intact. The response provides both a text version with asterisks and an HTML-formatted version with blacked-out sections for visualization.
         
         **Queue System**: When using the default "gpt4o" model, requests may be queued during high traffic. A queue status will be returned for tracking.
       tags:
         - Diagnosis
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -722,24 +811,57 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /disease/info:
     post:
-      summary: Generate questions
+      summary: Generate disease information and questions
       description: |
-        Generate a set of questions or information about a specific disease based on the questionType parameter.
+        Generate a set of questions, symptom lists, or information about a specific disease based on the questionType parameter.
         
         The questionType parameter determines what type of content will be generated:
-        - 0: List of common symptoms associated with the disease, ordered by probability
-        - 1: Detailed information about the disease (intended for medical professionals)
-        - 2: Information about diagnostic tests for the disease
-        - 3: List of potential symptoms not mentioned in the patient's description that could help in making a differential diagnosis (requires medicalDescription)
-        - 4: Analysis of why the patient might have the specified disease, comparing symptoms present and absent (requires medicalDescription)
+        
+        **Type 0: Common Symptoms List**
+        - Returns a comprehensive list of symptoms associated with the specified disease
+        - Symptoms are ordered by probability (most common symptoms first)
+        - Output is formatted as HTML with bulleted or numbered lists
+        - Useful for patient education or symptom checking
+        
+        **Type 1: Detailed Disease Information**
+        - Provides in-depth medical information about the disease
+        - Content is oriented toward medical professionals 
+        - Covers pathophysiology, epidemiology, and clinical considerations
+        - Output is formatted as HTML with appropriate headings and sections
+        
+        **Type 2: Diagnostic Testing Information**
+        - Lists recommended diagnostic tests for the specified disease
+        - May include information about test sensitivity, specificity, or interpretation
+        - Output is formatted as HTML with organized sections
+        - Useful for clinical decision support
+        
+        **Type 3: Differential Diagnosis Symptoms**
+        - Requires medicalDescription parameter with the patient's symptoms
+        - Returns a prioritized list of potential symptoms NOT currently mentioned by the patient
+        - These symptoms would help distinguish between the specified disease and other conditions
+        - Returns only a numbered list ordered from most to least relevant
+        - Response format is different: returns JSON array of symptom objects with name and checked status
+        - Ideal for refining a diagnosis when initial symptoms are inconclusive
+        
+        **Type 4: Disease Match Analysis**
+        - Requires medicalDescription parameter with the patient's symptoms
+        - Analyzes why the patient's description might match the specified disease
+        - Explicitly compares symptoms present in both the patient description and the disease
+        - Also notes symptoms typically associated with the disease that the patient doesn't have
+        - Output is formatted as HTML with clear sections for matching and non-matching symptoms
+        - Useful for explaining diagnostic reasoning
         
         Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
+        
+        **Response Format:** 
+        - For questionType 3: Returns a structured JSON response with type "differential" and an array of symptom objects
+        - For other types: Returns a response with type "general" and HTML-formatted content
         
         The parameter detectedLang should be obtained from a previous call to /diagnose and is used to determine the language of the response. It replaces the lang parameter which is no longer required.
       tags:
         - MedicalInfo
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -772,12 +894,45 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /questions/followup:
     post:
-      summary: Generate follow-up questions
-      description: Generate follow-up questions based on context and previous questions
+      summary: Generate follow-up questions after diagnosis
+      description: |
+        Generate 5-8 follow-up questions when previous diagnoses from /diagnose don't match the patient's experience.
+        
+        This endpoint is designed to be used as a refinement step after an initial diagnosis has been made but doesn't seem accurate.
+        Unlike /questions/emergency (which is used before any diagnosis), this endpoint requires both the patient description AND a list of 
+        previously suggested diagnoses that didn't match the patient's condition.
+        
+        The system prioritizes questions that would help clarify or rule out the suggested conditions, focusing on symptoms or details 
+        that are commonly used to differentiate between them. The questions seek critical missing information, which may include:
+        
+        - Demographics: age, sex/gender, height, weight
+        - Duration and progression of symptoms
+        - Severity, frequency, and triggers
+        - Associated symptoms not yet mentioned
+        - Relevant medical history or pre-existing conditions
+        - Family history if potentially relevant
+        - Current medications and previous treatments tried
+        - Potential risk factors or exposures
+        - Red-flag signs (confusion, significant weakness, severe pain, etc.)
+        - Immunization status or immunosuppression if indicated by the symptoms
+        
+        For pediatric patients, questions are formulated as if speaking to a caregiver, including questions about 
+        developmental milestones, immunizations, and relevant birth/early childhood history.
+        
+        Typical workflow:
+        1. User provides initial patient description
+        2. Call /diagnose to get initial diagnoses
+        3. If diagnoses don't match patient experience, call /questions/followup with both the description and list of unsuitable diagnoses
+        4. User answers these follow-up questions
+        5. Call /patient/update to incorporate answers into an improved description
+        6. Call /diagnose again with the enhanced description for a refined diagnosis
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected from the description. 
+        When provided, the follow-up questions will be returned in this language regardless of the language of the description.
       tags:
         - Questions
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -797,12 +952,49 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /questions/emergency:
     post:
-      summary: Generate ER questions
-      description: Generate ER-related questions based on context
+      summary: Generate initial questions
+      description: |
+        Generate 5-8 initial questions based on a patient's medical description before proceeding to diagnosis.
+        
+        This endpoint is designed to be used as a first step in the diagnostic process when you only have a basic description from the patient.
+        The system analyzes the description and generates relevant questions to complete the patient's clinical profile.
+        
+        The questions seek critical missing information, which may include:
+        - Demographics: age, sex/gender, height, weight
+        - Duration and progression of symptoms
+        - Severity, frequency, and triggers
+        - Associated symptoms not yet mentioned
+        - Relevant medical history or pre-existing conditions
+        - Family history if potentially relevant
+        - Current medications and previous treatments tried
+        - Potential risk factors or exposures (travel, smoking, occupational hazards, etc.)
+        - Red-flag signs (confusion, significant weakness, severe pain, etc.)
+        - Immunization status or immunosuppression if indicated by the symptoms
+        
+        For pediatric patients, questions are formulated as if speaking to a caregiver, including questions about 
+        developmental milestones, immunizations, and relevant birth/early childhood history.
+        
+        The questions follow these principles:
+        1. Focus first on missing demographic details if not already provided
+        2. Gather specific details about mentioned symptoms (timing, severity, triggers)
+        3. Explore related symptoms that haven't been mentioned
+        4. Ask about relevant medical history, family history, and current medications
+        5. Clear, concise, and easy for patients to understand
+        6. Avoid medical jargon when possible
+        
+        Typical workflow:
+        1. User provides initial patient description
+        2. Call /questions/emergency to get clarifying questions
+        3. User answers these questions
+        4. Call /patient/update to incorporate answers into an improved description
+        5. Call /diagnose with the enhanced description for better diagnostic accuracy
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected from the description.
+        When provided, the questions will be returned in this language regardless of the language of the description.
       tags:
         - Questions
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -822,12 +1014,45 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /patient/update:
     post:
-      summary: Process follow-up answers
-      description: Updates a patient's medical description by incorporating information from follow-up question answers
+      summary: Process question answers and enhance patient description
+      description: |
+        Updates a patient's medical description by integrating the original description with new information from question answers.
+        
+        This endpoint serves as a critical step between question generation and diagnosis:
+        
+        - After /questions/emergency: Processes answers to initial questions before the first diagnosis
+        - After /questions/followup: Processes answers to follow-up questions when previous diagnoses didn't match
+        
+        The system creates a comprehensive, well-organized description that:
+        1. Maintains all relevant information from the original description
+        2. Seamlessly incorporates the new details from question answers
+        3. Is written in first person, as if the patient is describing their symptoms
+        4. Does not include the questions themselves, only the information
+        5. Presents information in a clear, logical flow
+        
+        Typical workflow scenarios:
+        
+        Initial diagnosis workflow:
+        1. User provides basic patient description
+        2. Call /questions/emergency to get initial questions
+        3. User answers these questions
+        4. Call /patient/update to create an enhanced description
+        5. Call /diagnose with the enhanced description
+        
+        Refined diagnosis workflow:
+        1. User provides patient description
+        2. Call /diagnose to get initial diagnoses
+        3. If diagnoses don't match, call /questions/followup
+        4. User answers these follow-up questions
+        5. Call /patient/update to integrate these answers
+        6. Call /diagnose again with the improved description
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected.
+        The response includes an updatedDescription field with all relevant patient information incorporated in a coherent format.
       tags:
         - Patient
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -861,11 +1086,29 @@ paths:
   /medical/summarize:
     post:
       summary: Summarize medical description
-      description: Generate a concise summary of a medical description while preserving essential clinical information
+      description: |
+        Generate a concise summary of a medical description while preserving essential clinical information.
+        
+        This endpoint analyzes a potentially verbose medical description and extracts the most relevant clinical details:
+        - Symptoms and their duration/progression
+        - Important medical history
+        - Physical signs and examination findings
+        - Other clinically relevant details
+        
+        The summary removes redundant phrases, irrelevant personal details, and repetitive information, producing a shorter, 
+        clearer text that maintains the medical essence of the original description.
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected from the description.
+        When provided, the summary will be returned in this language regardless of the input language.
+        
+        This service is particularly useful for:
+        - Preparing clinical notes from lengthy patient descriptions
+        - Focusing on medically relevant details before diagnosis
+        - Creating concise reports for medical professionals
       tags:
         - Content
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -903,7 +1146,7 @@ paths:
       tags:
         - Queue
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       parameters:
         - name: ticketId
           in: path
@@ -928,7 +1171,7 @@ paths:
       tags:
         - System
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       responses:
         "200":
           description: System status
@@ -947,7 +1190,7 @@ paths:
       tags:
         - System
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       responses:
         "200":
           description: System healthy
@@ -966,11 +1209,13 @@ paths:
   /opinion:
     post:
       summary: Send opinion
-      description: Submit user opinion about content
+      description: |
+        Submit user feedback about diagnosis results. Used to collect user ratings (upvote/downvote) on the accuracy of the diagnosis.
+        The lang parameter is optional and is only used for error reporting.
       tags:
         - Feedback
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -991,11 +1236,13 @@ paths:
   /generalfeedback:
     post:
       summary: Send general feedback
-      description: Submit general feedback about the application
+      description: |
+        Submit general feedback about the application. The feedback includes ratings, user type, requested functionality, and optional comments. 
+        The lang parameter is optional and is only used for error reporting.
       tags:
         - Feedback
       security:
-        - ApiKeyAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:

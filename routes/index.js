@@ -11,7 +11,6 @@ const serviceEmail = require('../services/email')
 const api = express.Router()
 const config= require('../config')
 const { needsLimiter, healthLimiter, globalLimiter } = require('../services/rateLimiter')
-const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
 const whitelist = config.allowedOrigins;
 api.use(globalLimiter);
@@ -64,38 +63,29 @@ api.use(globalLimiter);
     cors(corsOptions)(req, res, next);
   }
 
-  const checkApiKey = (req, res, next) => {
-    const apiKey = req.get('x-api-key');
-    if (apiKey && apiKey === myApiKey) {
-      return next();
-    } else {
-      return res.status(401).json({ error: 'API Key no válida o ausente' });
-    }
-  };
-
 api.get('/langs/', needsLimiter, langCtrl.getLangs)
 
-api.post('/homesupport/', corsWithOptions, checkApiKey, needsLimiter, supportCtrl.sendMsgLogoutSupport)
+api.post('/homesupport/', corsWithOptions, needsLimiter, supportCtrl.sendMsgLogoutSupport)
 
-api.post('/diagnose', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.diagnose)
+api.post('/diagnose', corsWithOptions, needsLimiter, serviceDxGPTCtrl.diagnose)
 
-api.post('/disease/info', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.callInfoDisease)
+api.post('/disease/info', corsWithOptions, needsLimiter, serviceDxGPTCtrl.callInfoDisease)
 
-api.post('/questions/followup', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
-api.post('/questions/emergency', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.generateERQuestions)
-api.post('/patient/update', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
+api.post('/questions/followup', corsWithOptions, needsLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
+api.post('/questions/emergency', corsWithOptions, needsLimiter, serviceDxGPTCtrl.generateERQuestions)
+api.post('/patient/update', corsWithOptions, needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
 
 
-api.post('/medical/summarize', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.summarize)
+api.post('/medical/summarize', corsWithOptions, needsLimiter, serviceDxGPTCtrl.summarize)
 
-api.get('/status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.getQueueStatus)
+api.post('/status/:ticketId', corsWithOptions, needsLimiter, serviceDxGPTCtrl.getQueueStatus)
 
-api.get('/getSystemStatus', checkApiKey, needsLimiter, serviceDxGPTCtrl.getSystemStatus)
-api.get('/health', checkApiKey, healthLimiter, serviceDxGPTCtrl.checkHealth)
+api.get('/getSystemStatus', needsLimiter, serviceDxGPTCtrl.getSystemStatus)
+api.get('/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
 
-api.post('/opinion', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.opinion)
+api.post('/opinion', corsWithOptions, needsLimiter, serviceDxGPTCtrl.opinion)
 
-api.post('/generalfeedback', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
+api.post('/generalfeedback', corsWithOptions, needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
 
 
 api.use((req, res, next) => {
