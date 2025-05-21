@@ -10,6 +10,11 @@ servers:
     description: API Version 1
 components:
   securitySchemes:
+    ApimSubscription:
+      type: apiKey
+      in: header
+      name: Ocp-Apim-Subscription-Key
+      description: API Management subscription key for authenticating requests
     BearerAuth:
       type: http
       scheme: bearer
@@ -636,7 +641,7 @@ components:
           example: success
   responses:
     UnauthorizedError:
-      description: Invalid or missing API Key
+      description: Invalid or missing subscription key
       content:
         application/json:
           schema:
@@ -644,7 +649,7 @@ components:
             properties:
               error:
                 type: string
-                example: Invalid or missing API Key
+                example: Invalid or missing subscription key
     TooManyRequestsError:
       description: Too many requests
       content:
@@ -658,12 +663,12 @@ components:
 paths:
   /langs:
     get:
-      summary: Get available languages
+      summary: Get list of supported languages
       description: Returns a list of all available languages
       tags:
         - Languages
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       responses:
         "200":
           description: List of available languages
@@ -679,12 +684,12 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /homesupport:
     post:
-      summary: Send support message
+      summary: Submit support message from users
       description: Submit a support message from users
       tags:
         - Support
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -700,7 +705,7 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /diagnose:
     post:
-      summary: Unified diagnosis endpoint
+      summary: Analyze medical description for possible disease diagnoses
       description: |
         Analyzes a patient's medical description and provides a list of possible disease diagnoses. This unified endpoint allows choosing between different models through the optional "model" parameter.
         
@@ -743,7 +748,7 @@ paths:
       tags:
         - Diagnosis
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -811,7 +816,7 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /disease/info:
     post:
-      summary: Generate disease information and questions
+      summary: Get information and questions about specific diseases
       description: |
         Generate a set of questions, symptom lists, or information about a specific disease based on the questionType parameter.
         
@@ -861,7 +866,7 @@ paths:
       tags:
         - MedicalInfo
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -894,7 +899,7 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /questions/followup:
     post:
-      summary: Generate follow-up questions after diagnosis
+      summary: Generate follow-up questions to refine diagnosis
       description: |
         Generate 5-8 follow-up questions when previous diagnoses from /diagnose don't match the patient's experience.
         
@@ -932,7 +937,7 @@ paths:
       tags:
         - Questions
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -952,7 +957,7 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /questions/emergency:
     post:
-      summary: Generate initial questions
+      summary: Generate initial assessment questions for patients
       description: |
         Generate 5-8 initial questions based on a patient's medical description before proceeding to diagnosis.
         
@@ -994,7 +999,7 @@ paths:
       tags:
         - Questions
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -1014,7 +1019,7 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /patient/update:
     post:
-      summary: Process question answers and enhance patient description
+      summary: Process answers and enhance patient description
       description: |
         Updates a patient's medical description by integrating the original description with new information from question answers.
         
@@ -1052,7 +1057,7 @@ paths:
       tags:
         - Patient
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -1085,7 +1090,7 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /medical/summarize:
     post:
-      summary: Summarize medical description
+      summary: Create concise summary of medical description
       description: |
         Generate a concise summary of a medical description while preserving essential clinical information.
         
@@ -1108,7 +1113,7 @@ paths:
       tags:
         - Content
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -1141,12 +1146,12 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /status/{ticketId}:
     get:
-      summary: Get queue status
+      summary: Check status of queued diagnose request
       description: Get the status of a request in the processing queue
       tags:
         - Queue
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       parameters:
         - name: ticketId
           in: path
@@ -1166,12 +1171,12 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /getSystemStatus:
     get:
-      summary: Get system status
+      summary: Get overall system status and health
       description: Retrieve the current status of the system and its components
       tags:
         - System
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       responses:
         "200":
           description: System status
@@ -1185,12 +1190,12 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /health:
     get:
-      summary: Check system health
+      summary: Simple health check endpoint
       description: Simple health check endpoint to verify the API is running
       tags:
         - System
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       responses:
         "200":
           description: System healthy
@@ -1208,14 +1213,14 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /opinion:
     post:
-      summary: Send opinion
+      summary: Send user feedback on diagnosis accuracy
       description: |
         Submit user feedback about diagnosis results. Used to collect user ratings (upvote/downvote) on the accuracy of the diagnosis.
         The lang parameter is optional and is only used for error reporting.
       tags:
         - Feedback
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
@@ -1235,14 +1240,14 @@ paths:
           $ref: "#/components/responses/TooManyRequestsError"
   /generalfeedback:
     post:
-      summary: Send general feedback
+      summary: Submit general application feedback
       description: |
         Submit general feedback about the application. The feedback includes ratings, user type, requested functionality, and optional comments. 
         The lang parameter is optional and is only used for error reporting.
       tags:
         - Feedback
       security:
-        - BearerAuth: []
+        - ApimSubscription: []
       requestBody:
         required: true
         content:
