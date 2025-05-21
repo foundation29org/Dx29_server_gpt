@@ -28,7 +28,7 @@ function isValidDiagnoseRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos (timezone no incluido)
-  const requiredFields = ['description', 'myuuid', 'lang'];
+  const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -40,9 +40,6 @@ function isValidDiagnoseRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -88,13 +85,13 @@ return !suspiciousPatterns.some(pattern => {
 });
 }
 
-function sanitizeOpenAiData(data) {
+function sanitizeAiData(data) {
   return {
     ...data,
     description: sanitizeInput(data.description),
     diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -194,7 +191,7 @@ const REGION_MAPPING_STATUS = {
 // Añadir esta constante para definir las capacidades de cada región
 const REGION_CAPACITY = config.REGION_CAPACITY;
 
-async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
+async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, model, 'call');
@@ -210,12 +207,12 @@ async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', re
     if (retryCount < endpoints.length - 1) {
       console.warn(`❌ Error en ${endpoints[retryCount]} — Reintentando en ${RETRY_DELAY}ms...`);
       insights.error({
-        message: `Fallo OpenAI endpoint ${endpoints[retryCount]}`,
+        message: `Fallo AI endpoint ${endpoints[retryCount]}`,
         error: error.message,
         retryCount
       });
       await delay(RETRY_DELAY);
-      return callOpenAiWithFailover(requestBody, timezone, model, retryCount + 1);
+      return callAiWithFailover(requestBody, timezone, model, retryCount + 1);
     }
     throw error;
   }
@@ -347,7 +344,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     //throw translationError;
     }
 
-    // 2. Llamar a OpenAI con el texto en inglés
+    // 2. Llamar a AI con el texto en inglés
     const prompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
         .replace("{{description}}", englishDescription)
@@ -367,10 +364,10 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     requestBody.presence_penalty = 0;
   }
 
-  const diagnoseResponse = await callOpenAiWithFailover(requestBody, data.timezone, model);
+  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
-    throw new Error("No response from OpenAI");
+    throw new Error("No response from AI");
     }
 
   // 3. Anonimizar el texto
@@ -550,9 +547,6 @@ function calculateMaxTokens(jsonText) {
 // Función auxiliar para anonimizar texto
 async function anonymizeText(text, timezone) {
   const RETRY_DELAY = 1000;
-  
-  //    'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
-  // Determinar el orden de los endpoints según el timezone
 
   const endpoints = getEndpointsByTimezone(timezone, 'gpt4o', 'anonymized');
 
@@ -664,7 +658,7 @@ function isValidQuestionRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['questionType', 'disease', 'myuuid', 'lang'];
+  const requiredFields = ['questionType', 'disease', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar questionType
@@ -683,11 +677,8 @@ function isValidQuestionRequest(data) {
     return false;
   }
 
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar detectedLang
-  if (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2) return false;
+  // Validar detectedLang si existe  
+  if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -725,10 +716,9 @@ function sanitizeQuestionData(data) {
     disease: sanitizeInput(data.disease),
     medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
     timezone: data.timezone?.trim() || '',
     questionType: Number(data.questionType),
-    detectedLang: data.detectedLang.trim().toLowerCase()
+    detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
   };
 }
 
@@ -809,20 +799,20 @@ async function callInfoDisease(req, res) {
     }
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const result = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
     if (!result.data.choices[0].message.content) {
       try {
-        await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, requestInfo);
+        await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, req.body, result.data.choices, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      insights.error('error openai callInfoDisease');
+      insights.error('error ai callInfoDisease');
       let infoError = {
         error: result.data,
         requestInfo: requestInfo
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-      return res.status(200).send({ result: "error openai" });
+      return res.status(200).send({ result: "error ai" });
     }
 
     // Procesar la respuesta
@@ -924,7 +914,7 @@ async function callInfoDisease(req, res) {
         body: req.body,
         questionType: req.body?.questionType,
         disease: req.body?.disease,
-        lang: req.body?.lang
+        lang: req.body?.detectedLang || 'en'
       },
       error: {
         message: e.message,
@@ -945,7 +935,7 @@ async function callInfoDisease(req, res) {
 
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body?.lang || 'en',
+          req.body?.detectedLang || 'en',
           JSON.stringify({
             error: '400 Bad Request',
             details: errorDetails
@@ -976,7 +966,7 @@ async function callInfoDisease(req, res) {
     // Intentar enviar el email de error
     try {
       await serviceEmail.sendMailErrorGPTIP(
-        req.body?.lang || 'en',
+        req.body?.detectedLang || 'en',
         req.body,
         e,
         requestInfo
@@ -1089,7 +1079,7 @@ async function opinion(req, res) {
     res.status(200).send({ send: true })
   } catch (e) {
     insights.error(e);
-    console.error("[ERROR] OpenAI responded with status: " + e)
+    console.error("[ERROR] opinion responded with status: " + e)
     serviceEmail.sendMailError(req.body.lang, req.body.value, e)
       .then(response => {
 
@@ -1206,7 +1196,7 @@ async function sendGeneralFeedback(req, res) {
     return res.status(200).send({ send: true })
   } catch (e) {
     insights.error(e);
-    console.error("[ERROR] OpenAI responded with status: " + e)
+    console.error("[ERROR] sendGeneralFeedback responded with status: " + e)
     try {
       await serviceEmail.sendMailError(req.body.lang, req.body, e);
     } catch (emailError) {
@@ -1526,10 +1516,10 @@ Example output:
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!diagnoseResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+      throw new Error('Empty AI follow-up response');
     }
 
     // 3. Procesar la respuesta
@@ -1834,10 +1824,10 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!diagnoseResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+      throw new Error('Empty AI er-questions response');
     }
 
     // 3. Procesar la respuesta
@@ -2157,10 +2147,10 @@ async function processFollowUpAnswers(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
     if (!diagnoseResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+      throw new Error('Empty AI process-follow-up response');
     }
 
     // 3. Obtener la descripción actualizada
@@ -2312,7 +2302,7 @@ async function summarize(req, res) {
       });
     }
 
-    const sanitizedData = sanitizeOpenAiData(req.body);
+    const sanitizedData = sanitizeAiData(req.body);
     const { description, lang } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
@@ -2377,7 +2367,7 @@ async function summarize(req, res) {
       presence_penalty: 0,
     };
 
-    // 3. Llamar a OpenAI con failover
+    // 3. Llamar a AI con failover
 
     let endpoint= 'https://apiopenai.azure-api.net/v2/eu1/summarize/gpt-4o-mini';
     const diagnoseResponse = await axios.post(endpoint, requestBody, {
@@ -2388,7 +2378,7 @@ async function summarize(req, res) {
     });
 
     if (!diagnoseResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+      throw new Error('Empty AI summarize response');
     }
 
     // 4. Obtener el resumen
@@ -2444,7 +2434,6 @@ async function summarize(req, res) {
 async function getQueueStatus(req, res) {
   try {
     const ticketId = req.params.ticketId;
-    const timezone = req.body.timezone; // Opcional: obtener timezone de query params
 
     if (!ticketId) {
       return res.status(400).send({ 
@@ -2453,7 +2442,7 @@ async function getQueueStatus(req, res) {
       });
     }
 
-    const status = await queueService.getTicketStatus(ticketId, timezone);
+    const status = await queueService.getTicketStatus(ticketId);
     return res.status(200).send(status);
     
   } catch (error) {
@@ -2544,7 +2533,7 @@ async function diagnose(req, res) {
       });
     }
 
-    const sanitizedData = sanitizeOpenAiData(req.body);
+    const sanitizedData = sanitizeAiData(req.body);
 
     // Sistema de colas (solo para gpt4o)
     if (useQueue) {
@@ -2666,7 +2655,7 @@ module.exports = {
   processFollowUpAnswers,
   summarize,
   getQueueStatus,
-  callOpenAiWithFailover,
+  callAiWithFailover,
   anonymizeText,
   processAIRequest,
   detectLanguageWithRetry,

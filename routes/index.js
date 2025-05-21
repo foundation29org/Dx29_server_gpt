@@ -88,7 +88,7 @@ api.post('/patient/update', corsWithOptions, checkApiKey, needsLimiter, serviceD
 
 api.post('/medical/summarize', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.summarize)
 
-api.post('/status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.getQueueStatus)
+api.get('/status/:ticketId', corsWithOptions, checkApiKey, needsLimiter, serviceDxGPTCtrl.getQueueStatus)
 
 api.get('/getSystemStatus', checkApiKey, needsLimiter, serviceDxGPTCtrl.getSystemStatus)
 api.get('/health', checkApiKey, healthLimiter, serviceDxGPTCtrl.checkHealth)

@@ -51,7 +51,7 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         lang:
           type: string
-          description: Two-letter language code
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, it helps improve language detection with low confidence scores.
           minLength: 2
           maxLength: 2
           example: "en"
@@ -74,7 +74,6 @@ components:
       required:
         - description
         - myuuid
-        - lang
     DiagnoseResponse:
       type: object
       properties:
@@ -122,6 +121,9 @@ components:
               example: "Patient presents with headache for the past 3 weeks..."
         detectedLang:
           type: string
+          description: Language code returned by the /diagnose endpoint. This determines the language of the response. Required when a specific language output is needed.
+          minLength: 2
+          maxLength: 2
           example: "en"
         queueInfo:
           type: object
@@ -203,8 +205,6 @@ components:
         - questionType
         - disease
         - myuuid
-        - lang
-        - detectedLang
     QuestionsResponse:
       type: object
       properties:
@@ -282,7 +282,6 @@ components:
         - description
         - diseases
         - myuuid
-        - lang
     FollowUpQuestionsResponse:
       type: object
       properties:
@@ -735,6 +734,8 @@ paths:
         - 4: Analysis of why the patient might have the specified disease, comparing symptoms present and absent (requires medicalDescription)
         
         Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
+        
+        The parameter detectedLang should be obtained from a previous call to /diagnose and is used to determine the language of the response. It replaces the lang parameter which is no longer required.
       tags:
         - MedicalInfo
       security:
@@ -896,7 +897,7 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
   /status/{ticketId}:
-    post:
+    get:
       summary: Get queue status
       description: Get the status of a request in the processing queue
       tags:
