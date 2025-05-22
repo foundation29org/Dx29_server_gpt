@@ -1,3 +1,16 @@
 node_modules
 dist
 config.js
+*.log
+logs/
+.env
+
+# Docker
+.dockerignore
+env.local
+env.dev
+env.prod
+azure*
+docker*
+APIM.MD
+arquitecura_seguridad.md

@@ -6,7 +6,12 @@ const Metrics = require('../models/metrics');
 const metricsService = require('./metricsService');
 
 // Configuración de Service Bus
-const connectionString = config.serviceBusConnectionString;
+function clean(s) {
+  return s.replace(/[\r\n"' ]/g, '');
+}
+const namespace = clean(config.serviceBusName);
+const key       = clean(config.serviceBusKey);
+const connectionString = `Endpoint=sb://${namespace}.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=${key}`;
 const queueName = "diagnosis-queue";
 
 const REGION_MAPPING = {
@@ -236,7 +241,7 @@ class QueueService {
         body: {
           description: data.description,
           myuuid: data.myuuid,
-          operation: data.operation,
+          operation: 'find disease',
           lang: data.lang,
           diseases_list: data.diseases_list,
           timestamp: new Date().toISOString(),
@@ -565,8 +570,8 @@ class QueueService {
   async processMessageWithRetry(message, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const openaiazure = require('./openaiazure');
-        const result = await openaiazure.processOpenAIRequest(message.body, message.requestInfo, message.model);
+        const servicedxgpt = require('./servicedxgpt');
+        const result = await servicedxgpt.processAIRequest(message.body, message.requestInfo, message.model);
         return result;
       } catch (error) {
         if (!this.isRecoverableError(error) || attempt === maxRetries) {

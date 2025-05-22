@@ -7,9 +7,8 @@ const accountnameOpenDx =config.openDxAccessToken.blobAccount;
 const keyOpenDx = config.openDxAccessToken.key;
 const sharedKeyCredentialOpenDx = new storage.StorageSharedKeyCredential(accountnameOpenDx,keyOpenDx);
 const blobServiceOpenDx = new storage.BlobServiceClient(
-    // When using AnonymousCredential, following url should include a valid SAS or support public access
-    `https://${accountnameOpenDx}.blob.core.windows.net`,
-    sharedKeyCredentialOpenDx
+  `https://${accountnameOpenDx}.blob.core.windows.net`,
+  sharedKeyCredentialOpenDx
   );
 
   async function createBlob(containerName, data, fileNameToSave){

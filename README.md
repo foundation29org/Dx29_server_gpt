@@ -40,3 +40,108 @@ The client code is here: [Dx29 client](https://github.com/foundation29org/Dx29_c
 		</p>
 	</div>
 <div>
+
+# DxGPT API Server
+
+## Containerization and Deployment
+
+This project is configured to work with Docker and can be deployed on Azure Container Apps with secure secret management using native Container Apps secrets.
+
+### Deployment on Azure Container Apps
+
+The project uses Azure Container Apps with Azure Key Vault for secure secret management through RBAC (Role-Based Access Control).
+
+#### Requirements
+
+- Docker and Docker Compose installed
+- Node.js 18.x (for local development without Docker)
+- An Azure subscription
+- Azure CLI installed and configured
+- Azure Key Vault with RBAC enabled
+- Admin permissions in Azure to configure RBAC
+
+#### Environment Variables
+
+The project uses environment variable files for each environment. An `env.example` file has been created with all the necessary variables. Copy this file to create specific files for each environment:
+
+```bash
+# For local development
+cp env.example env.local
+
+# For development on Azure
+cp env.example env.dev
+
+# For production on Azure
+cp env.example env.prod
+```
+
+Then edit each file with the corresponding values for each environment.
+
+#### Secret Management
+
+The system implements multiple layers of security:
+
+1. RBAC for granular access control
+2. Managed identities for secure authentication
+3. Secure references to secrets via URIs
+4. Secret protection in Key Vault
+5. Environment isolation through separate resources
+
+#### Local Execution with Docker
+
+To run the project locally using Docker:
+
+```bash
+# Local development environment
+docker-compose up app-local
+
+# Development environment for Azure
+docker-compose up app-dev
+
+# Production environment
+docker-compose up app-prod
+```
+
+#### Image Building
+
+```bash
+# Build development image
+docker build -t dxgpt-api:dev -f Dockerfile.dev .
+
+# Build production image
+docker build -t dxgpt-api:prod -f Dockerfile .
+```
+
+## OpenAPI Specification
+
+The project includes an OpenAPI specification that defines all the API endpoints. This specification is located in `docs/dxgpt-api.yaml`.
+
+### Direct Swagger/OpenAPI Editing
+
+Instead of using JSDoc annotations, we work directly with the OpenAPI specification file. This gives more control and allows using visual editors:
+
+1. **Edit OpenAPI File Directly**: Modify the `docs/dxgpt-api.yaml` file directly
+2. **Use Swagger Editor**: Import/export your specification at [Swagger Editor](https://editor.swagger.io)
+
+### Validation
+
+To validate the OpenAPI specification, run:
+
+```
+npm run validate-openapi
+```
+
+### Swagger UI
+
+There are two ways to view the API documentation:
+
+1. **Within the Main Application**: Documentation is available at the `/docs` endpoint when the server is running
+2. **Standalone Swagger UI Server**: Run a dedicated documentation server:
+
+```
+npm run swagger-ui
+```
+
+This will start a server at http://localhost:3000 dedicated to displaying your API documentation.
+
+This specification is necessary to integrate the API with Azure API Management (APIM) and generate the developer portal.
