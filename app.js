@@ -13,7 +13,6 @@ app.use(compression());
 const serviceEmail = require('./services/email');
 const api = require('./routes');
 const allowedOrigins = config.allowedOrigins;
-const swaggerUi = require('swagger-ui-express');
 
 
 
@@ -24,7 +23,7 @@ function setCrossDomain(req, res, next) {
   if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD')  {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, ocp-apim-subscription-key');
     next();
   }else{
     //send email
@@ -58,14 +57,5 @@ app.use(setCrossDomain);
 
 // API y rutas
 app.use('/api', api);
-
-// Serve Swagger documentation if specification is available
-if (Object.keys(swaggerSpec).length > 0) {
-  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-  app.get('/swagger.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.send(swaggerSpec);
-  });
-}
 
 module.exports = app;
