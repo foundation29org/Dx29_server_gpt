@@ -1,0 +1,1264 @@
+openapi: 3.0.0
+info:
+  title: DXGPT API
+  version: 1.0.0
+  description: API for DXGPT services
+  contact:
+    name: DXGPT Support
+servers:
+  - url: /v1
+    description: API Version 1
+components:
+  securitySchemes:
+    ApimSubscription:
+      type: apiKey
+      in: header
+      name: Ocp-Apim-Subscription-Key
+      description: API Management subscription key for authenticating requests
+  schemas:
+    Language:
+      type: object
+      properties:
+        code:
+          type: string
+          example: en
+        name:
+          type: string
+          example: English
+    SupportRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        message:
+          type: string
+      required:
+        - email
+        - message
+    DiagnoseRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's medical description
+          minLength: 10
+          maxLength: 8000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head."
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, it helps improve language detection with low confidence scores.
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+        diseases_list:
+          type: string
+          description: List of previously identified diseases (optional)
+          maxLength: 1000
+          example: "Migraine, Tension headache, Cluster headache"
+      required:
+        - description
+        - myuuid
+    DiagnoseResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, translation error, unsupported_language, queued]
+          example: "success"
+        data:
+          type: object
+          description: Response data (only when result is success)
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  diagnosis:
+                    type: string
+                    example: "Migraine"
+                  description:
+                    type: string
+                    example: "A neurological condition characterized by recurrent moderate to severe headaches, often with associated symptoms like nausea, vomiting, and sensitivity to light and sound."
+                  symptoms_in_common:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Throbbing headache", "Light sensitivity", "Nausea"]
+                  symptoms_not_in_common:
+                    type: array
+                    items:
+                      type: string
+                    example: ["Visual auras", "Vomiting", "Sound sensitivity"]
+        anonymization:
+          type: object
+          properties:
+            hasPersonalInfo:
+              type: boolean
+              example: true
+            anonymizedText:
+              type: string
+              example: "Patient presents with headache for the past 3 weeks..."
+            anonymizedTextHtml:
+              type: string
+              example: "Patient presents with headache for the past 3 weeks..."
+        detectedLang:
+          type: string
+          description: Language code returned by the /diagnose endpoint. This determines the language of the response. Required when a specific language output is needed.
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        queueInfo:
+          type: object
+          description: Queue information (only when result is queued)
+          properties:
+            ticketId:
+              type: string
+              example: "ticket-123456"
+            position:
+              type: integer
+              example: 3
+            estimatedWaitTime:
+              type: integer
+              description: Estimated wait time in minutes
+              example: 5
+            region:
+              type: string
+              example: "WestUS"
+            utilizationPercentage:
+              type: number
+              format: float
+              example: 85.5
+    QuestionsRequest:
+      type: object
+      properties:
+        questionType:
+          type: integer
+          description: |
+            Type of questions or information to generate:
+            - 0: Common symptoms associated with the disease
+            - 1: Detailed information about the disease (for medical professionals)
+            - 2: Diagnostic tests for the disease
+            - 3: Potential symptoms not mentioned by patient for differential diagnosis (requires medicalDescription)
+            - 4: Analysis of why patient might have the disease (requires medicalDescription)
+          minimum: 0
+          maximum: 4
+          example: 1
+        disease:
+          type: string
+          description: Disease to generate questions about
+          minLength: 2
+          maxLength: 100
+          example: "Multiple Sclerosis"
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        detectedLang:
+          type: string
+          description: Detected language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+        medicalDescription:
+          type: string
+          description: Medical description (required for questionType 3 and 4)
+          minLength: 10
+          maxLength: 8000
+          example: "Patient presents with fatigue, numbness in limbs, and vision problems for the last 6 months."
+      required:
+        - questionType
+        - disease
+        - myuuid
+    QuestionsResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error]
+          example: "success"
+        data:
+          type: object
+          description: Response data
+          properties:
+            type:
+              type: string
+              enum: [differential, general]
+              description: Type of response data (differential for questionType 3, general for others)
+              example: "general"
+            content:
+              type: string
+              description: HTML content with questions/answers (for general type)
+              example: "<p>Common symptoms of Multiple Sclerosis include...</p>"
+            symptoms:
+              type: array
+              description: List of symptoms (for differential type)
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: "Double vision"
+                  checked:
+                    type: boolean
+                    example: false
+        detectedLang:
+          type: string
+          example: "en"
+    FollowUpQuestionsRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's medical description
+          minLength: 10
+          maxLength: 8000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
+        diseases:
+          type: string
+          description: List of suggested diseases that didn't match the patient's experience
+          minLength: 2
+          maxLength: 1000
+          example: "Migraine, Tension headache, Cluster headache"
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the follow-up questions will be returned in this language.
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - diseases
+        - myuuid
+    FollowUpQuestionsResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, translation error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          properties:
+            questions:
+              type: array
+              description: List of generated follow-up questions
+              items:
+                type: string
+              example: ["What is your age and gender?", "How long have you been experiencing these symptoms?", "Do you have any prior medical conditions?"]
+        detectedLang:
+          type: string
+          description: Detected language of the patient's description
+          example: "en"
+    ERQuestionsRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's initial medical description
+          minLength: 10
+          maxLength: 8000
+          example: "I've been experiencing fatigue and shortness of breath for the last two weeks, especially when climbing stairs."
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the questions will be returned in this language.
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - myuuid
+    ERQuestionsResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, translation error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          properties:
+            questions:
+              type: array
+              description: List of generated initial questions
+              items:
+                type: string
+              example: ["What is your age and gender?", "Do you have any history of heart or lung conditions?", "Are you experiencing any pain along with the shortness of breath?"]
+        detectedLang:
+          type: string
+          description: Detected language of the patient's description
+          example: "en"
+    FollowUpAnswersRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Patient's initial medical description
+          minLength: 10
+          maxLength: 8000
+          example: "I've been experiencing persistent headache for the past 3 weeks, accompanied by sensitivity to light."
+        answers:
+          type: array
+          description: Array of questions and their corresponding answers
+          items:
+            type: object
+            properties:
+              question:
+                type: string
+                description: The follow-up question
+                example: "What is your age and gender?"
+              answer:
+                type: string
+                description: The patient's answer to the question
+                example: "I am a 35-year-old female."
+            required:
+              - question
+              - answer
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - answers
+        - myuuid
+    FollowUpAnswersResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          description: Response data (only when result is success)
+          properties:
+            updatedDescription:
+              type: string
+              description: Updated medical description with incorporated follow-up answers
+              example: "I'm a 35-year-old female experiencing persistent headache for the past 3 weeks. The headaches are throbbing in nature, primarily on the right side, and are accompanied by sensitivity to light. I've noticed that the headaches worsen after prolonged screen use and are partially relieved by over-the-counter pain medication."
+        detectedLang:
+          type: string
+          description: Detected language of the provided description
+          example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
+    SummarizeRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Text to be summarized (medical description)
+          minLength: 10
+          maxLength: 400000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head."
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the summarized text will be returned in this language.
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        timezone:
+          type: string
+          description: |
+            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+      required:
+        - description
+        - myuuid
+    SummarizeResponse:
+      type: object
+      properties:
+        result:
+          type: string
+          description: Status of the request
+          enum: [success, error, unsupported_language]
+          example: "success"
+        data:
+          type: object
+          description: Response data (only when result is success)
+          properties:
+            summary:
+              type: string
+              description: The summarized text
+              example: "40-year-old male with 3-week history of right-sided throbbing headaches, photophobia, and occasional nausea."
+        detectedLang:
+          type: string
+          description: Detected language of the provided text
+          example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
+    QueueStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - completed
+            - failed
+        position:
+          type: integer
+        estimatedTime:
+          type: integer
+          description: Estimated time in seconds
+    SystemStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - online
+            - degraded
+            - offline
+        services:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+              - online
+              - degraded
+              - offline
+    OpinionRequest:
+      type: object
+      properties:
+        value:
+          type: string
+          description: Medical text being rated
+          maxLength: 10000
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        vote:
+          type: string
+          description: User's rating of the diagnosis
+          enum: [up, down]
+        lang:
+          type: string
+          description: Two-letter language code (optional, only used for error reporting)
+          minLength: 2
+          maxLength: 2
+          example: "en"
+        isNewModel:
+          type: boolean
+          description: Whether the feedback is for the new model
+        topRelatedConditions:
+          type: array
+          description: List of conditions related to the diagnosis
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                maxLength: 200
+      required:
+        - value
+        - myuuid
+        - vote
+        - isNewModel
+    OpinionResponse:
+      type: object
+      properties:
+        send:
+          type: boolean
+          description: Indicates if the opinion was successfully recorded
+          example: true
+    GeneralFeedbackRequest:
+      type: object
+      properties:
+        value:
+          type: object
+          description: Feedback data object
+          properties:
+            pregunta1:
+              type: number
+              description: Rating for question 1 (0-5)
+              minimum: 0
+              maximum: 5
+              example: 4
+            pregunta2:
+              type: number
+              description: Rating for question 2 (0-5)
+              minimum: 0
+              maximum: 5
+              example: 5
+            userType:
+              type: string
+              description: Type of user
+              maxLength: 100
+              example: "patient"
+            moreFunct:
+              type: string
+              description: Requested functionality
+              maxLength: 1000
+              example: "I would like to see more information about treatments"
+            freeText:
+              type: string
+              description: Additional feedback (optional)
+              maxLength: 2000
+              example: "Great application, very helpful for my needs"
+            email:
+              type: string
+              description: User email for follow-up (optional)
+              format: email
+              example: "user@example.com"
+          required:
+            - pregunta1
+            - pregunta2
+            - userType
+            - moreFunct
+        myuuid:
+          type: string
+          description: Unique identifier for the user
+          pattern: "^[0-9a-fA-F-]{36}$"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        lang:
+          type: string
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the updated description will be returned in this language.
+          minLength: 2
+          maxLength: 2
+          example: "en"
+      required:
+        - value
+        - myuuid
+    GeneralFeedbackResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+  responses:
+    UnauthorizedError:
+      description: Invalid or missing subscription key
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Invalid or missing subscription key
+    TooManyRequestsError:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Too many requests, please try again later
+paths:
+  /langs:
+    get:
+      summary: Get list of supported languages
+      description: Returns a list of all available languages
+      tags:
+        - Languages
+      security:
+        - ApimSubscription: []
+      responses:
+        "200":
+          description: List of available languages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Language"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /homesupport:
+    post:
+      summary: Submit support message from users
+      description: Submit a support message from users
+      tags:
+        - Support
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportRequest"
+      responses:
+        "200":
+          description: Message sent successfully
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /diagnose:
+    post:
+      summary: Analyze medical description for possible disease diagnoses
+      description: |
+        Analyzes a patient's medical description and provides a list of possible disease diagnoses. This unified endpoint allows choosing between different models through the optional "model" parameter.
+        
+        Available models:
+        - "gpt4o" (default): Faster processing with good accuracy
+        - "o1": More comprehensive analysis with longer processing time
+        
+        For best results:
+        - Provide relevant patient details such as age, gender, main symptoms, and when they started
+        - Include relevant medical history or family history if available
+        - A length of 200-2000 characters is recommended for optimal results
+        
+        **Detailed Response Format**: For each potential diagnosis, the system returns:
+        - Diagnosis name: The specific condition being suggested
+        - Description: A brief explanation of the disease or disorder
+        - Symptoms in common: List of symptoms from the patient's description that match this diagnosis
+        - Symptoms not in common: Symptoms mentioned by the patient that are NOT typically associated with this diagnosis
+        
+        This comprehensive format helps in differential diagnosis by showing not just what matches, but also what doesn't match each suggested condition.
+        
+        **Using diseases_list parameter**: If you provide a list of diseases in the optional `diseases_list` parameter, the system will exclude these from the results and provide alternative diagnoses. This is useful when:
+        - Initial diagnoses weren't accurate and you want to explore other possibilities
+        - You want to compare against known conditions to get a wider differential diagnosis
+        - You're looking for less common conditions that might match the symptoms
+        
+        Example input with diseases list: 
+        ```json
+        {
+          "description": "13-month-old patient. First focal seizure at three months. Multiple tonic-clonic seizures. Febrile seizures. One status epilepticus at eight months.", 
+          "diseases_list": "Dravet syndrome, Lennox-Gastaut syndrome, Febrile seizures Plus (FS+)", 
+          "myuuid": "01dd5910-de38-48df-9840-091bc918c943"
+        }
+        ```
+        
+        **Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description. If the optional parameter `lang` is not provided, the default language for responses will be English.
+        
+        **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Importantly, age is NOT considered PII in this context and is preserved. All medical specifics (symptoms, diagnosis, treatment plans, and lab results) are maintained intact. The response provides both a text version with asterisks and an HTML-formatted version with blacked-out sections for visualization.
+        
+        **Queue System**: When using the default "gpt4o" model, requests may be queued during high traffic. A queue status will be returned for tracking.
+      tags:
+        - Diagnosis
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/DiagnoseRequest"
+                - type: object
+                  properties:
+                    model:
+                      type: string
+                      description: Model to use for diagnosis
+                      enum: ["gpt4o", "o1"]
+                      default: "gpt4o"
+                      example: "gpt4o"
+      responses:
+        "200":
+          description: Diagnosis response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DiagnoseResponse"
+                  - type: object
+                    properties:
+                      result:
+                        type: string
+                        example: "queued"
+                      queueInfo:
+                        type: object
+                        properties:
+                          ticketId:
+                            type: string
+                            example: "ticket-123456"
+                          position:
+                            type: integer
+                            example: 3
+                          estimatedWaitTime:
+                            type: integer
+                            description: Estimated wait time in minutes
+                            example: 5
+                          region:
+                            type: string
+                            example: "WestUS"
+                          utilizationPercentage:
+                            type: number
+                            format: float
+                            example: 85.5
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: "error"
+                  message:
+                    type: string
+                    example: "Invalid request format or content"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /disease/info:
+    post:
+      summary: Get information and questions about specific diseases
+      description: |
+        Generate a set of questions, symptom lists, or information about a specific disease based on the questionType parameter.
+        
+        The questionType parameter determines what type of content will be generated:
+        
+        **Type 0: Common Symptoms List**
+        - Returns a comprehensive list of symptoms associated with the specified disease
+        - Symptoms are ordered by probability (most common symptoms first)
+        - Output is formatted as HTML with bulleted or numbered lists
+        - Useful for patient education or symptom checking
+        
+        **Type 1: Detailed Disease Information**
+        - Provides in-depth medical information about the disease
+        - Content is oriented toward medical professionals 
+        - Covers pathophysiology, epidemiology, and clinical considerations
+        - Output is formatted as HTML with appropriate headings and sections
+        
+        **Type 2: Diagnostic Testing Information**
+        - Lists recommended diagnostic tests for the specified disease
+        - May include information about test sensitivity, specificity, or interpretation
+        - Output is formatted as HTML with organized sections
+        - Useful for clinical decision support
+        
+        **Type 3: Differential Diagnosis Symptoms**
+        - Requires medicalDescription parameter with the patient's symptoms
+        - Returns a prioritized list of potential symptoms NOT currently mentioned by the patient
+        - These symptoms would help distinguish between the specified disease and other conditions
+        - Returns only a numbered list ordered from most to least relevant
+        - Response format is different: returns JSON array of symptom objects with name and checked status
+        - Ideal for refining a diagnosis when initial symptoms are inconclusive
+        
+        **Type 4: Disease Match Analysis**
+        - Requires medicalDescription parameter with the patient's symptoms
+        - Analyzes why the patient's description might match the specified disease
+        - Explicitly compares symptoms present in both the patient description and the disease
+        - Also notes symptoms typically associated with the disease that the patient doesn't have
+        - Output is formatted as HTML with clear sections for matching and non-matching symptoms
+        - Useful for explaining diagnostic reasoning
+        
+        Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
+        
+        **Response Format:** 
+        - For questionType 3: Returns a structured JSON response with type "differential" and an array of symptom objects
+        - For other types: Returns a response with type "general" and HTML-formatted content
+        
+        The parameter detectedLang should be obtained from a previous call to /diagnose and is used to determine the language of the response. It replaces the lang parameter which is no longer required.
+      tags:
+        - MedicalInfo
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestionsRequest"
+      responses:
+        "200":
+          description: Generated questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionsResponse"
+        "400":
+          description: Invalid request format or content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid question type
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /questions/followup:
+    post:
+      summary: Generate follow-up questions to refine diagnosis
+      description: |
+        Generate 5-8 follow-up questions when previous diagnoses from /diagnose don't match the patient's experience.
+        
+        This endpoint is designed to be used as a refinement step after an initial diagnosis has been made but doesn't seem accurate.
+        Unlike /questions/emergency (which is used before any diagnosis), this endpoint requires both the patient description AND a list of 
+        previously suggested diagnoses that didn't match the patient's condition.
+        
+        The system prioritizes questions that would help clarify or rule out the suggested conditions, focusing on symptoms or details 
+        that are commonly used to differentiate between them. The questions seek critical missing information, which may include:
+        
+        - Demographics: age, sex/gender, height, weight
+        - Duration and progression of symptoms
+        - Severity, frequency, and triggers
+        - Associated symptoms not yet mentioned
+        - Relevant medical history or pre-existing conditions
+        - Family history if potentially relevant
+        - Current medications and previous treatments tried
+        - Potential risk factors or exposures
+        - Red-flag signs (confusion, significant weakness, severe pain, etc.)
+        - Immunization status or immunosuppression if indicated by the symptoms
+        
+        For pediatric patients, questions are formulated as if speaking to a caregiver, including questions about 
+        developmental milestones, immunizations, and relevant birth/early childhood history.
+        
+        Typical workflow:
+        1. User provides initial patient description
+        2. Call /diagnose to get initial diagnoses
+        3. If diagnoses don't match patient experience, call /questions/followup with both the description and list of unsuitable diagnoses
+        4. User answers these follow-up questions
+        5. Call /patient/update to incorporate answers into an improved description
+        6. Call /diagnose again with the enhanced description for a refined diagnosis
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected from the description. 
+        When provided, the follow-up questions will be returned in this language regardless of the language of the description.
+      tags:
+        - Questions
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FollowUpQuestionsRequest"
+      responses:
+        "200":
+          description: Generated follow-up questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowUpQuestionsResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /questions/emergency:
+    post:
+      summary: Generate initial assessment questions for patients
+      description: |
+        Generate 5-8 initial questions based on a patient's medical description before proceeding to diagnosis.
+        
+        This endpoint is designed to be used as a first step in the diagnostic process when you only have a basic description from the patient.
+        The system analyzes the description and generates relevant questions to complete the patient's clinical profile.
+        
+        The questions seek critical missing information, which may include:
+        - Demographics: age, sex/gender, height, weight
+        - Duration and progression of symptoms
+        - Severity, frequency, and triggers
+        - Associated symptoms not yet mentioned
+        - Relevant medical history or pre-existing conditions
+        - Family history if potentially relevant
+        - Current medications and previous treatments tried
+        - Potential risk factors or exposures (travel, smoking, occupational hazards, etc.)
+        - Red-flag signs (confusion, significant weakness, severe pain, etc.)
+        - Immunization status or immunosuppression if indicated by the symptoms
+        
+        For pediatric patients, questions are formulated as if speaking to a caregiver, including questions about 
+        developmental milestones, immunizations, and relevant birth/early childhood history.
+        
+        The questions follow these principles:
+        1. Focus first on missing demographic details if not already provided
+        2. Gather specific details about mentioned symptoms (timing, severity, triggers)
+        3. Explore related symptoms that haven't been mentioned
+        4. Ask about relevant medical history, family history, and current medications
+        5. Clear, concise, and easy for patients to understand
+        6. Avoid medical jargon when possible
+        
+        Typical workflow:
+        1. User provides initial patient description
+        2. Call /questions/emergency to get clarifying questions
+        3. User answers these questions
+        4. Call /patient/update to incorporate answers into an improved description
+        5. Call /diagnose with the enhanced description for better diagnostic accuracy
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected from the description.
+        When provided, the questions will be returned in this language regardless of the language of the description.
+      tags:
+        - Questions
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ERQuestionsRequest"
+      responses:
+        "200":
+          description: Generated ER questions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ERQuestionsResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /patient/update:
+    post:
+      summary: Process answers and enhance patient description
+      description: |
+        Updates a patient's medical description by integrating the original description with new information from question answers.
+        
+        This endpoint serves as a critical step between question generation and diagnosis:
+        
+        - After /questions/emergency: Processes answers to initial questions before the first diagnosis
+        - After /questions/followup: Processes answers to follow-up questions when previous diagnoses didn't match
+        
+        The system creates a comprehensive, well-organized description that:
+        1. Maintains all relevant information from the original description
+        2. Seamlessly incorporates the new details from question answers
+        3. Is written in first person, as if the patient is describing their symptoms
+        4. Does not include the questions themselves, only the information
+        5. Presents information in a clear, logical flow
+        
+        Typical workflow scenarios:
+        
+        Initial diagnosis workflow:
+        1. User provides basic patient description
+        2. Call /questions/emergency to get initial questions
+        3. User answers these questions
+        4. Call /patient/update to create an enhanced description
+        5. Call /diagnose with the enhanced description
+        
+        Refined diagnosis workflow:
+        1. User provides patient description
+        2. Call /diagnose to get initial diagnoses
+        3. If diagnoses don't match, call /questions/followup
+        4. User answers these follow-up questions
+        5. Call /patient/update to integrate these answers
+        6. Call /diagnose again with the improved description
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected.
+        The response includes an updatedDescription field with all relevant patient information incorporated in a coherent format.
+      tags:
+        - Patient
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FollowUpAnswersRequest"
+      responses:
+        "200":
+          description: Processed answers with updated patient description
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowUpAnswersResponse"
+        "400":
+          description: Invalid request format or content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid request format or content
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /medical/summarize:
+    post:
+      summary: Create concise summary of medical description
+      description: |
+        Generate a concise summary of a medical description while preserving essential clinical information.
+        
+        This endpoint analyzes a potentially verbose medical description and extracts the most relevant clinical details:
+        - Symptoms and their duration/progression
+        - Important medical history
+        - Physical signs and examination findings
+        - Other clinically relevant details
+        
+        The summary removes redundant phrases, irrelevant personal details, and repetitive information, producing a shorter, 
+        clearer text that maintains the medical essence of the original description.
+        
+        The lang parameter is optional - if not provided, the language will be automatically detected from the description.
+        When provided, the summary will be returned in this language regardless of the input language.
+        
+        This service is particularly useful for:
+        - Preparing clinical notes from lengthy patient descriptions
+        - Focusing on medically relevant details before diagnosis
+        - Creating concise reports for medical professionals
+      tags:
+        - Content
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SummarizeRequest"
+      responses:
+        "200":
+          description: Summarized content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SummarizeResponse"
+        "400":
+          description: Invalid request format or content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Invalid request format or content
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /status/{ticketId}:
+    get:
+      summary: Check status of queued diagnose request
+      description: Get the status of a request in the processing queue
+      tags:
+        - Queue
+      security:
+        - ApimSubscription: []
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatusResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /getSystemStatus:
+    get:
+      summary: Get overall system status and health
+      description: Retrieve the current status of the system and its components
+      tags:
+        - System
+      security:
+        - ApimSubscription: []
+      responses:
+        "200":
+          description: System status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatusResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /health:
+    get:
+      summary: Simple health check endpoint
+      description: Simple health check endpoint to verify the API is running
+      tags:
+        - System
+      security:
+        - ApimSubscription: []
+      responses:
+        "200":
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /opinion:
+    post:
+      summary: Send user feedback on diagnosis accuracy
+      description: |
+        Submit user feedback about diagnosis results. Used to collect user ratings (upvote/downvote) on the accuracy of the diagnosis.
+        The lang parameter is optional and is only used for error reporting.
+      tags:
+        - Feedback
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpinionRequest"
+      responses:
+        "200":
+          description: Opinion sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpinionResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /generalfeedback:
+    post:
+      summary: Submit general application feedback
+      description: |
+        Submit general feedback about the application. The feedback includes ratings, user type, requested functionality, and optional comments. 
+        The lang parameter is optional and is only used for error reporting.
+      tags:
+        - Feedback
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneralFeedbackRequest"
+      responses:
+        "200":
+          description: Feedback sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneralFeedbackResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+tags: []

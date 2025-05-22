@@ -41,13 +41,14 @@ async function detectLanguage(text, lang, endpoint) {
       error.code = 'UNSUPPORTED_LANGUAGE';
       throw error;
     }
-    
+
     const confidenceThreshold = 0.9;
-    if (detectionResult.score < confidenceThreshold && lang == 'es') {
-      return lang;
-    }else{
-      return detectionResult.language;
+    if (detectionResult.score < confidenceThreshold) {
+      if (lang === 'es' || (lang && detectionResult.score < 0.7)) {
+        return lang;
+      }
     }
+    return detectionResult.language;
 
   } catch (error) {
     let infoError = {

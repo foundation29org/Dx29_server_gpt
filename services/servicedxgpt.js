@@ -23,13 +23,18 @@ function sanitizeInput(input) {
     .trim();
 }
 
-function isValidOpenAiRequest(data) {
+function isValidDiagnoseRequest(data) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos (timezone no incluido)
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
+
+  // Validar lang
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar description
   if (typeof data.description !== 'string' ||
@@ -40,12 +45,6 @@ function isValidOpenAiRequest(data) {
   if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     return false;
   }
-
-  // Validar operation
-  if (data.operation !== 'find disease') return false;
-
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -91,13 +90,13 @@ return !suspiciousPatterns.some(pattern => {
 });
 }
 
-function sanitizeOpenAiData(data) {
+function sanitizeAiData(data) {
   return {
     ...data,
     description: sanitizeInput(data.description),
     diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -197,7 +196,7 @@ const REGION_MAPPING_STATUS = {
 // Añadir esta constante para definir las capacidades de cada región
 const REGION_CAPACITY = config.REGION_CAPACITY;
 
-async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
+async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, model, 'call');
@@ -213,12 +212,12 @@ async function callOpenAiWithFailover(requestBody, timezone, model = 'gpt4o', re
     if (retryCount < endpoints.length - 1) {
       console.warn(`❌ Error en ${endpoints[retryCount]} — Reintentando en ${RETRY_DELAY}ms...`);
       insights.error({
-        message: `Fallo OpenAI endpoint ${endpoints[retryCount]}`,
+        message: `Fallo AI endpoint ${endpoints[retryCount]}`,
         error: error.message,
         retryCount
       });
       await delay(RETRY_DELAY);
-      return callOpenAiWithFailover(requestBody, timezone, model, retryCount + 1);
+      return callAiWithFailover(requestBody, timezone, model, retryCount + 1);
     }
     throw error;
   }
@@ -295,7 +294,7 @@ async function translateInvertWithRetry(text, toLang, retries = 3, delay = 1000)
 }
 
 // Extraer la lógica principal a una función reutilizable
-async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
+async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
   // 1. Detectar idioma y traducir a inglés si es necesario
   let englishDescription = data.description;
   let detectedLanguage = data.lang;
@@ -350,7 +349,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     //throw translationError;
     }
 
-    // 2. Llamar a OpenAI con el texto en inglés
+    // 2. Llamar a AI con el texto en inglés
     const prompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
         .replace("{{description}}", englishDescription)
@@ -370,10 +369,10 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     requestBody.presence_penalty = 0;
   }
 
-  const openAiResponse = await callOpenAiWithFailover(requestBody, data.timezone, model);
+  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model);
 
-    if (!openAiResponse.data.choices[0].message.content) {
-    throw new Error("No response from OpenAI");
+    if (!diagnoseResponse.data.choices[0].message.content) {
+    throw new Error("No response from AI");
     }
 
   // 3. Anonimizar el texto
@@ -405,12 +404,12 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     let parsedResponse;
     let parsedResponseEnglish;
     try {
-      const match = openAiResponse.data.choices[0].message.content
+      const match = diagnoseResponse.data.choices[0].message.content
         .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
 
       if (!match || !match[1]) {
         const error = new Error("Failed to match diagnosis output");
-        error.rawResponse = openAiResponse.data.choices[0].message.content;
+        error.rawResponse = diagnoseResponse.data.choices[0].message.content;
         throw error;
       }
 
@@ -439,7 +438,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
     if (requestInfo) {
       let infoError = {
         myuuid: data.myuuid,
-        operation: data.operation,
+        operation: 'find disease',
         lang: data.lang,
         description: data.description,
         error: parseError.message,
@@ -504,7 +503,7 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
       value: anonymizedDescription,
       valueEnglish: anonymizedDescriptionEnglish,
       myuuid: data.myuuid,
-      operation: data.operation,
+      operation: 'find disease',
       lang: data.lang,
       response: parsedResponse,
       responseEnglish: parsedResponseEnglish,
@@ -534,130 +533,6 @@ async function processOpenAIRequest(data, requestInfo = null, model = 'gpt4o') {
   };
 }
 
-async function callOpenAi(req, res) {
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    origin: req.get('origin'),
-    body: req.body,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    params: req.params,
-    query: req.query,
-    header_language: req.headers['accept-language'],
-    timezone: req.body.timezone
-  };
-
-  try {
-    if (!isValidOpenAiRequest(req.body)) {
-      insights.error({
-        message: "Invalid request format or content",
-        request: req.body
-      });
-      return res.status(400).send({
-        result: "error",
-        message: "Invalid request format or content"
-      });
-    }
-
-    const sanitizedData = sanitizeOpenAiData(req.body);
-
-    // Verificar el estado de la cola específica de la región
-    const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
-    console.log('queueProperties for region:', queueProperties);
-    console.log('queueUtilizationThreshold:', config.queueUtilizationThreshold);
-    console.log('queueProperties.utilizationPercentage:', queueProperties.utilizationPercentage);
-    if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-      // Si estamos por encima del umbral para esta región, usar su cola específica
-      console.log('Adding to queue for region:', sanitizedData.timezone);
-      const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, 'gpt4o');
-      console.log('Queue info received:', queueInfo); // Añadir log para debug
-
-      if (!queueInfo || !queueInfo.ticketId) {
-          console.error('Invalid queue info received:', queueInfo);
-          return res.status(500).send({
-              result: 'error',
-              message: 'Error adding request to queue'
-          });
-      }
-
-      return res.status(200).send({
-        result: 'queued',
-        queueInfo: {
-          ticketId: queueInfo.ticketId,
-          position: queueInfo.queuePosition,
-          estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
-          region: queueInfo.region,
-          utilizationPercentage: queueProperties.utilizationPercentage
-        }
-      });
-    }
-
-    // Si no usamos la cola, registrar la petición activa en la región correspondiente
-    const region = await queueService.registerActiveRequest(sanitizedData.timezone);
-
-    try {
-      const result = await processOpenAIRequest(sanitizedData, requestInfo, 'gpt4o');
-      await queueService.releaseActiveRequest(region);
-      return res.status(200).send(result);
-    } catch (error) {
-      await queueService.releaseActiveRequest(region);
-      throw error;
-    }
-
-  } catch (error) {
-    console.error('Error:', error);
-    insights.error({
-      message: error.message || 'Unknown error in callOpenAi',
-      stack: error.stack,
-      code: error.code,
-      result: error.result,
-      timestamp: new Date().toISOString(),
-      endpoint: 'callOpenAi',
-      phase: error.phase || 'unknown',
-      requestInfo: {
-        method: requestInfo.method,
-        url: requestInfo.url,
-        origin: requestInfo.origin,
-        ip: requestInfo.ip,
-        timezone: requestInfo.timezone,
-        header_language: requestInfo.header_language
-      },
-      requestData: req.body,
-      model: 'gpt4o'
-    });
-    let infoError = {
-      body: req.body,
-      error: error.message,
-      model: 'gpt4o'
-    };
-    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-    try {
-      await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
-        req.body.description,
-        infoError,
-        requestInfo
-      );
-    } catch (emailError) {
-      console.log('Fail sending email');
-    }
-    if (error.result === 'translation error') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "translation error",
-        message: error.message,
-        code: error.code || 'TRANSLATION_ERROR'
-      });
-    }else if (error.result === 'unsupported_language') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "unsupported_language",
-        message: error.message,
-        code: error.code || 'UNSUPPORTED_LANGUAGE'
-      });
-    }
-    return res.status(500).send({ result: "error" });
-  }
-}
 
 function calculateMaxTokens(jsonText) {
   const enc = encodingForModel("gpt-4o");
@@ -677,9 +552,6 @@ function calculateMaxTokens(jsonText) {
 // Función auxiliar para anonimizar texto
 async function anonymizeText(text, timezone) {
   const RETRY_DELAY = 1000;
-  
-  //    'https://apiopenai.azure-api.net/dxgpt/anonymized/gpt4o',
-  // Determinar el orden de los endpoints según el timezone
 
   const endpoints = getEndpointsByTimezone(timezone, 'gpt4o', 'anonymized');
 
@@ -785,85 +657,13 @@ function extractContent(tag, text) {
   return match ? match[1].trim() : '';
 }
 
-async function callOpenAiV2(req, res) {
-
-  const requestInfo = {
-    method: req.method,
-    url: req.url,
-    headers: req.headers,
-    origin: req.get('origin'),
-    body: req.body,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    params: req.params,
-    query: req.query,
-    header_language: req.headers['accept-language'],
-    timezone: req.body.timezone
-  };
-
-  try {
-    // Validar y sanitizar el request
-    if (!isValidOpenAiRequest(req.body)) {
-      return res.status(400).send({
-        result: "error",
-        message: "Invalid request format or content"
-      });
-    }
-
-    const sanitizedData = sanitizeOpenAiData(req.body);
-
-    try {
-      const result = await processOpenAIRequest(sanitizedData, requestInfo, 'o1');
-      return res.status(200).send(result);
-    } catch (error) {
-        throw error;
-      }
-
-  } catch (error) {
-    console.error('Error:', error);
-    insights.error(error);
-    let infoError = {
-      body: req.body,
-      error: error.message,
-      rawResponse: error.rawResponse,
-      matchedContent: error.matchedContent,
-      jsonError: error.jsonError,
-      model: 'o1'
-    }
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-    try {
-      await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
-        req.body.description,
-        infoError,
-        requestInfo
-      );
-    } catch (emailError) {
-      console.log('Fail sending email');
-    }
-    if (error.result === 'translation error') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "translation error",
-        message: error.message,
-        code: error.code || 'TRANSLATION_ERROR'
-      });
-    }else if (error.result === 'unsupported_language') {
-      return res.status(200).send({  // Mantener 400 para que el cliente lo maneje
-        result: "unsupported_language",
-        message: error.message,
-        code: error.code || 'UNSUPPORTED_LANGUAGE'
-      });
-    }
-    return res.status(500).send({ result: "error" });
-  }
-}
-
 
 function isValidQuestionRequest(data) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['questionType', 'disease', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['questionType', 'disease', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar questionType
@@ -882,14 +682,8 @@ function isValidQuestionRequest(data) {
     return false;
   }
 
-  // Validar operation
-  if (data.operation !== 'info disease') return false;
-
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
-
-  // Validar detectedLang
-  if (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2) return false;
+  // Validar detectedLang si existe  
+  if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) return false;
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -927,15 +721,14 @@ function sanitizeQuestionData(data) {
     disease: sanitizeInput(data.disease),
     medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
     timezone: data.timezone?.trim() || '',
     questionType: Number(data.questionType),
-    detectedLang: data.detectedLang.trim().toLowerCase()
+    detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
   };
 }
 
 
-async function callOpenAiQuestions(req, res) {
+async function callInfoDisease(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
@@ -1011,20 +804,20 @@ async function callOpenAiQuestions(req, res) {
     }
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const result = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
     if (!result.data.choices[0].message.content) {
       try {
-        await serviceEmail.sendMailErrorGPTIP(lang, req.body, result.data.choices, requestInfo);
+        await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, req.body, result.data.choices, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      insights.error('error openai callOpenAiQuestions');
+      insights.error('error ai callInfoDisease');
       let infoError = {
         error: result.data,
         requestInfo: requestInfo
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
-      return res.status(200).send({ result: "error openai" });
+      return res.status(200).send({ result: "error ai" });
     }
 
     // Procesar la respuesta
@@ -1121,12 +914,12 @@ async function callOpenAiQuestions(req, res) {
     console.log(e);
     const errorDetails = {
       timestamp: new Date().toISOString(),
-      endpoint: 'callOpenAiQuestions',
+      endpoint: 'callInfoDisease',
       requestData: {
         body: req.body,
         questionType: req.body?.questionType,
         disease: req.body?.disease,
-        lang: req.body?.lang
+        lang: req.body?.detectedLang || 'en'
       },
       error: {
         message: e.message,
@@ -1136,7 +929,7 @@ async function callOpenAiQuestions(req, res) {
     };
     console.error('Detailed API Error:', JSON.stringify(errorDetails, null, 2));
     insights.error({
-      message: 'API Error in callOpenAiQuestions',
+      message: 'API Error in callInfoDisease',
       details: errorDetails
     });
     blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails);
@@ -1147,7 +940,7 @@ async function callOpenAiQuestions(req, res) {
 
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body?.lang || 'en',
+          req.body?.detectedLang || 'en',
           JSON.stringify({
             error: '400 Bad Request',
             details: errorDetails
@@ -1170,7 +963,7 @@ async function callOpenAiQuestions(req, res) {
     } else {
       console.error('Non-API Error:', JSON.stringify(errorDetails, null, 2));
       insights.error({
-        message: 'Non-API Error in callOpenAiQuestions',
+        message: 'Non-API Error in callInfoDisease',
         details: errorDetails
       });
     }
@@ -1178,7 +971,7 @@ async function callOpenAiQuestions(req, res) {
     // Intentar enviar el email de error
     try {
       await serviceEmail.sendMailErrorGPTIP(
-        req.body?.lang || 'en',
+        req.body?.detectedLang || 'en',
         req.body,
         e,
         requestInfo
@@ -1205,7 +998,7 @@ function isValidOpinionData(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'operation', 'lang', 'vote'];
+  const requiredFields = ['value', 'myuuid', 'vote'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar myuuid
@@ -1213,11 +1006,10 @@ function isValidOpinionData(data) {
     return false;
   }
 
-  // Validar operation
-  if (data.operation !== 'vote') return false;
-
-  // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+   // Validar lang
+   if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar vote
   if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) return false;
@@ -1262,7 +1054,7 @@ function sanitizeOpinionData(data) {
       .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim(),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     topRelatedConditions: data.topRelatedConditions?.map(condition => ({
       ...condition,
       name: condition.name
@@ -1294,8 +1086,9 @@ async function opinion(req, res) {
     res.status(200).send({ send: true })
   } catch (e) {
     insights.error(e);
-    console.error("[ERROR] OpenAI responded with status: " + e)
-    serviceEmail.sendMailError(req.body.lang, req.body.value, e)
+    console.error("[ERROR] opinion responded with status: " + e)
+    let lang = req.body.lang ? req.body.lang : 'en';
+    serviceEmail.sendMailError(lang, req.body.value, e)
       .then(response => {
 
       })
@@ -1314,7 +1107,7 @@ function isValidGeneralFeedbackData(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'lang'];
+  const requiredFields = ['value', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar myuuid
@@ -1323,7 +1116,9 @@ function isValidGeneralFeedbackData(data) {
   }
 
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar value (objeto del formulario)
   if (!data.value || typeof data.value !== 'object') return false;
@@ -1360,7 +1155,7 @@ function sanitizeGeneralFeedbackData(data) {
   return {
     ...data,
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     value: {
       ...data.value,
       userType: sanitizeText(data.value.userType),
@@ -1411,9 +1206,10 @@ async function sendGeneralFeedback(req, res) {
     return res.status(200).send({ send: true })
   } catch (e) {
     insights.error(e);
-    console.error("[ERROR] OpenAI responded with status: " + e)
+    console.error("[ERROR] sendGeneralFeedback responded with status: " + e)
     try {
-      await serviceEmail.sendMailError(req.body.lang, req.body, e);
+      let lang = req.body.lang ? req.body.lang : 'en';
+      await serviceEmail.sendMailError(lang, req.body, e);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');
@@ -1459,7 +1255,7 @@ function isValidFollowUpQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'diseases', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'diseases', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1477,11 +1273,10 @@ function isValidFollowUpQuestionsRequest(data) {
     return false;
   }
 
-  // Validar operation
-  if (data.operation !== 'generate follow-up questions') return false;
-
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -1511,7 +1306,7 @@ function sanitizeFollowUpQuestionsData(data) {
     description: sanitizeInput(data.description),
     diseases: sanitizeInput(data.diseases),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -1576,7 +1371,7 @@ async function generateFollowUpQuestions(req, res) {
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -1611,37 +1406,6 @@ async function generateFollowUpQuestions(req, res) {
     }
 
     // 2. Construir el prompt para generar preguntas de seguimiento
-    const promptOld = `
-    You are a medical assistant helping to gather more information from a patient. The patient has provided the following description of their symptoms:
-    
-    "${englishDescription}"
-    
-    Based on this description, the system has identified these potential conditions: ${englishDiseases}
-    
-    The patient has indicated that none of these conditions seem to match their experience. Please generate 5-8 specific follow-up questions that would help clarify the patient's condition and potentially lead to a more accurate diagnosis.
-    
-    First, identify what critical information is missing from the description, which may include:
-    - Age, sex/gender, height, weight (if not already mentioned)
-    - Duration and progression of symptoms
-    - Severity, frequency, and triggers
-    - Associated symptoms that would help differentiate between the suggested conditions
-    - Relevant medical history, pre-existing conditions
-    - Family history if potentially relevant
-    - Current medications
-    - Previous treatments tried
-    
-    The questions should:
-    1. Focus first on missing demographic information (age, sex/gender) if not provided in the description
-    2. Get more specific details about symptoms already mentioned
-    3. Explore potential related symptoms that haven't been mentioned but could help differentiate between conditions
-    4. Ask about timing, severity, triggers, or alleviating factors
-    5. Be clear, concise, and easy for a patient to understand
-    6. Avoid medical jargon when possible
-    
-    Format your response as a JSON array of strings, with each string being a question. Example:
-    ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
-    
-    Your response should be ONLY the JSON array, nothing else.`;
 
     const prompt = `
     You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following description of their symptoms:
@@ -1674,7 +1438,7 @@ async function generateFollowUpQuestions(req, res) {
     Your questions should:
     1. Focus first on missing demographic details (age, sex/gender) if not already provided.
     2. Gather more specific details about the symptoms mentioned, including timing, severity, triggers, and alleviating factors.
-    3. Explore related or secondary symptoms that haven’t been mentioned but could differentiate between conditions.
+    3. Explore related or secondary symptoms that haven't been mentioned but could differentiate between conditions.
     4. Ask about relevant medical history, family history, current medications, and any treatments tried.
     5. Incorporate risk factors, exposures, and any red-flag or emergency indicators suggested by the symptoms.
     6. Be clear, concise, and easy for the patient to understand.
@@ -1685,43 +1449,6 @@ async function generateFollowUpQuestions(req, res) {
 
     Your response should be ONLY the JSON array, with no additional text or explanation.
     `;
-
-    const prompt2 = `
-You are a medical assistant helping to gather more information from a patient after an initial diagnostic suggestion. The patient has provided the following description of their symptoms:
-
-"${englishDescription}"
-
-The system previously suggested the following possible conditions: ${englishDiseases}.
-The patient indicated that none of these seem to match their experience.
-
-Please generate 5–8 follow-up questions aimed at refining the diagnostic process. Your goal is to uncover missing or unclear information that could help confirm or rule out the listed conditions, or suggest alternative possibilities.
-
-When formulating your questions, consider:
-- Age, sex/gender, height, weight (if not already mentioned)
-- Duration and progression of symptoms
-- Severity, frequency, timing, and known triggers
-- Associated symptoms not yet mentioned (especially those relevant to the suggested conditions)
-- Relevant medical history, pre-existing conditions, or family history
-- Current medications, supplements, or treatments already tried (and their outcomes)
-- Risk factors or exposures (e.g. travel, smoking, occupational/environmental risks, drug use, recent contact with illness)
-- Red-flag signs (confusion, severe weakness, chest pain, hypotension, etc.)
-- Immunization status or known immunosuppression
-
-If the patient is a child, frame your questions as if speaking to a caregiver. Include questions about developmental milestones, immunizations, and relevant birth/early childhood history.
-
-Do not ask for personal identifiers such as name, address, phone number, email, or ID numbers.
-
-Your questions should:
-1. Start with any missing demographic info if clearly absent.
-2. Clarify key symptoms already mentioned and explore differentiating features.
-3. Ask concise, patient-friendly questions using non-technical language.
-4. Focus only on medically relevant information needed to refine the diagnosis.
-
-Format your response strictly as a JSON array of strings, with each string being a single question. Do not include any explanations, introductions, or formatting.
-
-Example output:
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]
-`;
 
     const messages = [{ role: "user", content: prompt }];
     const requestBody = {
@@ -1734,17 +1461,17 @@ Example output:
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
-    if (!openAiResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+    if (!diagnoseResponse.data.choices[0].message.content) {
+      throw new Error('Empty AI follow-up response');
     }
 
     // 3. Procesar la respuesta
     let questions;
     try {
       // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = openAiResponse.data.choices[0].message.content.trim();
+      const content = diagnoseResponse.data.choices[0].message.content.trim();
       const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
       questions = JSON.parse(jsonContent);
       
@@ -1756,21 +1483,21 @@ Example output:
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content
       });
       
       let infoError = {
         myuuid: sanitizedData.myuuid,
-        operation: sanitizedData.operation,
+        operation: 'follow-up',
         lang: sanitizedData.lang,
         description: description,
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content,
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
         model: 'follow-up'
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          sanitizedData.lang,
           req.body.description,
           infoError,
           requestInfo
@@ -1801,7 +1528,7 @@ Example output:
       value: description,
       valueEnglish: englishDescription,
       myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
+      operation: 'follow-up',
       lang: sanitizedData.lang,
       diseases: diseases,
       diseasesEnglish: englishDiseases,
@@ -1834,8 +1561,9 @@ Example output:
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -1854,7 +1582,7 @@ function isValidERQuestionsRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -1867,11 +1595,10 @@ function isValidERQuestionsRequest(data) {
     return false;
   }
 
-  // Validar operation
-  if (data.operation !== 'generate ER questions') return false;
-
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -1899,7 +1626,7 @@ function sanitizeERQuestionsData(data) {
     ...data,
     description: sanitizeInput(data.description),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -1959,7 +1686,7 @@ async function generateERQuestions(req, res) {
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -2020,7 +1747,7 @@ If the patient appears to be a child or infant, frame the questions as if speaki
 Your questions should:
 1. Focus first on missing demographic details (age, sex/gender) if not already provided.
 2. Gather more specific details about the symptoms mentioned, including timing, severity, triggers, and alleviating factors.
-3. Explore related or secondary symptoms that haven’t been mentioned but could differentiate between conditions.
+3. Explore related or secondary symptoms that haven't been mentioned but could differentiate between conditions.
 4. Ask about relevant medical history, family history, current medications, and any treatments tried.
 5. Incorporate risk factors, exposures, and any red-flag or emergency indicators suggested by the symptoms.
 6. Be clear, concise, and easy for the patient to understand.
@@ -2045,17 +1772,17 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
-    if (!openAiResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+    if (!diagnoseResponse.data.choices[0].message.content) {
+      throw new Error('Empty AI er-questions response');
     }
 
     // 3. Procesar la respuesta
     let questions;
     try {
       // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = openAiResponse.data.choices[0].message.content.trim();
+      const content = diagnoseResponse.data.choices[0].message.content.trim();
       const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
       questions = JSON.parse(jsonContent);
       
@@ -2067,21 +1794,21 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content
       });
       
       let infoError = {
         myuuid: sanitizedData.myuuid,
-        operation: sanitizedData.operation,
+        operation: 'er-questions',
         lang: sanitizedData.lang,
         description: description,
         error: parseError.message,
-        rawResponse: openAiResponse.data.choices[0].message.content,
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
         model: 'follow-up'
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          sanitizedData.lang,
           req.body.description,
           infoError,
           requestInfo
@@ -2112,7 +1839,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       value: description,
       valueEnglish: englishDescription,
       myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
+      operation: 'er-questions',
       lang: sanitizedData.lang,
       questions: questions,
       header_language: header_language,
@@ -2143,8 +1870,9 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -2162,7 +1890,7 @@ function isValidProcessFollowUpRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'answers', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'answers', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description
@@ -2185,11 +1913,10 @@ function isValidProcessFollowUpRequest(data) {
     return false;
   }
 
-  // Validar operation
-  if (data.operation !== 'process follow-up answers') return false;
-
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -2231,7 +1958,7 @@ function sanitizeProcessFollowUpData(data) {
       answer: sanitizeInput(answer.answer)
     })),
     myuuid: data.myuuid.trim(),
-    lang: data.lang.trim().toLowerCase(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -2302,7 +2029,7 @@ async function processFollowUpAnswers(req, res) {
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -2371,14 +2098,14 @@ async function processFollowUpAnswers(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const openAiResponse = await callOpenAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
 
-    if (!openAiResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+    if (!diagnoseResponse.data.choices[0].message.content) {
+      throw new Error('Empty AI process-follow-up response');
     }
 
     // 3. Obtener la descripción actualizada
-    let updatedDescription = openAiResponse.data.choices[0].message.content.trim();
+    let updatedDescription = diagnoseResponse.data.choices[0].message.content.trim();
 
     // 4. Traducir la descripción actualizada al idioma original si es necesario
     if (detectedLanguage !== 'en') {
@@ -2395,7 +2122,7 @@ async function processFollowUpAnswers(req, res) {
       originalDescription: description,
       originalDescriptionEnglish: englishDescription,
       myuuid: sanitizedData.myuuid,
-      operation: sanitizedData.operation,
+      operation: 'process-follow-up',
       lang: sanitizedData.lang,
       answers: answers,
       answersEnglish: englishAnswers,
@@ -2427,9 +2154,10 @@ async function processFollowUpAnswers(req, res) {
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
+    let lang = req.body.lang ? req.body.lang : 'en';
     try {
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -2447,7 +2175,7 @@ function isValidSummarizeRequest(data) {
   if (!data || typeof data !== 'object') return false;
 
   // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid', 'operation', 'lang'];
+  const requiredFields = ['description', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
   // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
@@ -2460,11 +2188,10 @@ function isValidSummarizeRequest(data) {
     return false;
   }
 
-  // Validar operation
-  if (data.operation !== 'summarize text') return false;
-
   // Validar lang
-  if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
+    return false;
+  }
 
   // Validar timezone si existe
   if (data.timezone !== undefined && typeof data.timezone !== 'string') {
@@ -2529,7 +2256,7 @@ async function summarize(req, res) {
       });
     }
 
-    const sanitizedData = sanitizeOpenAiData(req.body);
+    const sanitizedData = sanitizeAiData(req.body);
     const { description, lang } = sanitizedData;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
@@ -2551,7 +2278,7 @@ async function summarize(req, res) {
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
-          req.body.lang,
+          lang,
           req.body.description,
           infoErrorlang,
           requestInfo
@@ -2594,22 +2321,22 @@ async function summarize(req, res) {
       presence_penalty: 0,
     };
 
-    // 3. Llamar a OpenAI con failover
+    // 3. Llamar a AI con failover
 
     let endpoint= 'https://apiopenai.azure-api.net/v2/eu1/summarize/gpt-4o-mini';
-    const openAiResponse = await axios.post(endpoint, requestBody, {
+    const diagnoseResponse = await axios.post(endpoint, requestBody, {
       headers: {
         'Content-Type': 'application/json',
         'Ocp-Apim-Subscription-Key': ApiManagementKey,
       }
     });
 
-    if (!openAiResponse.data.choices[0].message.content) {
-      throw new Error('Empty OpenAI response');
+    if (!diagnoseResponse.data.choices[0].message.content) {
+      throw new Error('Empty AI summarize response');
     }
 
     // 4. Obtener el resumen
-    let summary = openAiResponse.data.choices[0].message.content.trim();
+    let summary = diagnoseResponse.data.choices[0].message.content.trim();
     let summaryEnglish = summary;
 
     // 5. Traducir el resumen al idioma original si es necesario
@@ -2643,8 +2370,9 @@ async function summarize(req, res) {
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
     
     try {
+      let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
-        req.body.lang,
+        lang,
         req.body.description,
         infoError,
         requestInfo
@@ -2670,7 +2398,7 @@ async function getQueueStatus(req, res) {
       });
     }
 
-    const status = await queueService.getTicketStatus(ticketId, timezone);
+    const status = await queueService.getTicketStatus(ticketId);
     return res.status(200).send(status);
     
   } catch (error) {
@@ -2731,10 +2459,152 @@ async function checkHealth(req, res) {
   return res.status(200).send(health);
 }
 
+async function diagnose(req, res) {
+  // Extraer el modelo de la solicitud o usar gpt4o como predeterminado
+  const model = req.body.model || 'gpt4o';
+  const useQueue = model === 'gpt4o'; // Solo usar colas para el modelo principal (rápido)
+  
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: req.get('origin'),
+    body: req.body,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    params: req.params,
+    query: req.query,
+    header_language: req.headers['accept-language'],
+    timezone: req.body.timezone
+  };
+
+  try {
+    if (!isValidDiagnoseRequest(req.body)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeAiData(req.body);
+
+    // Sistema de colas (solo para gpt4o)
+    if (useQueue) {
+      // Verificar el estado de la cola específica de la región
+      const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
+      console.log('queueProperties for region:', queueProperties);
+      console.log('queueUtilizationThreshold:', config.queueUtilizationThreshold);
+      console.log('queueProperties.utilizationPercentage:', queueProperties.utilizationPercentage);
+      
+      if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
+        // Si estamos por encima del umbral para esta región, usar su cola específica
+        console.log('Adding to queue for region:', sanitizedData.timezone);
+        const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
+        console.log('Queue info received:', queueInfo);
+
+        if (!queueInfo || !queueInfo.ticketId) {
+          console.error('Invalid queue info received:', queueInfo);
+          return res.status(500).send({
+            result: 'error',
+            message: 'Error adding request to queue'
+          });
+        }
+
+        return res.status(200).send({
+          result: 'queued',
+          queueInfo: {
+            ticketId: queueInfo.ticketId,
+            position: queueInfo.queuePosition,
+            estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
+            region: queueInfo.region,
+            utilizationPercentage: queueProperties.utilizationPercentage
+          }
+        });
+      }
+
+      // Si no usamos la cola, registrar la petición activa en la región
+      const region = await queueService.registerActiveRequest(sanitizedData.timezone);
+
+      try {
+        const result = await processAIRequest(sanitizedData, requestInfo, model);
+        await queueService.releaseActiveRequest(region);
+        return res.status(200).send(result);
+      } catch (error) {
+        await queueService.releaseActiveRequest(region);
+        throw error;
+      }
+    } else {
+      // Para otros modelos (o1), procesamiento directo sin cola
+      const result = await processAIRequest(sanitizedData, requestInfo, model);
+      return res.status(200).send(result);
+    }
+
+  } catch (error) {
+    console.error('Error:', error);
+    insights.error({
+      message: error.message || 'Unknown error in diagnose',
+      stack: error.stack,
+      code: error.code,
+      result: error.result,
+      timestamp: new Date().toISOString(),
+      endpoint: 'diagnose',
+      phase: error.phase || 'unknown',
+      requestInfo: {
+        method: requestInfo.method,
+        url: requestInfo.url,
+        origin: requestInfo.origin,
+        ip: requestInfo.ip,
+        timezone: requestInfo.timezone,
+        header_language: requestInfo.header_language
+      },
+      requestData: req.body,
+      model: model
+    });
+    
+    let infoError = {
+      body: req.body,
+      error: error.message,
+      model: model
+    };
+    
+    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    try {
+      let lang = req.body.lang ? req.body.lang : 'en';
+      await serviceEmail.sendMailErrorGPTIP(
+        lang,
+        req.body.description,
+        infoError,
+        requestInfo
+      );
+    } catch (emailError) {
+      console.log('Fail sending email');
+    }
+    
+    if (error.result === 'translation error') {
+      return res.status(200).send({
+        result: "translation error",
+        message: error.message,
+        code: error.code || 'TRANSLATION_ERROR'
+      });
+    } else if (error.result === 'unsupported_language') {
+      return res.status(200).send({
+        result: "unsupported_language",
+        message: error.message,
+        code: error.code || 'UNSUPPORTED_LANGUAGE'
+      });
+    }
+    
+    return res.status(500).send({ result: "error" });
+  }
+}
+
 module.exports = {
-  callOpenAi,
-  callOpenAiV2,
-  callOpenAiQuestions,
+  diagnose,
+  callInfoDisease,
   opinion,
   sendGeneralFeedback,
   generateFollowUpQuestions,
@@ -2742,9 +2612,9 @@ module.exports = {
   processFollowUpAnswers,
   summarize,
   getQueueStatus,
-  callOpenAiWithFailover,  // Añadir esta exportación
-  anonymizeText,           // Añadir esta exportación
-  processOpenAIRequest,  // Asegurarnos de que está exportada
+  callAiWithFailover,
+  anonymizeText,
+  processAIRequest,
   detectLanguageWithRetry,
   translateInvertWithRetry,
   translateTextWithRetry,

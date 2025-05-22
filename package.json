@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node index.js",
     "serve": "nodemon index.js",
-    "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js"
+    "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
+    "validate-openapi": "swagger-cli validate docs/dxgpt-api.yaml",
+    "generate-openapi": "node scripts/generate-openapi.js",
+    "swagger-ui": "node scripts/serve-swagger-ui.js"
   },
   "author": "LOA",
   "license": "MIT",
@@ -25,10 +28,14 @@
     "js-tiktoken": "^1.0.12",
     "mongoose": "^8.13.2",
     "nodemailer": "^6.10.1",
-    "nodemailer-express-handlebars": "^6.1.2"
+    "nodemailer-express-handlebars": "^6.1.2",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "swagger-cli": "^4.0.4",
+    "swagger-jsdoc": "^6.2.8",
+    "yaml": "^2.8.0"
   },
   "volta": {
     "node": "18.20.6"

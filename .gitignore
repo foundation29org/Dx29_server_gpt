@@ -10,6 +10,7 @@ logs/
 env.local
 env.dev
 env.prod
-env*
+azure*
 docker*
-azure-deploy*
+APIM.MD
+arquitecura_seguridad.md
