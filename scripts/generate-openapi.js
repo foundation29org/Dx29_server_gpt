@@ -1,3 +1,8 @@
+/**
+    * DEPRECATED: Este script ya no se utiliza. 
+    * La especificación OpenAPI se mantiene manualmente en docs/dxgpt-api.yaml
+    * y se valida con npm run validate-openapi
+    */
 const fs = require('fs');
 const path = require('path');
 const swaggerJsdoc = require('swagger-jsdoc');

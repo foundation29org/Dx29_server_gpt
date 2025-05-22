@@ -15,10 +15,6 @@ components:
       in: header
       name: Ocp-Apim-Subscription-Key
       description: API Management subscription key for authenticating requests
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
   schemas:
     Language:
       type: object
