@@ -15,50 +15,28 @@ const { needsLimiter, healthLimiter, globalLimiter } = require('../services/rate
 const whitelist = config.allowedOrigins;
 api.use(globalLimiter);
 
-  // Middleware personalizado para CORS
-  function corsWithOptions(req, res, next) {
-    const corsOptions = {
-      origin: function (origin, callback) {
-
-        if (!origin) {
-          return callback(new Error('Missing Origin header')); // Bloquear sin origin
-        }
-        // Para peticiones con origin, verificar whitelist
-        if (whitelist.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      }
-    };
-  
-    cors(corsOptions)(req, res, next);
-  }
-
 api.get('/langs/', needsLimiter, langCtrl.getLangs)
 
-api.post('/homesupport/', corsWithOptions, needsLimiter, supportCtrl.sendMsgLogoutSupport)
+api.post('/homesupport/', needsLimiter, supportCtrl.sendMsgLogoutSupport)
 
-api.post('/diagnose', corsWithOptions, needsLimiter, serviceDxGPTCtrl.diagnose)
+api.post('/diagnose', needsLimiter, serviceDxGPTCtrl.diagnose)
 
-api.post('/disease/info', corsWithOptions, needsLimiter, serviceDxGPTCtrl.callInfoDisease)
+api.post('/disease/info', needsLimiter, serviceDxGPTCtrl.callInfoDisease)
 
-api.post('/questions/followup', corsWithOptions, needsLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
-api.post('/questions/emergency', corsWithOptions, needsLimiter, serviceDxGPTCtrl.generateERQuestions)
-api.post('/patient/update', corsWithOptions, needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
+api.post('/questions/followup', needsLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
+api.post('/questions/emergency', needsLimiter, serviceDxGPTCtrl.generateERQuestions)
+api.post('/patient/update', needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
 
+api.post('/medical/summarize', needsLimiter, serviceDxGPTCtrl.summarize)
 
-api.post('/medical/summarize', corsWithOptions, needsLimiter, serviceDxGPTCtrl.summarize)
-
-api.post('/status/:ticketId', corsWithOptions, needsLimiter, serviceDxGPTCtrl.getQueueStatus)
+api.post('/status/:ticketId', needsLimiter, serviceDxGPTCtrl.getQueueStatus)
 
 api.get('/getSystemStatus', needsLimiter, serviceDxGPTCtrl.getSystemStatus)
 api.get('/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
 
-api.post('/opinion', corsWithOptions, needsLimiter, serviceDxGPTCtrl.opinion)
+api.post('/opinion', needsLimiter, serviceDxGPTCtrl.opinion)
 
-api.post('/generalfeedback', corsWithOptions, needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
-
+api.post('/generalfeedback', needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
 
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
