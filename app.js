@@ -20,10 +20,15 @@ function setCrossDomain(req, res, next) {
   //instead of * you can define ONLY the sources that we allow.
   //res.header('Access-Control-Allow-Origin', '*');
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD')  {
+  if (allowedOrigins.includes(origin) || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS')  {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Methods', 'HEAD,GET,PUT,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, ocp-apim-subscription-key');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Access-Control-Allow-Origin, Accept, Accept-Language, Origin, User-Agent, ocp-apim-subscription-key, Ocp-Apim-Subscription-Key');
+    
+    // Para solicitudes OPTIONS (preflight), enviar 200 OK inmediatamente
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
     next();
   }else{
     //send email
@@ -57,5 +62,17 @@ app.use(setCrossDomain);
 
 // API y rutas
 app.use('/api', api);
+
+// Middleware general para redireccionar rutas sin /api a /api
+/*app.use((req, res, next) => {
+  // Verificar si la ruta no empieza con /api
+  if (!req.path.startsWith('/api')) {
+    // Reescribir la URL para añadir el prefijo /api
+    req.url = '/api' + req.url;
+    // Reenviar a las rutas de la API
+    return api(req, res, next);
+  }
+  next();
+});*/
 
 module.exports = app;
