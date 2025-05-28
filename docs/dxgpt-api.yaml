@@ -1141,7 +1141,7 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
   /status/{ticketId}:
-    get:
+    post:
       summary: Check status of queued diagnose request
       description: Get the status of a request in the processing queue
       tags:

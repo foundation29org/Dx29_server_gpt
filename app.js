@@ -12,7 +12,6 @@ app.set('trust proxy', 1);
 app.use(compression());
 const serviceEmail = require('./services/email');
 const api = require('./routes');
-const allowedOrigins = config.allowedOrigins;
 
 
 // Middlewares básicos

@@ -11,6 +11,7 @@ const { encodingForModel } = require("js-tiktoken");
 const translationCtrl = require('../services/translation')
 const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
+const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -105,62 +106,62 @@ function sanitizeAiData(data) {
   const endpointsMap = {
     gpt4o: {
       asia: [
-      `https://apiopenai.azure-api.net/v2/as1/call/gpt4o`, // India: 428 calls/min
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/as1/call/gpt4o`, // India: 428 calls/min
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
       ],
       europe: [
-      `https://apiopenai.azure-api.net/v2/eu1/call/gpt4o`, // Suiza: 428 calls/min
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt4o`, // Suiza: 428 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
       ],
       northamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/us2/call/gpt4o`  // EastUS2: 420 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
       ],
       southamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/us2/call/gpt4o`  // EastUS2: 420 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
       ],
       africa: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
       ],
       oceania: [
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`, // Japan: 300 calls/min
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`, // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
       ],
       other: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
       ]
     },
     o1: {
       asia: [
-      `https://apiopenai.azure-api.net/v2/as1/call/o1`, // India
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+      `${API_MANAGEMENT_BASE}/as1/call/o1`, // India
+      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
       ],
       europe: [
-      `https://apiopenai.azure-api.net/v2/eu1/call/o1`, // Suiza
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`  // WestUS como backup
+      `${API_MANAGEMENT_BASE}/eu1/call/o1`, // Suiza
+      `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
       ],
       northamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/us2/call/o1`  // EastUS2
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
       ],
       southamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/us2/call/o1`  // EastUS2
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
       ],
       africa: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
       ],
       oceania: [
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`, // Japan
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`  // WestUS como backup
+      `${API_MANAGEMENT_BASE}/as2/call/o1`, // Japan
+      `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
       ],
       other: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
     ]
   }
 };
@@ -2323,7 +2324,7 @@ async function summarize(req, res) {
 
     // 3. Llamar a AI con failover
 
-    let endpoint= 'https://apiopenai.azure-api.net/v2/eu1/summarize/gpt-4o-mini';
+    let endpoint = `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`;
     const diagnoseResponse = await axios.post(endpoint, requestBody, {
       headers: {
         'Content-Type': 'application/json',

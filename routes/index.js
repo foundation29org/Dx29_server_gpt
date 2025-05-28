@@ -6,18 +6,14 @@ const express = require('express')
 const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
 const serviceDxGPTCtrl = require('../services/servicedxgpt')
-const cors = require('cors');
-const serviceEmail = require('../services/email')
 const api = express.Router()
-const config= require('../config')
 const { needsLimiter, healthLimiter, globalLimiter } = require('../services/rateLimiter')
 // Lista de dominios permitidos
-const whitelist = config.allowedOrigins;
 api.use(globalLimiter);
 
-api.get('/langs/', needsLimiter, langCtrl.getLangs)
+api.get('/internal/langs/', needsLimiter, langCtrl.getLangs)
 
-api.post('/homesupport/', needsLimiter, supportCtrl.sendMsgLogoutSupport)
+api.post('/internal/homesupport/', needsLimiter, supportCtrl.sendMsgLogoutSupport)
 
 api.post('/diagnose', needsLimiter, serviceDxGPTCtrl.diagnose)
 
@@ -29,14 +25,14 @@ api.post('/patient/update', needsLimiter, serviceDxGPTCtrl.processFollowUpAnswer
 
 api.post('/medical/summarize', needsLimiter, serviceDxGPTCtrl.summarize)
 
-api.post('/status/:ticketId', needsLimiter, serviceDxGPTCtrl.getQueueStatus)
+api.post('/internal/status/:ticketId', needsLimiter, serviceDxGPTCtrl.getQueueStatus)
 
-api.get('/getSystemStatus', needsLimiter, serviceDxGPTCtrl.getSystemStatus)
-api.get('/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
+api.get('/internal/getSystemStatus', needsLimiter, serviceDxGPTCtrl.getSystemStatus)
+api.get('/internal/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
 
-api.post('/opinion', needsLimiter, serviceDxGPTCtrl.opinion)
+api.post('/internal/opinion', needsLimiter, serviceDxGPTCtrl.opinion)
 
-api.post('/generalfeedback', needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
+api.post('/internal/generalfeedback', needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
 
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
