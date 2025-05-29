@@ -35,7 +35,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var ff = Math.round(now.getMilliseconds()/10);
     var date='' + y.toString().substr(-2) + (m < 10 ? '0' : '') + m + (d < 10 ? '0' : '') + d + (h < 10 ? '0' : '') + h + (mm < 10 ? '0' : '') + mm + (ss < 10 ? '0' : '') + ss + (ff < 10 ? '0' : '') + ff;
     var fileNameNcr = 'info.json';
-    var name = body.myuuid+'/'+date;
+    var name = (body.myuuid || 'noid') + '/' + date;
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
@@ -67,7 +67,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var ff = Math.round(now.getMilliseconds()/10);
     var date='' + y.toString().substr(-2) + (m < 10 ? '0' : '') + m + (d < 10 ? '0' : '') + d + (h < 10 ? '0' : '') + h + (mm < 10 ? '0' : '') + mm + (ss < 10 ? '0' : '') + ss + (ff < 10 ? '0' : '') + ff;
     var fileNameNcr = 'info.json';
-    var name = body.myuuid+'/'+date;
+    var name = (body.myuuid || 'noid') + '/' + date;
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
@@ -97,7 +97,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var ff = Math.round(now.getMilliseconds()/10);
     var date='' + y.toString().substr(-2) + (m < 10 ? '0' : '') + m + (d < 10 ? '0' : '') + d + (h < 10 ? '0' : '') + h + (mm < 10 ? '0' : '') + mm + (ss < 10 ? '0' : '') + ss + (ff < 10 ? '0' : '') + ff;
     var fileNameNcr = 'info.json';
-    var name = body.myuuid+'/'+date;
+    var name = (body.myuuid || 'noid') + '/' + date;
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
@@ -127,7 +127,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var ff = Math.round(now.getMilliseconds()/10);
     var date='' + y.toString().substr(-2) + (m < 10 ? '0' : '') + m + (d < 10 ? '0' : '') + d + (h < 10 ? '0' : '') + h + (mm < 10 ? '0' : '') + mm + (ss < 10 ? '0' : '') + ss + (ff < 10 ? '0' : '') + ff;
     var fileNameNcr = 'info.json';
-    var name = body.myuuid+'/'+date;
+    var name = (body.myuuid || 'noid') + '/' + date;
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente

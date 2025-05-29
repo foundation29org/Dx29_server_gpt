@@ -327,7 +327,10 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: model
+        model: model,
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionKeyHash: data.subscriptionKeyHash
       };
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionKeyHash);
@@ -456,7 +459,9 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         rawResponse: parseError.rawResponse,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError,
-        model: model
+        model: model,
+        tenantId: data.tenantId,
+        subscriptionKeyHash: data.subscriptionKeyHash
       };
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionKeyHash);
       try {
@@ -762,7 +767,8 @@ async function callInfoDisease(req, res) {
     params: req.params,
     query: req.query,
     header_language: header_language,
-    timezone: req.body.timezone
+    timezone: req.body.timezone,
+    myuuid: req.body.myuuid
   };
   try {
     // Validar los datos de entrada
@@ -833,7 +839,10 @@ async function callInfoDisease(req, res) {
       insights.error('error ai callInfoDisease');
       let infoError = {
         error: result.data,
-        requestInfo: requestInfo
+        requestInfo: requestInfo,
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       }
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error ai" });
@@ -934,6 +943,9 @@ async function callInfoDisease(req, res) {
     const errorDetails = {
       timestamp: new Date().toISOString(),
       endpoint: 'callInfoDisease',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
       requestData: {
         body: req.body,
         questionType: req.body?.questionType,
@@ -949,7 +961,10 @@ async function callInfoDisease(req, res) {
     console.error('Detailed API Error:', JSON.stringify(errorDetails, null, 2));
     insights.error({
       message: 'API Error in callInfoDisease',
-      details: errorDetails
+      details: errorDetails,
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     });
     blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails, tenantId, subscriptionKeyHash);
 
@@ -1403,7 +1418,10 @@ async function generateFollowUpQuestions(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'follow-up'
+        model: 'follow-up',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
@@ -1532,7 +1550,9 @@ async function generateFollowUpQuestions(req, res) {
         description: description,
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
-        model: 'follow-up'
+        model: 'follow-up',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1598,7 +1618,10 @@ async function generateFollowUpQuestions(req, res) {
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'follow-up'
+      model: 'follow-up',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
@@ -1725,7 +1748,10 @@ async function generateERQuestions(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'follow-up'
+        model: 'follow-up',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
@@ -1850,7 +1876,9 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         description: description,
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
-        model: 'follow-up'
+        model: 'follow-up',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1914,7 +1942,10 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'follow-up'
+      model: 'follow-up',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
@@ -2075,7 +2106,10 @@ async function processFollowUpAnswers(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'process-follow-up'
+        model: 'process-follow-up',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
@@ -2206,7 +2240,10 @@ async function processFollowUpAnswers(req, res) {
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'process-follow-up'
+      model: 'process-follow-up',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
@@ -2334,7 +2371,10 @@ async function summarize(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'summarize'
+        model: 'summarize',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2424,7 +2464,10 @@ async function summarize(req, res) {
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'summarize'
+      model: 'summarize',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
@@ -2621,7 +2664,10 @@ async function diagnose(req, res) {
     let infoError = {
       body: req.body,
       error: error.message,
-      model: model
+      model: model,
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
     await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
