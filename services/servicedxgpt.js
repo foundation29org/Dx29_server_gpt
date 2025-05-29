@@ -12,6 +12,7 @@ const translationCtrl = require('../services/translation')
 const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
 const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
+const OpinionStats = require('../models/opinionstats');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1069,7 +1070,6 @@ function sanitizeOpinionData(data) {
 
 async function opinion(req, res) {
   try {
-
     // Validar los datos de entrada
     if (!isValidOpinionData(req.body)) {
       return res.status(400).send({
@@ -1081,7 +1081,17 @@ async function opinion(req, res) {
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
 
-    // Añadir la versión del prompt
+    // Guardar SIEMPRE la estadística (sin value)
+    const stats = new OpinionStats({
+      myuuid: sanitizedData.myuuid,
+      lang: sanitizedData.lang,
+      vote: sanitizedData.vote,
+      topRelatedConditions: sanitizedData.topRelatedConditions,
+      isNewModel: sanitizedData.isNewModel
+    });
+    await stats.save();
+
+    // Guardar en blob
     sanitizedData.version = PROMPTS.version;
     await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
     res.status(200).send({ send: true })
@@ -1090,15 +1100,11 @@ async function opinion(req, res) {
     console.error("[ERROR] opinion responded with status: " + e)
     let lang = req.body.lang ? req.body.lang : 'en';
     serviceEmail.sendMailError(lang, req.body.value, e)
-      .then(response => {
-
-      })
+      .then(response => {})
       .catch(response => {
         insights.error(response);
-        //create user, but Failed sending email.
         console.log('Fail sending email');
       })
-
     res.status(500).send('error')
   }
 }
