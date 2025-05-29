@@ -39,59 +39,18 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
-    var clientPrefix;
+    let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
     } else if (body.subscriptionKeyHash) {
         clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
     } else {
-        clientPrefix = 'self-hosted/';
+        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = version === 'v2' ? 
       `${clientPrefix}datav2/${url}` : 
       `${clientPrefix}data/${url}`;
-    
-    var result = await createBlob(tempUrl, info, fileNameNcr);
-  }
-
-  function replacer(key, value) {
-    // Suponemos que la propiedad que causa la referencia circular se llama 'body'
-    if (key === 'body' && typeof value === 'object' && value !== null) {
-      // Se podría devolver una versión reducida del 'body' o simplemente omitirlo
-      return; // undefined omite la propiedad del objeto serializado
-    }
-    return value;
-  }
-  
-  async function createBlobCallsOpenDx29(body, response, requestInfo){
-    body.response = response;
-    body.requestInfo = requestInfo;
-    var info = JSON.stringify(body);
-    var now = new Date();
-    var y = now.getFullYear();
-    var m = now.getMonth() + 1;
-    var d = now.getDate();
-    var h = now.getHours();
-    var mm = now.getMinutes();
-    var ss = now.getSeconds();
-    var ff = Math.round(now.getMilliseconds()/10);
-    var date='' + y.toString().substr(-2) + (m < 10 ? '0' : '') + m + (d < 10 ? '0' : '') + d + (h < 10 ? '0' : '') + h + (mm < 10 ? '0' : '') + mm + (ss < 10 ? '0' : '') + ss + (ff < 10 ? '0' : '') + ff;
-    var fileNameNcr = 'info.json';
-    var name = body.myuuid+'/'+date;
-    var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
-    
-    // Determinar el prefijo según el tipo de cliente
-    var clientPrefix;
-    if (body.tenantId) {
-        clientPrefix = `tenants/${body.tenantId}/`;
-    } else if (body.subscriptionKeyHash) {
-        clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
-    } else {
-        clientPrefix = 'self-hosted/';
-    }
-    
-    var tempUrl = `${clientPrefix}calls/${url}`;
     
     var result = await createBlob(tempUrl, info, fileNameNcr);
   }
@@ -112,13 +71,13 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
-    var clientPrefix;
+    let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
     } else if (body.subscriptionKeyHash) {
         clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
     } else {
-        clientPrefix = 'self-hosted/';
+        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = `${clientPrefix}vote/${url}`;
@@ -126,7 +85,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var result = await createBlob(tempUrl, info, fileNameNcr);
   }
 
-  async function createBlobErrorsDx29(body){
+  async function createBlobErrorsDx29(body, tenantId, subscriptionKeyHash) {
     var info = JSON.stringify(body);
     var now = new Date();
     var y = now.getFullYear();
@@ -142,13 +101,13 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
-    var clientPrefix;
-    if (body.tenantId) {
-        clientPrefix = `tenants/${body.tenantId}/`;
-    } else if (body.subscriptionKeyHash) {
-        clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
+    let clientPrefix;
+    if (tenantId) {
+        clientPrefix = `tenants/${tenantId}/`;
+    } else if (subscriptionKeyHash) {
+        clientPrefix = `marketplace/${subscriptionKeyHash}/`;
     } else {
-        clientPrefix = 'self-hosted/';
+        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = `${clientPrefix}errors/${url}`;
@@ -172,13 +131,13 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var url = y.toString().substr(-2) +'/'+ (m < 10 ? '0' : '') + m +'/'+ (d < 10 ? '0' : '') + d +'/'+ name;
     
     // Determinar el prefijo según el tipo de cliente
-    var clientPrefix;
+    let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
     } else if (body.subscriptionKeyHash) {
         clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
     } else {
-        clientPrefix = 'self-hosted/';
+        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = `${clientPrefix}questions/${operation}/${url}`;
@@ -188,7 +147,6 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
 
 module.exports = {
   createBlobOpenDx29,
-  createBlobCallsOpenDx29,
   createBlobOpenVote,
   createBlobErrorsDx29,
   createBlobQuestions

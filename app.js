@@ -12,7 +12,16 @@ app.set('trust proxy', 1);
 app.use(compression());
 const serviceEmail = require('./services/email');
 const api = require('./routes');
+const cors = require('cors');
 
+const isLocal = process.env.NODE_ENV === 'local'
+if (isLocal) {
+  app.use(cors({
+    origin: '*', // O pon la URL de tu frontend, ej: 'http://localhost:4200'
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Ocp-Apim-Subscription-Key', 'X-MS-AUTH-TOKEN', 'X-Tenant-Id'],
+  }));
+}
 
 // Middlewares básicos
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: false }));
