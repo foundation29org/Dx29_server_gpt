@@ -13,6 +13,15 @@ const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
 const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const OpinionStats = require('../models/opinionstats');
+const { shouldSaveToBlob } = require('../utils/blobPolicy');
+const hashSubscriptionKey = (subscriptionKey) => {
+  if (!subscriptionKey) return null;
+  return require('crypto')
+    .createHash('sha256')
+    .update(subscriptionKey)
+    .digest('hex')
+    .substring(0, 8);
+};
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -321,7 +330,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         model: model
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -449,7 +458,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         jsonError: parseError.jsonError,
         model: model
       };
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionKeyHash);
       try {
         await serviceEmail.sendMailErrorGPTIP(
           data.lang,
@@ -513,12 +522,17 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       topRelatedConditionsEnglish: englishDiseasesList,
       header_language: requestInfo.header_language,
       timezone: data.timezone,
-      model: model
+      model: model,
+      tenantId: data.tenantId,
+      subscriptionKeyHash: data.subscriptionKeyHash
     };
-    if(model == 'gpt4o'){
-      await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-    }else{
-      await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+    if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionKeyHash: data.subscriptionKeyHash })) {
+      console.log('Saving to blob');
+      if(model == 'gpt4o'){
+        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');        
+      }else{
+        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+      }
     }
   }
 
@@ -734,6 +748,9 @@ async function callInfoDisease(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -818,7 +835,7 @@ async function callInfoDisease(req, res) {
         error: result.data,
         requestInfo: requestInfo
       }
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error ai" });
     }
 
@@ -934,7 +951,7 @@ async function callInfoDisease(req, res) {
       message: 'API Error in callInfoDisease',
       details: errorDetails
     });
-    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails, tenantId, subscriptionKeyHash);
 
     if (e.response) {
       console.log(e.response.status);
@@ -1078,9 +1095,17 @@ async function opinion(req, res) {
       });
     }
 
+    // Obtener headers
+    const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+    const tenantId = getHeader(req, 'X-Tenant-Id');
+    const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
     sanitizedData.version = PROMPTS.version;
+    sanitizedData.tenantId = tenantId;
+    sanitizedData.subscriptionKeyHash = subscriptionKeyHash;
+
     // Guardar SIEMPRE la estadística (sin value)
     const stats = new OpinionStats({
       myuuid: sanitizedData.myuuid,
@@ -1088,13 +1113,16 @@ async function opinion(req, res) {
       vote: sanitizedData.vote,
       version: sanitizedData.version,
       topRelatedConditions: sanitizedData.topRelatedConditions,
-      isNewModel: sanitizedData.isNewModel
+      isNewModel: sanitizedData.isNewModel,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     });
     await stats.save();
 
-    // Guardar en blob
-    
-    await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
+    // Guardar en blob SOLO si la política lo permite
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
+    }
     res.status(200).send({ send: true })
   } catch (e) {
     insights.error(e);
@@ -1323,6 +1351,9 @@ async function generateFollowUpQuestions(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -1375,7 +1406,7 @@ async function generateFollowUpQuestions(req, res) {
         model: 'follow-up'
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1515,7 +1546,7 @@ async function generateFollowUpQuestions(req, res) {
         insights.error(emailError);
       }
       
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error" });
     }
 
@@ -1543,10 +1574,14 @@ async function generateFollowUpQuestions(req, res) {
       questions: questions,
       header_language: header_language,
       timezone: timezone,
-      model: 'follow-up'
+      model: 'follow-up',
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
+    }
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -1566,7 +1601,7 @@ async function generateFollowUpQuestions(req, res) {
       model: 'follow-up'
     };
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1642,6 +1677,9 @@ async function generateERQuestions(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -1690,7 +1728,7 @@ async function generateERQuestions(req, res) {
         model: 'follow-up'
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1826,7 +1864,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         insights.error(emailError);
       }
       
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error" });
     }
 
@@ -1852,10 +1890,14 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       questions: questions,
       header_language: header_language,
       timezone: timezone,
-      model: 'er-questions'
+      model: 'er-questions',
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
+    }
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -1875,7 +1917,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       model: 'follow-up'
     };
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1975,6 +2017,9 @@ async function processFollowUpAnswers(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -2033,7 +2078,7 @@ async function processFollowUpAnswers(req, res) {
         model: 'process-follow-up'
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2137,10 +2182,14 @@ async function processFollowUpAnswers(req, res) {
       updatedDescription: updatedDescription,
       header_language: header_language,
       timezone: timezone,
-      model: 'process-follow-up'
+      model: 'process-follow-up',
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
+    }
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -2160,7 +2209,7 @@ async function processFollowUpAnswers(req, res) {
       model: 'process-follow-up'
     };
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     let lang = req.body.lang ? req.body.lang : 'en';
     try {
@@ -2237,6 +2286,9 @@ async function summarize(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -2296,7 +2348,7 @@ async function summarize(req, res) {
         insights.error(emailError);
       }
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         return res.status(200).send({ 
@@ -2375,7 +2427,7 @@ async function summarize(req, res) {
       model: 'summarize'
     };
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -2467,10 +2519,17 @@ async function checkHealth(req, res) {
   return res.status(200).send(health);
 }
 
+function getHeader(req, name) {
+  return req.headers[name.toLowerCase()];
+}
+
 async function diagnose(req, res) {
-  // Extraer el modelo de la solicitud o usar gpt4o como predeterminado
   const model = req.body.model || 'gpt4o';
-  const useQueue = model === 'gpt4o'; // Solo usar colas para el modelo principal (rápido)
+  const useQueue = model === 'gpt4o';
+  // Obtener headers (respetando mayúsculas/minúsculas)
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
   
   const requestInfo = {
     method: req.method,
@@ -2496,31 +2555,22 @@ async function diagnose(req, res) {
         message: "Invalid request format or content"
       });
     }
-
+    
     const sanitizedData = sanitizeAiData(req.body);
-
+    sanitizedData.tenantId = tenantId;
+    sanitizedData.subscriptionKeyHash = subscriptionKeyHash;
     // Sistema de colas (solo para gpt4o)
     if (useQueue) {
       // Verificar el estado de la cola específica de la región
       const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
-      console.log('queueProperties for region:', queueProperties);
-      console.log('queueUtilizationThreshold:', config.queueUtilizationThreshold);
-      console.log('queueProperties.utilizationPercentage:', queueProperties.utilizationPercentage);
-      
       if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-        // Si estamos por encima del umbral para esta región, usar su cola específica
-        console.log('Adding to queue for region:', sanitizedData.timezone);
         const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
-        console.log('Queue info received:', queueInfo);
-
         if (!queueInfo || !queueInfo.ticketId) {
-          console.error('Invalid queue info received:', queueInfo);
           return res.status(500).send({
             result: 'error',
             message: 'Error adding request to queue'
           });
         }
-
         return res.status(200).send({
           result: 'queued',
           queueInfo: {
@@ -2532,10 +2582,7 @@ async function diagnose(req, res) {
           }
         });
       }
-
-      // Si no usamos la cola, registrar la petición activa en la región
       const region = await queueService.registerActiveRequest(sanitizedData.timezone);
-
       try {
         const result = await processAIRequest(sanitizedData, requestInfo, model);
         await queueService.releaseActiveRequest(region);
@@ -2549,7 +2596,6 @@ async function diagnose(req, res) {
       const result = await processAIRequest(sanitizedData, requestInfo, model);
       return res.status(200).send(result);
     }
-
   } catch (error) {
     console.error('Error:', error);
     insights.error({
@@ -2578,7 +2624,7 @@ async function diagnose(req, res) {
       model: model
     };
     
-    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
