@@ -9,6 +9,7 @@ const OpinionStatsSchema = new Schema({
   vote: String,
   topRelatedConditions: Array,
   isNewModel: Boolean,
+  version: String,
   tenantId: String,
   subscriptionKeyHash: String,
   createdAt: { type: Date, default: Date.now }

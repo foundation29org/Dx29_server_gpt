@@ -1080,19 +1080,20 @@ async function opinion(req, res) {
 
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
-
+    sanitizedData.version = PROMPTS.version;
     // Guardar SIEMPRE la estadística (sin value)
     const stats = new OpinionStats({
       myuuid: sanitizedData.myuuid,
       lang: sanitizedData.lang,
       vote: sanitizedData.vote,
+      version: sanitizedData.version,
       topRelatedConditions: sanitizedData.topRelatedConditions,
       isNewModel: sanitizedData.isNewModel
     });
     await stats.save();
 
     // Guardar en blob
-    sanitizedData.version = PROMPTS.version;
+    
     await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
     res.status(200).send({ send: true })
   } catch (e) {
