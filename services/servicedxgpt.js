@@ -24,7 +24,40 @@ function sanitizeInput(input) {
     .trim();
 }
 
-function isValidDiagnoseRequest(data) {
+// Función para procesar myuuid según el escenario
+function processMyUuid(myuuid, subscriptionKey = null) {
+  // Si no hay subscriptionKey, asumimos que es self-hosted
+  if (!subscriptionKey) {
+    return {
+      isValid: /^[0-9a-fA-F-]{36}$/.test(myuuid),
+      processedUuid: myuuid,
+      tenantId: null
+    };
+  }
+
+  // Para SaaS Multi-tenant, validamos el formato tenant_id-uuid
+  const parts = myuuid.split('-');
+  if (parts.length !== 2) {
+    return {
+      isValid: false,
+      processedUuid: myuuid,
+      tenantId: null
+    };
+  }
+
+  const [tenantId, uuid] = parts;
+  const isValidUuid = /^[0-9a-fA-F-]{36}$/.test(uuid);
+  const isValidTenant = /^[a-zA-Z0-9]{8}$/.test(tenantId); // Ejemplo de formato para tenant_id
+
+  return {
+    isValid: isValidUuid && isValidTenant,
+    processedUuid: uuid,
+    tenantId: tenantId
+  };
+}
+
+// Modificar la función isValidDiagnoseRequest
+function isValidDiagnoseRequest(data, subscriptionKey = null) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
@@ -42,8 +75,9 @@ function isValidDiagnoseRequest(data) {
     data.description.length < 10 ||
     data.description.length > 8000) return false;
 
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+  // Validar myuuid usando la nueva función
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
+  if (!uuidValidation.isValid) {
     return false;
   }
 
@@ -91,14 +125,28 @@ return !suspiciousPatterns.some(pattern => {
 });
 }
 
-function sanitizeAiData(data) {
+// Función para hashear el subscriptionKey de forma segura
+function hashSubscriptionKey(subscriptionKey) {
+  if (!subscriptionKey) return null;
+  // Usar los primeros 8 caracteres del hash para mantener un identificador corto pero único
+  return require('crypto')
+    .createHash('sha256')
+    .update(subscriptionKey)
+    .digest('hex')
+    .substring(0, 8);
+}
+
+function sanitizeAiData(data, subscriptionKey = null) {
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
   return {
     ...data,
     description: sanitizeInput(data.description),
     diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
-    myuuid: data.myuuid.trim(),
-    lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
-    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+    myuuid: uuidValidation.processedUuid,
+    tenantId: uuidValidation.tenantId,
+    subscriptionKeyHash: hashSubscriptionKey(subscriptionKey),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
+    timezone: data.timezone?.trim() || ''
   };
 }
 
@@ -659,7 +707,7 @@ function extractContent(tag, text) {
 }
 
 
-function isValidQuestionRequest(data) {
+function isValidQuestionRequest(data, subscriptionKey = null) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
@@ -678,8 +726,9 @@ function isValidQuestionRequest(data) {
     data.disease.length < 2 ||
     data.disease.length > 100) return false;
 
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+  // Validar myuuid usando la nueva función
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
+  if (!uuidValidation.isValid) {
     return false;
   }
 
@@ -716,12 +765,15 @@ function isValidQuestionRequest(data) {
   );
 }
 
-function sanitizeQuestionData(data) {
+function sanitizeQuestionData(data, subscriptionKey = null) {
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
   return {
     ...data,
     disease: sanitizeInput(data.disease),
     medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
-    myuuid: data.myuuid.trim(),
+    myuuid: uuidValidation.processedUuid,
+    tenantId: uuidValidation.tenantId,
+    subscriptionKeyHash: hashSubscriptionKey(subscriptionKey),
     timezone: data.timezone?.trim() || '',
     questionType: Number(data.questionType),
     detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
@@ -994,7 +1046,7 @@ async function callInfoDisease(req, res) {
 }
 
 
-function isValidOpinionData(data) {
+function isValidOpinionData(data, subscriptionKey = null) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
@@ -1002,8 +1054,9 @@ function isValidOpinionData(data) {
   const requiredFields = ['value', 'myuuid', 'vote'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+  // Validar myuuid usando la nueva función
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
+  if (!uuidValidation.isValid) {
     return false;
   }
 
@@ -1046,7 +1099,8 @@ function isValidOpinionData(data) {
   return true;
 }
 
-function sanitizeOpinionData(data) {
+function sanitizeOpinionData(data, subscriptionKey = null) {
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
   return {
     ...data,
     value: data.value
@@ -1054,7 +1108,9 @@ function sanitizeOpinionData(data) {
       .replace(/(\{|\}|\||\\)/g, '')
       .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim(),
-    myuuid: data.myuuid.trim(),
+    myuuid: uuidValidation.processedUuid,
+    tenantId: uuidValidation.tenantId,
+    subscriptionKeyHash: hashSubscriptionKey(subscriptionKey),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     topRelatedConditions: data.topRelatedConditions?.map(condition => ({
       ...condition,
@@ -1068,18 +1124,34 @@ function sanitizeOpinionData(data) {
 }
 
 async function opinion(req, res) {
-  try {
+  const subscriptionKey = req.headers['ocp-apim-subscription-key'];
+  
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: req.get('origin'),
+    body: req.body,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    params: req.params,
+    query: req.query,
+    header_language: req.headers['accept-language'],
+    subscriptionKey: subscriptionKey
+  };
 
-    // Validar los datos de entrada
-    if (!isValidOpinionData(req.body)) {
+  try {
+    if (!isValidOpinionData(req.body, subscriptionKey)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
       return res.status(400).send({
         result: "error",
         message: "Invalid request format or content"
       });
     }
 
-    // Sanitizar los datos
-    const sanitizedData = sanitizeOpinionData(req.body);
+    const sanitizedData = sanitizeOpinionData(req.body, subscriptionKey);
 
     // Añadir la versión del prompt
     sanitizedData.version = PROMPTS.version;
@@ -1103,7 +1175,7 @@ async function opinion(req, res) {
   }
 }
 
-function isValidGeneralFeedbackData(data) {
+function isValidGeneralFeedbackData(data, subscriptionKey = null) {
   // Validar estructura básica
   if (!data || typeof data !== 'object') return false;
 
@@ -1111,8 +1183,9 @@ function isValidGeneralFeedbackData(data) {
   const requiredFields = ['value', 'myuuid'];
   if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
 
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+  // Validar myuuid usando la nueva función
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
+  if (!uuidValidation.isValid) {
     return false;
   }
 
@@ -1143,7 +1216,8 @@ function isValidGeneralFeedbackData(data) {
   });
 }
 
-function sanitizeGeneralFeedbackData(data) {
+function sanitizeGeneralFeedbackData(data, subscriptionKey = null) {
+  const uuidValidation = processMyUuid(data.myuuid, subscriptionKey);
   const sanitizeText = (text) => {
     if (!text) return text;
     return text
@@ -1155,7 +1229,9 @@ function sanitizeGeneralFeedbackData(data) {
 
   return {
     ...data,
-    myuuid: data.myuuid.trim(),
+    myuuid: uuidValidation.processedUuid,
+    tenantId: uuidValidation.tenantId,
+    subscriptionKeyHash: hashSubscriptionKey(subscriptionKey),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     value: {
       ...data.value,
@@ -1163,7 +1239,6 @@ function sanitizeGeneralFeedbackData(data) {
       moreFunct: sanitizeText(data.value.moreFunct),
       freeText: sanitizeText(data.value.freeText),
       email: data.value.email?.trim().toLowerCase(),
-      // Mantener los valores numéricos sin cambios
       pregunta1: data.value.pregunta1,
       pregunta2: data.value.pregunta2
     }
@@ -1171,20 +1246,34 @@ function sanitizeGeneralFeedbackData(data) {
 }
 
 async function sendGeneralFeedback(req, res) {
-
+  const subscriptionKey = req.headers['ocp-apim-subscription-key'];
+  
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: req.get('origin'),
+    body: req.body,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    params: req.params,
+    query: req.query,
+    header_language: req.headers['accept-language'],
+    subscriptionKey: subscriptionKey
+  };
 
   try {
-
-    // Validar los datos de entrada
-    if (!isValidGeneralFeedbackData(req.body)) {
+    if (!isValidGeneralFeedbackData(req.body, subscriptionKey)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
       return res.status(400).send({
         result: "error",
         message: "Invalid request format or content"
       });
     }
 
-    // Sanitizar los datos
-    const sanitizedData = sanitizeGeneralFeedbackData(req.body);
+    const sanitizedData = sanitizeGeneralFeedbackData(req.body, subscriptionKey);
     const generalfeedback = new Generalfeedback({
       myuuid: sanitizedData.myuuid,
       pregunta1: sanitizedData.value.pregunta1,
@@ -2465,6 +2554,9 @@ async function diagnose(req, res) {
   const model = req.body.model || 'gpt4o';
   const useQueue = model === 'gpt4o'; // Solo usar colas para el modelo principal (rápido)
   
+  // Extraer subscriptionKey del header
+  const subscriptionKey = req.headers['ocp-apim-subscription-key'];
+  
   const requestInfo = {
     method: req.method,
     url: req.url,
@@ -2475,11 +2567,12 @@ async function diagnose(req, res) {
     params: req.params,
     query: req.query,
     header_language: req.headers['accept-language'],
-    timezone: req.body.timezone
+    timezone: req.body.timezone,
+    subscriptionKey: subscriptionKey
   };
 
   try {
-    if (!isValidDiagnoseRequest(req.body)) {
+    if (!isValidDiagnoseRequest(req.body, subscriptionKey)) {
       insights.error({
         message: "Invalid request format or content",
         request: req.body
@@ -2490,7 +2583,7 @@ async function diagnose(req, res) {
       });
     }
 
-    const sanitizedData = sanitizeAiData(req.body);
+    const sanitizedData = sanitizeAiData(req.body, subscriptionKey);
 
     // Sistema de colas (solo para gpt4o)
     if (useQueue) {
@@ -2600,6 +2693,45 @@ async function diagnose(req, res) {
     }
     
     return res.status(500).send({ result: "error" });
+  }
+}
+
+async function question(req, res) {
+  const model = req.body.model || 'gpt4o';
+  const useQueue = model === 'gpt4o';
+  const subscriptionKey = req.headers['ocp-apim-subscription-key'];
+  
+  const requestInfo = {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: req.get('origin'),
+    body: req.body,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    params: req.params,
+    query: req.query,
+    header_language: req.headers['accept-language'],
+    timezone: req.body.timezone,
+    subscriptionKey: subscriptionKey
+  };
+
+  try {
+    if (!isValidQuestionRequest(req.body, subscriptionKey)) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Invalid request format or content"
+      });
+    }
+
+    const sanitizedData = sanitizeQuestionData(req.body, subscriptionKey);
+
+    // ... resto del código existente ...
+  } catch (error) {
+    // ... manejo de errores existente ...
   }
 }
 
