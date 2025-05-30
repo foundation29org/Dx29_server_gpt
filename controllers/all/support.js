@@ -9,6 +9,19 @@ const insights = require('../../services/insights')
 const axios = require('axios');
 const config = require('../../config')
 
+function getHeader(req, name) {
+	return req.headers[name.toLowerCase()];
+  }
+
+  const hashSubscriptionKey = (subscriptionKey) => {
+	if (!subscriptionKey) return null;
+	return require('crypto')
+	  .createHash('sha256')
+	  .update(subscriptionKey)
+	  .digest('hex')
+	  .substring(0, 8);
+  };
+  
 function isValidSupportData(data) {
 	if (!data || typeof data !== 'object') return false;
   
@@ -71,6 +84,12 @@ function isValidSupportData(data) {
 
   async function sendMsgLogoutSupport(req, res) {
 	try {
+		// Obtener headers
+		const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+		const tenantId = getHeader(req, 'X-Tenant-Id');
+		const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+		
+
 	  // Validar los datos de entrada
 	  if (!isValidSupportData(req.body)) {
 		return res.status(400).send({ 
@@ -88,11 +107,13 @@ function isValidSupportData(data) {
 		subscribe: sanitizedData.subscribe,
 		email: sanitizedData.email,
 		description: `Name: ${sanitizedData.userName}, Email: ${sanitizedData.email}, Description: ${sanitizedData.description}`,
-		date: new Date(Date.now()).toString()
+		date: new Date(Date.now()).toString(),
+		tenantId: tenantId,
+		subscriptionKeyHash: subscriptionKeyHash
 	  });
   
 	  // Enviar al flujo (sin esperar respuesta)
-	  sendFlow(support, sanitizedData.lang);
+	  sendFlow(support, sanitizedData.lang, tenantId, subscriptionKeyHash);
   
 	  // Guardar en base de datos (sin esperar respuesta)
 	  support.save()
@@ -123,16 +144,17 @@ function isValidSupportData(data) {
   }
 
 
-async function sendFlow(support, lang){
+async function sendFlow(support, lang, tenantId, subscriptionKeyHash){
 	let requestBody = {
 		subject: support.subject,
 		subscribe: support.subscribe.toString(),
 		email: support.email,
 		description: support.description,
 		date: support.date,
-		lang: lang
+		lang: lang,
+		tenantId: tenantId,
+		subscriptionKeyHash: subscriptionKeyHash
 	}
-
 	const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
     ? 'https://prod-186.westeurope.logic.azure.com:443/workflows/9dae9a0707e5452abbc7173b05277df6/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=sobGleGrapNnnf5SIgVtX6PmC7Bhzn5oTKPv9MluGwM'
     : 'https://prod-208.westeurope.logic.azure.com:443/workflows/2e5021f1e8764cacb7a60a58bfe1f1db/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=QdRU50xndaLmf47VpR77saF2U_AzJx1W3z6cupllejo';

@@ -128,7 +128,7 @@ function sendMailErrorGPTIP (lang, req, response, requestInfo){
   return decoded
 }
 
-function sendMailGeneralFeedback (info, myuuid){
+function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionKeyHash){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -147,7 +147,9 @@ function sendMailGeneralFeedback (info, myuuid){
         userType : info.userType,
         moreFunct : info.moreFunct,
         freeText : info.freeText,
-        email : info.email
+        email : info.email,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       }
     };
 

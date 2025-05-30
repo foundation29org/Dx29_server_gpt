@@ -34,73 +34,6 @@ function sanitizeInput(input) {
     .trim();
 }
 
-function isValidDiagnoseRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos (timezone no incluido)
-  const requiredFields = ['description', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
-  }
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
-  }
-
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
-  }
-
-  // Validar diseases_list si existe
-  if (data.diseases_list !== undefined &&
-    (typeof data.diseases_list !== 'string' || data.diseases_list.length > 1000)) {
-    return false;
-  }
-
-  // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
-
-// Normalizar el texto para la validación
-const normalizedDescription = data.description.replace(/\n/g, ' ');
-const normalizedDiseasesList = data.diseases_list || '';
-
-return !suspiciousPatterns.some(pattern => {
-    const descriptionMatch = pattern.test(normalizedDescription);
-    const diseasesMatch = data.diseases_list && pattern.test(normalizedDiseasesList);
-    
-    if (descriptionMatch || diseasesMatch) {
-        console.log('Pattern matched:', pattern);
-        console.log('In description:', descriptionMatch);
-        console.log('In diseases list:', diseasesMatch);
-        insights.error({
-          message: "Pattern matched",
-          pattern: pattern,
-          description: descriptionMatch,
-          diseases_list: diseasesMatch
-        });
-    }
-    
-    return descriptionMatch || diseasesMatch;
-});
-}
-
 function sanitizeAiData(data) {
   return {
     ...data,
@@ -678,76 +611,88 @@ function extractContent(tag, text) {
   return match ? match[1].trim() : '';
 }
 
+function validateQuestionRequest(data) {
+  const errors = [];
 
-function isValidQuestionRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos
-  const requiredFields = ['questionType', 'disease', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar questionType
-  if (typeof data.questionType !== 'number' ||
-    !Number.isInteger(data.questionType) ||
-    data.questionType < 0 ||
-    data.questionType > 4) return false;
-
-  // Validar disease
-  if (typeof data.disease !== 'string' ||
-    data.disease.length < 2 ||
-    data.disease.length > 100) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar detectedLang si existe  
-  if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) return false;
-
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (data.questionType === undefined) {
+    errors.push({ field: 'questionType', reason: 'Field is required' });
+  } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 4) {
+    errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 4' });
   }
 
-  // Validar medicalDescription si existe (requerido para questionType 3 y 4)
+  if (!data.disease) {
+    errors.push({ field: 'disease', reason: 'Field is required' });
+  } else if (typeof data.disease !== 'string') {
+    errors.push({ field: 'disease', reason: 'Must be a string' });
+  } else if (data.disease.length < 2) {
+    errors.push({ field: 'disease', reason: 'Must be at least 2 characters' });
+  } else if (data.disease.length > 100) {
+    errors.push({ field: 'disease', reason: 'Must not exceed 100 characters' });
+  }
+
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) {
+    errors.push({ field: 'detectedLang', reason: 'Must be a 2-character language code' });
+  }
+
+  // Validar medicalDescription si questionType es 3 o 4
   if ([3, 4].includes(data.questionType)) {
-    if (!data.medicalDescription ||
-      typeof data.medicalDescription !== 'string' ||
-      data.medicalDescription.length < 10 ||
-      data.medicalDescription.length > 8000) {
-      return false;
+    if (!data.medicalDescription) {
+      errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3 or 4' });
+    } else if (typeof data.medicalDescription !== 'string') {
+      errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
+    } else if (data.medicalDescription.length < 10) {
+      errors.push({ field: 'medicalDescription', reason: 'Must be at least 10 characters' });
+    } else if (data.medicalDescription.length > 8000) {
+      errors.push({ field: 'medicalDescription', reason: 'Must not exceed 8000 characters' });
     }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
+  ];
 
-  return !suspiciousPatterns.some(pattern =>
-    pattern.test(data.disease) ||
-    (data.medicalDescription && pattern.test(data.medicalDescription))
-  );
+  if (data.disease) {
+    const normalizedDisease = data.disease.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDisease)) {
+        errors.push({ field: 'disease', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  if ([3, 4].includes(data.questionType) && data.medicalDescription) {
+    const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedMedicalDescription)) {
+        errors.push({ field: 'medicalDescription', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+
+  return errors;
 }
-
-function sanitizeQuestionData(data) {
-  return {
-    ...data,
-    disease: sanitizeInput(data.disease),
-    medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
-    myuuid: data.myuuid.trim(),
-    timezone: data.timezone?.trim() || '',
-    questionType: Number(data.questionType),
-    detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
-  };
-}
-
 
 async function callInfoDisease(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
@@ -772,10 +717,12 @@ async function callInfoDisease(req, res) {
   };
   try {
     // Validar los datos de entrada
-    if (!isValidQuestionRequest(req.body)) {
+    const validationErrors = validateQuestionRequest(req.body);
+    if (validationErrors.length > 0) {
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1027,89 +974,136 @@ async function callInfoDisease(req, res) {
 }
 
 
-function isValidOpinionData(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function sanitizeQuestionData(data) {
+  return {
+    ...data,
+    disease: sanitizeInput(data.disease),
+    medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
+    myuuid: data.myuuid.trim(),
+    timezone: data.timezone?.trim() || '',
+    questionType: Number(data.questionType),
+    detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
+  };
+}
 
-  // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'vote'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+function validateOpinionData(data) {
+  const errors = [];
+  
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
-
-   // Validar lang
-   if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  
+  if (!data.value) {
+    errors.push({ field: 'value', reason: 'Field is required' });
+  } else if (typeof data.value !== 'string') {
+    errors.push({ field: 'value', reason: 'Must be a string' });
+  } else if (data.value.length > 10000) {
+    errors.push({ field: 'value', reason: 'Must not exceed 10000 characters' });
   }
-
-  // Validar vote
-  if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) return false;
-
-  // Validar value (texto médico)
-  if (typeof data.value !== 'string' || data.value.length > 10000) return false;
-
-  if (typeof data.isNewModel !== 'boolean') return false;
-
-  // Verificar patrones sospechosos en el texto
-  const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
-
-  if (suspiciousPatterns.some(pattern => pattern.test(data.value))) {
-    return false;
+  
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
-
-  // Validar topRelatedConditions si existe
+  
+  if (!data.vote) {
+    errors.push({ field: 'vote', reason: 'Field is required' });
+  } else if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) {
+    errors.push({ field: 'vote', reason: 'Must be either "up" or "down"' });
+  }
+  
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
+  }
+  
+  if (typeof data.isNewModel !== 'boolean') {
+    errors.push({ field: 'isNewModel', reason: 'Must be a boolean' });
+  }
+  
   if (data.topRelatedConditions) {
-    if (!Array.isArray(data.topRelatedConditions)) return false;
-    if (!data.topRelatedConditions.every(condition =>
-      typeof condition === 'object' &&
-      typeof condition.name === 'string' &&
-      condition.name.length < 200
-    )) return false;
+    if (!Array.isArray(data.topRelatedConditions)) {
+      errors.push({ field: 'topRelatedConditions', reason: 'Must be an array' });
+    } else {
+      data.topRelatedConditions.forEach((condition, index) => {
+        if (!condition || typeof condition !== 'object') {
+          errors.push({ field: `topRelatedConditions[${index}]`, reason: 'Must be an object' });
+        } else if (!condition.name || typeof condition.name !== 'string') {
+          errors.push({ field: `topRelatedConditions[${index}].name`, reason: 'Must be a string' });
+        } else if (condition.name.length > 200) {
+          errors.push({ field: `topRelatedConditions[${index}].name`, reason: 'Must not exceed 200 characters' });
+        }
+      });
+    }
   }
-
-  return true;
+  
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
+  ];
+  
+  if (data.value) {
+    const normalizedValue = data.value.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedValue)) {
+        errors.push({ field: 'value', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  
+  return errors;
 }
 
 function sanitizeOpinionData(data) {
   return {
     ...data,
-    value: data.value
-      .replace(/[<>]/g, '')
-      .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt:|system:|assistant:|user:/gi, '')
-      .trim(),
-    myuuid: data.myuuid.trim(),
-    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
-    topRelatedConditions: data.topRelatedConditions?.map(condition => ({
-      ...condition,
-      name: condition.name
-        .replace(/[<>]/g, '')
-        .replace(/(\{|\}|\||\\)/g, '')
-        .trim()
-    })),
+    value: typeof data.value === 'string'
+      ? data.value
+          .replace(/[<>]/g, '')
+          .replace(/(\{|\}|\||\\)/g, '')
+          .replace(/prompt:|system:|assistant:|user:/gi, '')
+          .trim()
+      : '',
+    myuuid: typeof data.myuuid === 'string' ? data.myuuid.trim() : '',
+    lang: data.lang ? String(data.lang).trim().toLowerCase() : 'en',
+    topRelatedConditions: Array.isArray(data.topRelatedConditions)
+      ? data.topRelatedConditions.map(condition => ({
+          ...condition,
+          name: typeof condition.name === 'string'
+            ? condition.name
+                .replace(/[<>]/g, '')
+                .replace(/(\{|\}|\||\\)/g, '')
+                .trim()
+            : ''
+        }))
+      : [],
     isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
   };
 }
 
 async function opinion(req, res) {
   try {
-    // Validar los datos de entrada
-    if (!isValidOpinionData(req.body)) {
+    const validationErrors = validateOpinionData(req.body);
+    if (validationErrors.length > 0) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body,
+        errors: validationErrors
+      });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
-
+    
     // Obtener headers
     const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
     const tenantId = getHeader(req, 'X-Tenant-Id');
@@ -1153,44 +1147,54 @@ async function opinion(req, res) {
   }
 }
 
-function isValidGeneralFeedbackData(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateGeneralFeedbackData(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
-  }
-
-  // Validar value (objeto del formulario)
-  if (!data.value || typeof data.value !== 'object') return false;
-
-  // Validar campos específicos del formulario
-  const formFields = {
-    pregunta1: (val) => typeof val === 'number' && val >= 0 && val <= 5,
-    pregunta2: (val) => typeof val === 'number' && val >= 0 && val <= 5,
-    userType: (val) => typeof val === 'string' && val.length < 100,
-    moreFunct: (val) => typeof val === 'string' && val.length < 1000,
-    freeText: (val) => !val || (typeof val === 'string' && val.length < 2000),
-    email: (val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
-  };
-
-  return Object.entries(formFields).every(([field, validator]) => {
-    if (field === 'freeText' || field === 'email') {
-      // Estos campos son opcionales
-      return !data.value[field] || validator(data.value[field]);
+  if (!data.value || typeof data.value !== 'object') {
+    errors.push({ field: 'value', reason: 'Field is required and must be an object' });
+  } else {
+    // Validar campos específicos del formulario
+    const formFields = {
+      pregunta1: (val) => typeof val === 'number' && val >= 0 && val <= 5,
+      pregunta2: (val) => typeof val === 'number' && val >= 0 && val <= 5,
+      userType: (val) => typeof val === 'string' && val.length < 100,
+      moreFunct: (val) => typeof val === 'string' && val.length < 1000,
+      freeText: (val) => !val || (typeof val === 'string' && val.length < 2000),
+      email: (val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
+    };
+    for (const [field, validator] of Object.entries(formFields)) {
+      if (field === 'freeText' || field === 'email') {
+        if (data.value[field] && !validator(data.value[field])) {
+          errors.push({ field: `value.${field}`, reason: 'Invalid format' });
+        }
+      } else {
+        if (!data.value.hasOwnProperty(field)) {
+          errors.push({ field: `value.${field}`, reason: 'Field is required' });
+        } else if (!validator(data.value[field])) {
+          errors.push({ field: `value.${field}`, reason: 'Invalid format' });
+        }
+      }
     }
-    return data.value.hasOwnProperty(field) && validator(data.value[field]);
-  });
+  }
+
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
+  }
+
+  return errors;
 }
 
 function sanitizeGeneralFeedbackData(data) {
@@ -1221,15 +1225,21 @@ function sanitizeGeneralFeedbackData(data) {
 }
 
 async function sendGeneralFeedback(req, res) {
+  // Obtener headers
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
 
   try {
 
     // Validar los datos de entrada
-    if (!isValidGeneralFeedbackData(req.body)) {
+    const validationErrors = validateGeneralFeedbackData(req.body);
+    if (validationErrors.length > 0) {
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1243,12 +1253,14 @@ async function sendGeneralFeedback(req, res) {
       moreFunct: sanitizedData.value.moreFunct,
       freeText: sanitizedData.value.freeText,
       email: sanitizedData.value.email,
-      date: new Date(Date.now()).toString()
+      date: new Date(Date.now()).toString(),
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     });
-    sendFlow(generalfeedback, sanitizedData.lang)
+    sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionKeyHash)
     await generalfeedback.save();
     try {
-      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid);
+      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionKeyHash);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');
@@ -1270,7 +1282,7 @@ async function sendGeneralFeedback(req, res) {
   }
 }
 
-async function sendFlow(generalfeedback, lang) {
+async function sendFlow(generalfeedback, lang, tenantId, subscriptionKeyHash) {
   let requestBody = {
     myuuid: generalfeedback.myuuid,
     pregunta1: generalfeedback.pregunta1,
@@ -1280,7 +1292,9 @@ async function sendFlow(generalfeedback, lang) {
     freeText: generalfeedback.freeText,
     date: generalfeedback.date,
     email: generalfeedback.email,
-    lang: lang
+    lang: lang,
+    tenantId: tenantId,
+    subscriptionKeyHash: subscriptionKeyHash
   }
 
   const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
@@ -1301,54 +1315,80 @@ async function sendFlow(generalfeedback, lang) {
 
 }
 
-function isValidFollowUpQuestionsRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateFollowUpQuestionsRequest(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['description', 'diseases', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar diseases
-  if (typeof data.diseases !== 'string' ||
-    data.diseases.length < 2 ||
-    data.diseases.length > 1000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
 
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (!data.diseases) {
+    errors.push({ field: 'diseases', reason: 'Field is required' });
+  } else if (typeof data.diseases !== 'string') {
+    errors.push({ field: 'diseases', reason: 'Must be a string' });
+  } else if (data.diseases.length < 2) {
+    errors.push({ field: 'diseases', reason: 'Must be at least 2 characters' });
+  } else if (data.diseases.length > 1000) {
+    errors.push({ field: 'diseases', reason: 'Must not exceed 1000 characters' });
+  }
+
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
 
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
-  const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  if (data.diseases) {
+    const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDiseases)) {
+        errors.push({ field: 'diseases', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
 
-  return !suspiciousPatterns.some(pattern => {
-    return pattern.test(normalizedDescription) || pattern.test(normalizedDiseases);
-  });
+  return errors;
 }
 
 function sanitizeFollowUpQuestionsData(data) {
@@ -1385,14 +1425,17 @@ async function generateFollowUpQuestions(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidFollowUpQuestionsRequest(req.body)) {
+    const validationErrors = validateFollowUpQuestionsRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for follow-up questions",
-        request: req.body
+        request: req.body,
+        errors: validationErrors
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1643,48 +1686,61 @@ async function generateFollowUpQuestions(req, res) {
 }
 
 
-function isValidERQuestionsRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateERQuestionsRequest(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
 
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
 
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
 
-  return !suspiciousPatterns.some(pattern => {
-    return pattern.test(normalizedDescription);
-  });
+  return errors;
 }
 
 function sanitizeERQuestionsData(data) {
@@ -1719,14 +1775,17 @@ async function generateERQuestions(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidERQuestionsRequest(req.body)) {
+    const validationErrors = validateERQuestionsRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for ER questions",
-        request: req.body
+        request: req.body,
+        errors: validationErrors
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1966,68 +2025,100 @@ Your response should be ONLY the JSON array, with no additional text or explanat
   }
 }
 
-function isValidProcessFollowUpRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateProcessFollowUpRequest(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['description', 'answers', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar answers
-  if (!Array.isArray(data.answers) || data.answers.length === 0) return false;
-  
-  // Validar estructura de cada respuesta
-  for (const answer of data.answers) {
-    if (!answer || typeof answer !== 'object') return false;
-    if (!answer.question || typeof answer.question !== 'string') return false;
-    if (!answer.answer || typeof answer.answer !== 'string') return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!Array.isArray(data.answers) || data.answers.length === 0) {
+    errors.push({ field: 'answers', reason: 'Must be a non-empty array' });
+  } else {
+    data.answers.forEach((answer, idx) => {
+      if (!answer || typeof answer !== 'object') {
+        errors.push({ field: `answers[${idx}]`, reason: 'Each answer must be an object' });
+      } else {
+        if (!answer.question || typeof answer.question !== 'string') {
+          errors.push({ field: `answers[${idx}].question`, reason: 'Field is required and must be a string' });
+        }
+        if (!answer.answer || typeof answer.answer !== 'string') {
+          errors.push({ field: `answers[${idx}].answer`, reason: 'Field is required and must be a string' });
+        }
+      }
+    });
   }
 
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
 
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
-  
-  if (suspiciousPatterns.some(pattern => pattern.test(normalizedDescription))) {
-    return false;
-  }
-  
-  // Verificar patrones sospechosos en las respuestas
-  for (const answer of data.answers) {
-    if (suspiciousPatterns.some(pattern => 
-      pattern.test(answer.question) || pattern.test(answer.answer))) {
-      return false;
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
     }
   }
+  if (Array.isArray(data.answers)) {
+    data.answers.forEach((answer, idx) => {
+      if (answer && typeof answer.question === 'string') {
+        const normalizedQ = answer.question.replace(/\n/g, ' ');
+        for (const { pattern, reason } of suspiciousPatterns) {
+          if (pattern.test(normalizedQ)) {
+            errors.push({ field: `answers[${idx}].question`, reason: `Contains suspicious content: ${reason}` });
+            break;
+          }
+        }
+      }
+      if (answer && typeof answer.answer === 'string') {
+        const normalizedA = answer.answer.replace(/\n/g, ' ');
+        for (const { pattern, reason } of suspiciousPatterns) {
+          if (pattern.test(normalizedA)) {
+            errors.push({ field: `answers[${idx}].answer`, reason: `Contains suspicious content: ${reason}` });
+            break;
+          }
+        }
+      }
+    });
+  }
 
-  return true;
+  return errors;
 }
 
 function sanitizeProcessFollowUpData(data) {
@@ -2067,14 +2158,17 @@ async function processFollowUpAnswers(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidProcessFollowUpRequest(req.body)) {
+    const validationErrors = validateProcessFollowUpRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for processing follow-up answers",
-        request: req.body
+        request: req.body,
+        errors: validationErrors
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -2264,59 +2358,61 @@ async function processFollowUpAnswers(req, res) {
   }
 }
 
-function isValidSummarizeRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 400000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+function validateSummarizeRequest(data) {
+  const errors = [];
+  
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
+  }
+  
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 400000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 400000 characters' });
+  }
+  
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
-
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
-
+  
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
-
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
-
-  return !suspiciousPatterns.some(pattern => {
-    const descriptionMatch = pattern.test(normalizedDescription);
-    
-    if (descriptionMatch) {
-      console.log('Pattern matched:', pattern);
-      insights.error({
-        message: "Pattern matched in summarize request",
-        pattern: pattern,
-        description: descriptionMatch
-      });
+  
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
     }
-    
-    return descriptionMatch;
-  });
+  }
+  
+  return errors;
 }
 
 async function summarize(req, res) {
@@ -2342,14 +2438,17 @@ async function summarize(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidSummarizeRequest(req.body)) {
+    const validationErrors = validateSummarizeRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for summarization",
-        request: req.body
+        request: req.body,
+        errors: validationErrors
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -2566,10 +2665,84 @@ function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
 }
 
+function validateDiagnoseRequest(data) {
+  const errors = [];
+  
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
+  }
+  
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
+  }
+  
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+  
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+  
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
+  }
+  
+  if (data.diseases_list !== undefined) {
+    if (typeof data.diseases_list !== 'string') {
+      errors.push({ field: 'diseases_list', reason: 'Must be a string' });
+    } else if (data.diseases_list.length > 1000) {
+      errors.push({ field: 'diseases_list', reason: 'Must not exceed 1000 characters' });
+    }
+  }
+  
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
+  ];
+  
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  
+  if (data.diseases_list) {
+    const normalizedDiseasesList = data.diseases_list.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDiseasesList)) {
+        errors.push({ field: 'diseases_list', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  
+  return errors;
+}
+
 async function diagnose(req, res) {
   const model = req.body.model || 'gpt4o';
   const useQueue = model === 'gpt4o';
-  // Obtener headers (respetando mayúsculas/minúsculas)
   const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
@@ -2588,14 +2761,17 @@ async function diagnose(req, res) {
   };
 
   try {
-    if (!isValidDiagnoseRequest(req.body)) {
+    const validationErrors = validateDiagnoseRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content",
-        request: req.body
+        request: req.body,
+        errors: validationErrors
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
     

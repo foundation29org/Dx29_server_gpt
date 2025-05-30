@@ -13,7 +13,6 @@ let url = `mongodb://${mongodbname}:${pwd}@${host}:10255/test?ssl=true&retrywrit
 if(config.NODE_ENV === 'production'){
   url = `mongodb://${mongodbname}:${pwd}@${host}:10255/admin?ssl=true&retrywrites=false&appName=@${mongodbname}@`;
 }
-console.log(url);
 mongoose.connect(url);
 
 module.exports = mongoose;
