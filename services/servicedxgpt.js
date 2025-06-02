@@ -16,50 +16,21 @@ const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const OpinionStats = require('../models/opinionstats');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const ENCRYPTION_KEY = config.SECRET_KEY_CRYPTO;
-const IV_LENGTH = 16;
 
-const encryptSubscriptionKey = (subscriptionKey) => {
-  if (!subscriptionKey) return null;
-  
-  // Crear un IV aleatorio
-  const iv = crypto.randomBytes(IV_LENGTH);
-  
-  // Crear cipher con la clave secreta y el IV
-  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
-  
-  // Encriptar la subscription key
-  let encrypted = cipher.update(subscriptionKey, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  
-  // Obtener el auth tag
-  const authTag = cipher.getAuthTag();
-  
-  return {
-    encrypted: encrypted,
-    iv: iv.toString('hex'),
-    tag: authTag.toString('hex')
-  };
-};
+function encryptSubscriptionKey(data) {
+  var cipher = crypto.createCipher('aes-256-ecb', ENCRYPTION_KEY);
+  return cipher.update(data, 'utf8', 'hex') + cipher.final('hex');
+}
 
-const decryptSubscriptionKey = (encrypted, iv, tag) => {
-  try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), Buffer.from(iv, 'hex'));
-    decipher.setAuthTag(Buffer.from(tag, 'hex'));
-    
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    
-    return decrypted;
-  } catch (error) {
-    console.error('Error decrypting:', error);
-    return null;
-  }
-};
+function decryptSubscriptionKey(data) {
+  var cipher = crypto.createDecipher('aes-256-ecb', ENCRYPTION_KEY);
+  return cipher.update(data, 'hex', 'utf8') + cipher.final('utf8');
+}
 
 const hashSubscriptionKey = (subscriptionKey) => {
   if (!subscriptionKey) return null;
   const encryptedData = encryptSubscriptionKey(subscriptionKey);
-  return encryptedData.encrypted; // Usamos el valor encriptado completo
+  return encryptedData; // Usamos el valor encriptado completo
 };
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -160,7 +131,6 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
     return 'other';
   })();
   const suffix = mode === 'anonymized' ? 'anonymized' : 'call';
-
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
   return endpoints.map(endpoint => endpoint.replace('/call/', `/${suffix}/`));
 }
@@ -364,7 +334,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     subscriptionKeyHash: data.subscriptionKeyHash,
     myuuid: data.myuuid
   }
-  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model, dataRequest);
+  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
@@ -848,7 +818,7 @@ async function callInfoDisease(req, res) {
       subscriptionKeyHash: subscriptionKeyHash,
       myuuid: sanitizedData.myuuid
     }
-    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
+    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
     if (!result.data.choices[0].message.content) {
       try {
         await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, req.body, result.data.choices, requestInfo);
@@ -1692,7 +1662,7 @@ async function generateFollowUpQuestions(req, res) {
       subscriptionKeyHash: subscriptionKeyHash,
       myuuid: sanitizedData.myuuid
     }
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
@@ -2064,7 +2034,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       subscriptionKeyHash: subscriptionKeyHash,
       myuuid: sanitizedData.myuuid
     }
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
@@ -2468,7 +2438,7 @@ async function processFollowUpAnswers(req, res) {
       subscriptionKeyHash: subscriptionKeyHash,
       myuuid: sanitizedData.myuuid
     }
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
