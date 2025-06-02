@@ -9,7 +9,9 @@ const SupportSchema = new Schema({
   status: { type: String, default: 'unread' },
   email: String,
   subscribe: { type: Boolean, default: false },
-  date: { type: Date, default: Date.now }
+  date: { type: Date, default: Date.now },
+  tenantId: String,
+  subscriptionKeyHash: String
 });
 
 module.exports = mongoose.model('Support', SupportSchema);

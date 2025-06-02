@@ -5,12 +5,33 @@ const serviceEmail = require('../services/email')
 const Support = require('../models/support')
 const Generalfeedback = require('../models/generalfeedback')
 const axios = require('axios');
+const crypto = require('crypto');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const supportService = require('../controllers/all/support');
 const { encodingForModel } = require("js-tiktoken");
 const translationCtrl = require('../services/translation')
 const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
+const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
+const OpinionStats = require('../models/opinionstats');
+const { shouldSaveToBlob } = require('../utils/blobPolicy');
+const ENCRYPTION_KEY = config.SECRET_KEY_CRYPTO;
+
+function encryptSubscriptionKey(data) {
+  var cipher = crypto.createCipher('aes-256-ecb', ENCRYPTION_KEY);
+  return cipher.update(data, 'utf8', 'hex') + cipher.final('hex');
+}
+
+function decryptSubscriptionKey(data) {
+  var cipher = crypto.createDecipher('aes-256-ecb', ENCRYPTION_KEY);
+  return cipher.update(data, 'hex', 'utf8') + cipher.final('utf8');
+}
+
+const hashSubscriptionKey = (subscriptionKey) => {
+  if (!subscriptionKey) return null;
+  const encryptedData = encryptSubscriptionKey(subscriptionKey);
+  return encryptedData; // Usamos el valor encriptado completo
+};
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -21,73 +42,6 @@ function sanitizeInput(input) {
     .replace(/(\{|\}|\[|\]|\||\\|\/)/g, '') // Eliminar caracteres que podrían ser usados para inyección
     .replace(/prompt:|system:|assistant:|user:/gi, '') // Eliminar palabras clave de OpenAI con ':'
     .trim();
-}
-
-function isValidDiagnoseRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos (timezone no incluido)
-  const requiredFields = ['description', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
-  }
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
-  }
-
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
-  }
-
-  // Validar diseases_list si existe
-  if (data.diseases_list !== undefined &&
-    (typeof data.diseases_list !== 'string' || data.diseases_list.length > 1000)) {
-    return false;
-  }
-
-  // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
-
-// Normalizar el texto para la validación
-const normalizedDescription = data.description.replace(/\n/g, ' ');
-const normalizedDiseasesList = data.diseases_list || '';
-
-return !suspiciousPatterns.some(pattern => {
-    const descriptionMatch = pattern.test(normalizedDescription);
-    const diseasesMatch = data.diseases_list && pattern.test(normalizedDiseasesList);
-    
-    if (descriptionMatch || diseasesMatch) {
-        console.log('Pattern matched:', pattern);
-        console.log('In description:', descriptionMatch);
-        console.log('In diseases list:', diseasesMatch);
-        insights.error({
-          message: "Pattern matched",
-          pattern: pattern,
-          description: descriptionMatch,
-          diseases_list: diseasesMatch
-        });
-    }
-    
-    return descriptionMatch || diseasesMatch;
-});
 }
 
 function sanitizeAiData(data) {
@@ -105,62 +59,62 @@ function sanitizeAiData(data) {
   const endpointsMap = {
     gpt4o: {
       asia: [
-      `https://apiopenai.azure-api.net/v2/as1/call/gpt4o`, // India: 428 calls/min
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/as1/call/gpt4o`, // India: 428 calls/min
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
       ],
       europe: [
-      `https://apiopenai.azure-api.net/v2/eu1/call/gpt4o`, // Suiza: 428 calls/min
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt4o`, // Suiza: 428 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
       ],
       northamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/us2/call/gpt4o`  // EastUS2: 420 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
       ],
       southamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/us2/call/gpt4o`  // EastUS2: 420 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
       ],
       africa: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
       ],
       oceania: [
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`, // Japan: 300 calls/min
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`, // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
       ],
       other: [
-      `https://apiopenai.azure-api.net/v2/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `https://apiopenai.azure-api.net/v2/as2/call/gpt4o`  // Japan: 300 calls/min
+      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
+      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
       ]
     },
     o1: {
       asia: [
-      `https://apiopenai.azure-api.net/v2/as1/call/o1`, // India
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+      `${API_MANAGEMENT_BASE}/as1/call/o1`, // India
+      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
       ],
       europe: [
-      `https://apiopenai.azure-api.net/v2/eu1/call/o1`, // Suiza
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`  // WestUS como backup
+      `${API_MANAGEMENT_BASE}/eu1/call/o1`, // Suiza
+      `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
       ],
       northamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/us2/call/o1`  // EastUS2
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
       ],
       southamerica: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/us2/call/o1`  // EastUS2
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
       ],
       africa: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
       ],
       oceania: [
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`, // Japan
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`  // WestUS como backup
+      `${API_MANAGEMENT_BASE}/as2/call/o1`, // Japan
+      `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
       ],
       other: [
-      `https://apiopenai.azure-api.net/v2/us1/call/o1`, // WestUS
-      `https://apiopenai.azure-api.net/v2/as2/call/o1`  // Japan
+      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
+      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
     ]
   }
 };
@@ -177,7 +131,6 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
     return 'other';
   })();
   const suffix = mode === 'anonymized' ? 'anonymized' : 'call';
-
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
   return endpoints.map(endpoint => endpoint.replace('/call/', `/${suffix}/`));
 }
@@ -196,7 +149,7 @@ const REGION_MAPPING_STATUS = {
 // Añadir esta constante para definir las capacidades de cada región
 const REGION_CAPACITY = config.REGION_CAPACITY;
 
-async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
+async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0, dataRequest = null) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, model, 'call');
@@ -214,10 +167,14 @@ async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryC
       insights.error({
         message: `Fallo AI endpoint ${endpoints[retryCount]}`,
         error: error.message,
-        retryCount
+        retryCount,
+        requestBody,
+        timezone,
+        model,
+        dataRequest
       });
       await delay(RETRY_DELAY);
-      return callAiWithFailover(requestBody, timezone, model, retryCount + 1);
+      return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
     }
     throw error;
   }
@@ -316,10 +273,13 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: model
+        model: model,
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionKeyHash: data.subscriptionKeyHash
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -369,14 +329,29 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     requestBody.presence_penalty = 0;
   }
 
-  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model);
+  let dataRequest = {
+    tenantId: data.tenantId,
+    subscriptionKeyHash: data.subscriptionKeyHash,
+    myuuid: data.myuuid
+  }
+  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "No response from AI",
+        requestData: data,
+        model: model,
+        response: diagnoseResponse,
+        operation: 'diagnosis',
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionKeyHash: data.subscriptionKeyHash
+      });
     throw new Error("No response from AI");
     }
 
   // 3. Anonimizar el texto
-  let anonymizedResult = await anonymizeText(englishDescription, data.timezone);
+  let anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionKeyHash, data.myuuid);
     let anonymizedDescription = anonymizedResult.anonymizedText;
     let anonymizedDescriptionEnglish = anonymizedDescription;
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
@@ -445,9 +420,11 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         rawResponse: parseError.rawResponse,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError,
-        model: model
+        model: model,
+        tenantId: data.tenantId,
+        subscriptionKeyHash: data.subscriptionKeyHash
       };
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionKeyHash);
       try {
         await serviceEmail.sendMailErrorGPTIP(
           data.lang,
@@ -511,12 +488,17 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       topRelatedConditionsEnglish: englishDiseasesList,
       header_language: requestInfo.header_language,
       timezone: data.timezone,
-      model: model
+      model: model,
+      tenantId: data.tenantId,
+      subscriptionKeyHash: data.subscriptionKeyHash
     };
-    if(model == 'gpt4o'){
-      await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-    }else{
-      await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+    if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionKeyHash: data.subscriptionKeyHash })) {
+      console.log('Saving to blob');
+      if(model == 'gpt4o'){
+        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');        
+      }else{
+        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+      }
     }
   }
 
@@ -550,7 +532,7 @@ function calculateMaxTokens(jsonText) {
 }
 
 // Función auxiliar para anonimizar texto
-async function anonymizeText(text, timezone) {
+async function anonymizeText(text, timezone, tenantId, subscriptionKeyHash, myuuid) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, 'gpt4o', 'anonymized');
@@ -608,7 +590,14 @@ async function anonymizeText(text, timezone) {
       insights.error({
         message: `Failed to call anonymization endpoint ${endpoints[i]}`,
         error: error.message,
-        retryCount: i
+        retryCount: i,
+        operation: 'anonymizeText',
+        requestData: text,
+        model: 'gpt4o',
+        timezone: timezone,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        myuuid: myuuid
       });
       await delay(RETRY_DELAY);
     }
@@ -657,81 +646,96 @@ function extractContent(tag, text) {
   return match ? match[1].trim() : '';
 }
 
+function validateQuestionRequest(data) {
+  const errors = [];
 
-function isValidQuestionRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos
-  const requiredFields = ['questionType', 'disease', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar questionType
-  if (typeof data.questionType !== 'number' ||
-    !Number.isInteger(data.questionType) ||
-    data.questionType < 0 ||
-    data.questionType > 4) return false;
-
-  // Validar disease
-  if (typeof data.disease !== 'string' ||
-    data.disease.length < 2 ||
-    data.disease.length > 100) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar detectedLang si existe  
-  if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) return false;
-
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (data.questionType === undefined) {
+    errors.push({ field: 'questionType', reason: 'Field is required' });
+  } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 4) {
+    errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 4' });
   }
 
-  // Validar medicalDescription si existe (requerido para questionType 3 y 4)
+  if (!data.disease) {
+    errors.push({ field: 'disease', reason: 'Field is required' });
+  } else if (typeof data.disease !== 'string') {
+    errors.push({ field: 'disease', reason: 'Must be a string' });
+  } else if (data.disease.length < 2) {
+    errors.push({ field: 'disease', reason: 'Must be at least 2 characters' });
+  } else if (data.disease.length > 100) {
+    errors.push({ field: 'disease', reason: 'Must not exceed 100 characters' });
+  }
+
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) {
+    errors.push({ field: 'detectedLang', reason: 'Must be a 2-character language code' });
+  }
+
+  // Validar medicalDescription si questionType es 3 o 4
   if ([3, 4].includes(data.questionType)) {
-    if (!data.medicalDescription ||
-      typeof data.medicalDescription !== 'string' ||
-      data.medicalDescription.length < 10 ||
-      data.medicalDescription.length > 8000) {
-      return false;
+    if (!data.medicalDescription) {
+      errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3 or 4' });
+    } else if (typeof data.medicalDescription !== 'string') {
+      errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
+    } else if (data.medicalDescription.length < 10) {
+      errors.push({ field: 'medicalDescription', reason: 'Must be at least 10 characters' });
+    } else if (data.medicalDescription.length > 8000) {
+      errors.push({ field: 'medicalDescription', reason: 'Must not exceed 8000 characters' });
     }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
+  ];
 
-  return !suspiciousPatterns.some(pattern =>
-    pattern.test(data.disease) ||
-    (data.medicalDescription && pattern.test(data.medicalDescription))
-  );
+  if (data.disease) {
+    const normalizedDisease = data.disease.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDisease)) {
+        errors.push({ field: 'disease', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  if ([3, 4].includes(data.questionType) && data.medicalDescription) {
+    const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedMedicalDescription)) {
+        errors.push({ field: 'medicalDescription', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+
+  return errors;
 }
-
-function sanitizeQuestionData(data) {
-  return {
-    ...data,
-    disease: sanitizeInput(data.disease),
-    medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
-    myuuid: data.myuuid.trim(),
-    timezone: data.timezone?.trim() || '',
-    questionType: Number(data.questionType),
-    detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
-  };
-}
-
 
 async function callInfoDisease(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -743,14 +747,19 @@ async function callInfoDisease(req, res) {
     params: req.params,
     query: req.query,
     header_language: header_language,
-    timezone: req.body.timezone
+    timezone: req.body.timezone,
+    myuuid: req.body.myuuid,
+    tenantId: tenantId,
+    subscriptionKeyHash: subscriptionKeyHash
   };
   try {
     // Validar los datos de entrada
-    if (!isValidQuestionRequest(req.body)) {
+    const validationErrors = validateQuestionRequest(req.body);
+    if (validationErrors.length > 0) {
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -804,19 +813,29 @@ async function callInfoDisease(req, res) {
     }
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
     if (!result.data.choices[0].message.content) {
       try {
         await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, req.body, result.data.choices, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      insights.error('error ai callInfoDisease');
+      
       let infoError = {
         error: result.data,
-        requestInfo: requestInfo
+        requestInfo: requestInfo,
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        operation: 'callInfoDisease',
+        subscriptionKeyHash: subscriptionKeyHash
       }
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      insights.error(infoError);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error ai" });
     }
 
@@ -861,7 +880,15 @@ async function callInfoDisease(req, res) {
           processedContent = translatedContent;
         } catch (translationError) {
           console.error('Translation error:', translationError);
-          insights.error(translationError);
+          let infoError = {
+            error: translationError,
+            requestInfo: requestInfo,
+            myuuid: req.body.myuuid,
+            tenantId: tenantId,
+            operation: 'callInfoDisease',
+            subscriptionKeyHash: subscriptionKeyHash
+          }
+          insights.error(infoError);
         }
       }
 
@@ -896,7 +923,15 @@ async function callInfoDisease(req, res) {
           processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
         } catch (translationError) {
           console.error('Translation error:', translationError);
-          insights.error(translationError);
+          let infoError = {
+            error: translationError,
+            requestInfo: requestInfo,
+            myuuid: req.body.myuuid,
+            tenantId: tenantId,
+            operation: 'callInfoDisease',
+            subscriptionKeyHash: subscriptionKeyHash
+          }
+          insights.error(infoError);
         }
       }
 
@@ -915,6 +950,9 @@ async function callInfoDisease(req, res) {
     const errorDetails = {
       timestamp: new Date().toISOString(),
       endpoint: 'callInfoDisease',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
       requestData: {
         body: req.body,
         questionType: req.body?.questionType,
@@ -930,9 +968,12 @@ async function callInfoDisease(req, res) {
     console.error('Detailed API Error:', JSON.stringify(errorDetails, null, 2));
     insights.error({
       message: 'API Error in callInfoDisease',
-      details: errorDetails
+      details: errorDetails,
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     });
-    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails, tenantId, subscriptionKeyHash);
 
     if (e.response) {
       console.log(e.response.status);
@@ -993,153 +1034,239 @@ async function callInfoDisease(req, res) {
 }
 
 
-function isValidOpinionData(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function sanitizeQuestionData(data) {
+  return {
+    ...data,
+    disease: sanitizeInput(data.disease),
+    medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
+    myuuid: data.myuuid.trim(),
+    timezone: data.timezone?.trim() || '',
+    questionType: Number(data.questionType),
+    detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
+  };
+}
 
-  // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid', 'vote'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+function validateOpinionData(data) {
+  const errors = [];
+  
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
-
-   // Validar lang
-   if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  
+  if (!data.value) {
+    errors.push({ field: 'value', reason: 'Field is required' });
+  } else if (typeof data.value !== 'string') {
+    errors.push({ field: 'value', reason: 'Must be a string' });
+  } else if (data.value.length > 10000) {
+    errors.push({ field: 'value', reason: 'Must not exceed 10000 characters' });
   }
-
-  // Validar vote
-  if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) return false;
-
-  // Validar value (texto médico)
-  if (typeof data.value !== 'string' || data.value.length > 10000) return false;
-
-  if (typeof data.isNewModel !== 'boolean') return false;
-
-  // Verificar patrones sospechosos en el texto
-  const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    // Modificar la detección de palabras clave para evitar falsos positivos
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-];
-
-  if (suspiciousPatterns.some(pattern => pattern.test(data.value))) {
-    return false;
+  
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
-
-  // Validar topRelatedConditions si existe
+  
+  if (!data.vote) {
+    errors.push({ field: 'vote', reason: 'Field is required' });
+  } else if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) {
+    errors.push({ field: 'vote', reason: 'Must be either "up" or "down"' });
+  }
+  
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
+  }
+  
+  if (typeof data.isNewModel !== 'boolean') {
+    errors.push({ field: 'isNewModel', reason: 'Must be a boolean' });
+  }
+  
   if (data.topRelatedConditions) {
-    if (!Array.isArray(data.topRelatedConditions)) return false;
-    if (!data.topRelatedConditions.every(condition =>
-      typeof condition === 'object' &&
-      typeof condition.name === 'string' &&
-      condition.name.length < 200
-    )) return false;
+    if (!Array.isArray(data.topRelatedConditions)) {
+      errors.push({ field: 'topRelatedConditions', reason: 'Must be an array' });
+    } else {
+      data.topRelatedConditions.forEach((condition, index) => {
+        if (!condition || typeof condition !== 'object') {
+          errors.push({ field: `topRelatedConditions[${index}]`, reason: 'Must be an object' });
+        } else if (!condition.name || typeof condition.name !== 'string') {
+          errors.push({ field: `topRelatedConditions[${index}].name`, reason: 'Must be a string' });
+        } else if (condition.name.length > 200) {
+          errors.push({ field: `topRelatedConditions[${index}].name`, reason: 'Must not exceed 200 characters' });
+        }
+      });
+    }
   }
-
-  return true;
+  
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
+  ];
+  
+  if (data.value) {
+    const normalizedValue = data.value.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedValue)) {
+        errors.push({ field: 'value', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  
+  return errors;
 }
 
 function sanitizeOpinionData(data) {
   return {
     ...data,
-    value: data.value
-      .replace(/[<>]/g, '')
-      .replace(/(\{|\}|\||\\)/g, '')
-      .replace(/prompt:|system:|assistant:|user:/gi, '')
-      .trim(),
-    myuuid: data.myuuid.trim(),
-    lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
-    topRelatedConditions: data.topRelatedConditions?.map(condition => ({
-      ...condition,
-      name: condition.name
-        .replace(/[<>]/g, '')
-        .replace(/(\{|\}|\||\\)/g, '')
-        .trim()
-    })),
+    value: typeof data.value === 'string'
+      ? data.value
+          .replace(/[<>]/g, '')
+          .replace(/(\{|\}|\||\\)/g, '')
+          .replace(/prompt:|system:|assistant:|user:/gi, '')
+          .trim()
+      : '',
+    myuuid: typeof data.myuuid === 'string' ? data.myuuid.trim() : '',
+    lang: data.lang ? String(data.lang).trim().toLowerCase() : 'en',
+    topRelatedConditions: Array.isArray(data.topRelatedConditions)
+      ? data.topRelatedConditions.map(condition => ({
+          ...condition,
+          name: typeof condition.name === 'string'
+            ? condition.name
+                .replace(/[<>]/g, '')
+                .replace(/(\{|\}|\||\\)/g, '')
+                .trim()
+            : ''
+        }))
+      : [],
     isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
   };
 }
 
 async function opinion(req, res) {
   try {
+    // Obtener headers
+    const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+    const tenantId = getHeader(req, 'X-Tenant-Id');
+    const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
-    // Validar los datos de entrada
-    if (!isValidOpinionData(req.body)) {
+    const validationErrors = validateOpinionData(req.body);
+    if (validationErrors.length > 0) {
+      insights.error({
+        message: "Invalid request format or content",
+        request: req.body,
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
+    
+    
 
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
-
-    // Añadir la versión del prompt
     sanitizedData.version = PROMPTS.version;
-    await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
+    sanitizedData.tenantId = tenantId;
+    sanitizedData.subscriptionKeyHash = subscriptionKeyHash;
+
+    // Guardar SIEMPRE la estadística (sin value)
+    const stats = new OpinionStats({
+      myuuid: sanitizedData.myuuid,
+      lang: sanitizedData.lang,
+      vote: sanitizedData.vote,
+      version: sanitizedData.version,
+      topRelatedConditions: sanitizedData.topRelatedConditions,
+      isNewModel: sanitizedData.isNewModel,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
+    });
+    await stats.save();
+
+    // Guardar en blob SOLO si la política lo permite
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
+    }
     res.status(200).send({ send: true })
   } catch (e) {
-    insights.error(e);
+    let infoError = {
+      error: e,
+      requestInfo: req.body,
+      tenantId: tenantId,
+      operation: 'opinion',
+      subscriptionKeyHash: subscriptionKeyHash
+    }
+
+    insights.error(infoError);
     console.error("[ERROR] opinion responded with status: " + e)
     let lang = req.body.lang ? req.body.lang : 'en';
     serviceEmail.sendMailError(lang, req.body.value, e)
-      .then(response => {
-
-      })
+      .then(response => {})
       .catch(response => {
         insights.error(response);
-        //create user, but Failed sending email.
         console.log('Fail sending email');
       })
-
     res.status(500).send('error')
   }
 }
 
-function isValidGeneralFeedbackData(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateGeneralFeedbackData(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['value', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
-  }
-
-  // Validar value (objeto del formulario)
-  if (!data.value || typeof data.value !== 'object') return false;
-
-  // Validar campos específicos del formulario
-  const formFields = {
-    pregunta1: (val) => typeof val === 'number' && val >= 0 && val <= 5,
-    pregunta2: (val) => typeof val === 'number' && val >= 0 && val <= 5,
-    userType: (val) => typeof val === 'string' && val.length < 100,
-    moreFunct: (val) => typeof val === 'string' && val.length < 1000,
-    freeText: (val) => !val || (typeof val === 'string' && val.length < 2000),
-    email: (val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
-  };
-
-  return Object.entries(formFields).every(([field, validator]) => {
-    if (field === 'freeText' || field === 'email') {
-      // Estos campos son opcionales
-      return !data.value[field] || validator(data.value[field]);
+  if (!data.value || typeof data.value !== 'object') {
+    errors.push({ field: 'value', reason: 'Field is required and must be an object' });
+  } else {
+    // Validar campos específicos del formulario
+    const formFields = {
+      pregunta1: (val) => typeof val === 'number' && val >= 0 && val <= 5,
+      pregunta2: (val) => typeof val === 'number' && val >= 0 && val <= 5,
+      userType: (val) => typeof val === 'string' && val.length < 100,
+      moreFunct: (val) => typeof val === 'string' && val.length < 1000,
+      freeText: (val) => !val || (typeof val === 'string' && val.length < 2000),
+      email: (val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
+    };
+    for (const [field, validator] of Object.entries(formFields)) {
+      if (field === 'freeText' || field === 'email') {
+        if (data.value[field] && !validator(data.value[field])) {
+          errors.push({ field: `value.${field}`, reason: 'Invalid format' });
+        }
+      } else {
+        if (!data.value.hasOwnProperty(field)) {
+          errors.push({ field: `value.${field}`, reason: 'Field is required' });
+        } else if (!validator(data.value[field])) {
+          errors.push({ field: `value.${field}`, reason: 'Invalid format' });
+        }
+      }
     }
-    return data.value.hasOwnProperty(field) && validator(data.value[field]);
-  });
+  }
+
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
+  }
+
+  return errors;
 }
 
 function sanitizeGeneralFeedbackData(data) {
@@ -1170,15 +1297,21 @@ function sanitizeGeneralFeedbackData(data) {
 }
 
 async function sendGeneralFeedback(req, res) {
+  // Obtener headers
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
 
   try {
 
     // Validar los datos de entrada
-    if (!isValidGeneralFeedbackData(req.body)) {
+    const validationErrors = validateGeneralFeedbackData(req.body);
+    if (validationErrors.length > 0) {
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1192,12 +1325,14 @@ async function sendGeneralFeedback(req, res) {
       moreFunct: sanitizedData.value.moreFunct,
       freeText: sanitizedData.value.freeText,
       email: sanitizedData.value.email,
-      date: new Date(Date.now()).toString()
+      date: new Date(Date.now()).toString(),
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     });
-    sendFlow(generalfeedback, sanitizedData.lang)
+    sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionKeyHash)
     await generalfeedback.save();
     try {
-      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid);
+      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionKeyHash);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');
@@ -1205,7 +1340,14 @@ async function sendGeneralFeedback(req, res) {
 
     return res.status(200).send({ send: true })
   } catch (e) {
-    insights.error(e);
+    let infoError = {
+      error: e,
+      requestInfo: req.body,
+      tenantId: tenantId,
+      operation: 'sendGeneralFeedback',
+      subscriptionKeyHash: subscriptionKeyHash
+    }
+    insights.error(infoError);
     console.error("[ERROR] sendGeneralFeedback responded with status: " + e)
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1219,7 +1361,7 @@ async function sendGeneralFeedback(req, res) {
   }
 }
 
-async function sendFlow(generalfeedback, lang) {
+async function sendFlow(generalfeedback, lang, tenantId, subscriptionKeyHash) {
   let requestBody = {
     myuuid: generalfeedback.myuuid,
     pregunta1: generalfeedback.pregunta1,
@@ -1229,7 +1371,9 @@ async function sendFlow(generalfeedback, lang) {
     freeText: generalfeedback.freeText,
     date: generalfeedback.date,
     email: generalfeedback.email,
-    lang: lang
+    lang: lang,
+    tenantId: tenantId,
+    subscriptionKeyHash: subscriptionKeyHash
   }
 
   const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
@@ -1245,59 +1389,92 @@ async function sendFlow(generalfeedback, lang) {
   } catch (error) {
     console.log(error)
     console.error('Error al enviar datos:', error.message);
-    insights.error(error);
+    let infoError = {
+      error: error,
+      requestInfo: requestBody,
+      tenantId: tenantId,
+      operation: 'sendFlow',
+      subscriptionKeyHash: subscriptionKeyHash
+    }
+    insights.error(infoError);
   }
 
 }
 
-function isValidFollowUpQuestionsRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateFollowUpQuestionsRequest(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['description', 'diseases', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar diseases
-  if (typeof data.diseases !== 'string' ||
-    data.diseases.length < 2 ||
-    data.diseases.length > 1000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
 
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (!data.diseases) {
+    errors.push({ field: 'diseases', reason: 'Field is required' });
+  } else if (typeof data.diseases !== 'string') {
+    errors.push({ field: 'diseases', reason: 'Must be a string' });
+  } else if (data.diseases.length < 2) {
+    errors.push({ field: 'diseases', reason: 'Must be at least 2 characters' });
+  } else if (data.diseases.length > 1000) {
+    errors.push({ field: 'diseases', reason: 'Must not exceed 1000 characters' });
+  }
+
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
 
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
-  const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  if (data.diseases) {
+    const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDiseases)) {
+        errors.push({ field: 'diseases', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
 
-  return !suspiciousPatterns.some(pattern => {
-    return pattern.test(normalizedDescription) || pattern.test(normalizedDiseases);
-  });
+  return errors;
 }
 
 function sanitizeFollowUpQuestionsData(data) {
@@ -1315,6 +1492,9 @@ async function generateFollowUpQuestions(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -1331,14 +1511,19 @@ async function generateFollowUpQuestions(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidFollowUpQuestionsRequest(req.body)) {
+    const validationErrors = validateFollowUpQuestionsRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for follow-up questions",
-        request: req.body
+        request: req.body,
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1364,10 +1549,13 @@ async function generateFollowUpQuestions(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'follow-up'
+        model: 'follow-up',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1384,7 +1572,11 @@ async function generateFollowUpQuestions(req, res) {
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
+          message: translationError.message,
+          tenantId: tenantId,
+          subscriptionKeyHash: subscriptionKeyHash,
+          operation: 'generateFollowUpQuestions',
+          requestInfo: requestInfo
         });
 
         return res.status(200).send({ 
@@ -1396,7 +1588,11 @@ async function generateFollowUpQuestions(req, res) {
       // Otros errores de traducción
       insights.error({
         type: 'TRANSLATION_ERROR',
-        message: translationError.message
+        message: translationError.message,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateFollowUpQuestions',
+        requestInfo: requestInfo
       });
 
       return res.status(500).send({ 
@@ -1461,9 +1657,24 @@ async function generateFollowUpQuestions(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "No response from AI",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'follow-up',
+        myuuid: sanitizedData.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
+
       throw new Error('Empty AI follow-up response');
     }
 
@@ -1483,7 +1694,11 @@ async function generateFollowUpQuestions(req, res) {
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: diagnoseResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateFollowUpQuestions',
+        requestInfo: requestInfo
       });
       
       let infoError = {
@@ -1493,7 +1708,9 @@ async function generateFollowUpQuestions(req, res) {
         description: description,
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
-        model: 'follow-up'
+        model: 'follow-up',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1507,7 +1724,7 @@ async function generateFollowUpQuestions(req, res) {
         insights.error(emailError);
       }
       
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error" });
     }
 
@@ -1535,10 +1752,14 @@ async function generateFollowUpQuestions(req, res) {
       questions: questions,
       header_language: header_language,
       timezone: timezone,
-      model: 'follow-up'
+      model: 'follow-up',
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
+    }
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -1551,14 +1772,18 @@ async function generateFollowUpQuestions(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'follow-up'
+      model: 'follow-up',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
+    insights.error(infoError);
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1577,48 +1802,61 @@ async function generateFollowUpQuestions(req, res) {
 }
 
 
-function isValidERQuestionsRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateERQuestionsRequest(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
 
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
 
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
 
-  return !suspiciousPatterns.some(pattern => {
-    return pattern.test(normalizedDescription);
-  });
+  return errors;
 }
 
 function sanitizeERQuestionsData(data) {
@@ -1634,6 +1872,9 @@ async function generateERQuestions(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -1650,14 +1891,19 @@ async function generateERQuestions(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidERQuestionsRequest(req.body)) {
+    const validationErrors = validateERQuestionsRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for ER questions",
-        request: req.body
+        request: req.body,
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -1679,10 +1925,13 @@ async function generateERQuestions(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'follow-up'
+        model: 'follow-up',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1699,7 +1948,11 @@ async function generateERQuestions(req, res) {
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
+          message: translationError.message,
+          tenantId: tenantId,
+          subscriptionKeyHash: subscriptionKeyHash,
+          operation: 'generateERQuestions',
+          requestInfo: requestInfo
         });
 
         return res.status(200).send({ 
@@ -1711,7 +1964,11 @@ async function generateERQuestions(req, res) {
       // Otros errores de traducción
       insights.error({
         type: 'TRANSLATION_ERROR',
-        message: translationError.message
+        message: translationError.message,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateERQuestions',
+        requestInfo: requestInfo
       });
 
       return res.status(500).send({ 
@@ -1772,9 +2029,22 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "No response from AI",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'er-questions',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       throw new Error('Empty AI er-questions response');
     }
 
@@ -1794,7 +2064,11 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: diagnoseResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateERQuestions',
+        requestInfo: requestInfo
       });
       
       let infoError = {
@@ -1804,7 +2078,9 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         description: description,
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
-        model: 'follow-up'
+        model: 'follow-up',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1818,7 +2094,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         insights.error(emailError);
       }
       
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error" });
     }
 
@@ -1844,10 +2120,14 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       questions: questions,
       header_language: header_language,
       timezone: timezone,
-      model: 'er-questions'
+      model: 'er-questions',
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
+    }
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -1860,14 +2140,18 @@ Your response should be ONLY the JSON array, with no additional text or explanat
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'follow-up'
+      model: 'follow-up',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
+    insights.error(infoError);
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1885,68 +2169,100 @@ Your response should be ONLY the JSON array, with no additional text or explanat
   }
 }
 
-function isValidProcessFollowUpRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
+function validateProcessFollowUpRequest(data) {
+  const errors = [];
 
-  // Validar campos requeridos
-  const requiredFields = ['description', 'answers', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 8000) return false;
-
-  // Validar answers
-  if (!Array.isArray(data.answers) || data.answers.length === 0) return false;
-  
-  // Validar estructura de cada respuesta
-  for (const answer of data.answers) {
-    if (!answer || typeof answer !== 'object') return false;
-    if (!answer.question || typeof answer.question !== 'string') return false;
-    if (!answer.answer || typeof answer.answer !== 'string') return false;
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
   }
 
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!Array.isArray(data.answers) || data.answers.length === 0) {
+    errors.push({ field: 'answers', reason: 'Must be a non-empty array' });
+  } else {
+    data.answers.forEach((answer, idx) => {
+      if (!answer || typeof answer !== 'object') {
+        errors.push({ field: `answers[${idx}]`, reason: 'Each answer must be an object' });
+      } else {
+        if (!answer.question || typeof answer.question !== 'string') {
+          errors.push({ field: `answers[${idx}].question`, reason: 'Field is required and must be a string' });
+        }
+        if (!answer.answer || typeof answer.answer !== 'string') {
+          errors.push({ field: `answers[${idx}].answer`, reason: 'Field is required and must be a string' });
+        }
+      }
+    });
   }
 
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
 
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
-  
-  if (suspiciousPatterns.some(pattern => pattern.test(normalizedDescription))) {
-    return false;
-  }
-  
-  // Verificar patrones sospechosos en las respuestas
-  for (const answer of data.answers) {
-    if (suspiciousPatterns.some(pattern => 
-      pattern.test(answer.question) || pattern.test(answer.answer))) {
-      return false;
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
     }
   }
+  if (Array.isArray(data.answers)) {
+    data.answers.forEach((answer, idx) => {
+      if (answer && typeof answer.question === 'string') {
+        const normalizedQ = answer.question.replace(/\n/g, ' ');
+        for (const { pattern, reason } of suspiciousPatterns) {
+          if (pattern.test(normalizedQ)) {
+            errors.push({ field: `answers[${idx}].question`, reason: `Contains suspicious content: ${reason}` });
+            break;
+          }
+        }
+      }
+      if (answer && typeof answer.answer === 'string') {
+        const normalizedA = answer.answer.replace(/\n/g, ' ');
+        for (const { pattern, reason } of suspiciousPatterns) {
+          if (pattern.test(normalizedA)) {
+            errors.push({ field: `answers[${idx}].answer`, reason: `Contains suspicious content: ${reason}` });
+            break;
+          }
+        }
+      }
+    });
+  }
 
-  return true;
+  return errors;
 }
 
 function sanitizeProcessFollowUpData(data) {
@@ -1967,6 +2283,9 @@ async function processFollowUpAnswers(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -1983,14 +2302,19 @@ async function processFollowUpAnswers(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidProcessFollowUpRequest(req.body)) {
+    const validationErrors = validateProcessFollowUpRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for processing follow-up answers",
-        request: req.body
+        request: req.body,
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -2022,10 +2346,13 @@ async function processFollowUpAnswers(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'process-follow-up'
+        model: 'process-follow-up',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2042,7 +2369,11 @@ async function processFollowUpAnswers(req, res) {
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
+          message: translationError.message,
+          tenantId: tenantId,
+          subscriptionKeyHash: subscriptionKeyHash,
+          operation: 'process-follow-up',
+          requestInfo: requestInfo
         });
 
         return res.status(200).send({ 
@@ -2054,7 +2385,11 @@ async function processFollowUpAnswers(req, res) {
       // Otros errores de traducción
       insights.error({
         type: 'TRANSLATION_ERROR',
-        message: translationError.message
+        message: translationError.message,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'process-follow-up',
+        requestInfo: requestInfo
       });
 
       return res.status(500).send({ 
@@ -2098,9 +2433,22 @@ async function processFollowUpAnswers(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "Empty AI process-follow-up response",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'process-follow-up',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       throw new Error('Empty AI process-follow-up response');
     }
 
@@ -2129,10 +2477,14 @@ async function processFollowUpAnswers(req, res) {
       updatedDescription: updatedDescription,
       header_language: header_language,
       timezone: timezone,
-      model: 'process-follow-up'
+      model: 'process-follow-up',
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
+    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
+    }
 
     // 6. Preparar la respuesta final
     return res.status(200).send({
@@ -2145,14 +2497,18 @@ async function processFollowUpAnswers(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+    
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'process-follow-up'
+      model: 'process-follow-up',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
-    
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+
+    insights.error(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     let lang = req.body.lang ? req.body.lang : 'en';
     try {
@@ -2170,65 +2526,70 @@ async function processFollowUpAnswers(req, res) {
   }
 }
 
-function isValidSummarizeRequest(data) {
-  // Validar estructura básica
-  if (!data || typeof data !== 'object') return false;
-
-  // Validar campos requeridos
-  const requiredFields = ['description', 'myuuid'];
-  if (!requiredFields.every(field => data.hasOwnProperty(field))) return false;
-
-  // Validar description - permitir hasta 128k tokens aproximadamente (alrededor de 400k caracteres)
-  if (typeof data.description !== 'string' ||
-    data.description.length < 10 ||
-    data.description.length > 400000) return false;
-
-  // Validar myuuid
-  if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
-    return false;
+function validateSummarizeRequest(data) {
+  const errors = [];
+  
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
+  }
+  
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 400000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 400000 characters' });
+  }
+  
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
 
-  // Validar lang
-  if (data.lang !== undefined && (typeof data.lang !== 'string' || data.lang.length !== 2)) {
-    return false;
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
-
-  // Validar timezone si existe
-  if (data.timezone !== undefined && typeof data.timezone !== 'string') {
-    return false;
+  
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
   }
-
+  
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
-    /\{\{[^}]*\}\}/g,  // Handlebars syntax
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-    /\$\{[^}]*\}/g,    // Template literals
-    /\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
-
-  // Normalizar el texto para la validación
-  const normalizedDescription = data.description.replace(/\n/g, ' ');
-
-  return !suspiciousPatterns.some(pattern => {
-    const descriptionMatch = pattern.test(normalizedDescription);
-    
-    if (descriptionMatch) {
-      console.log('Pattern matched:', pattern);
-      insights.error({
-        message: "Pattern matched in summarize request",
-        pattern: pattern,
-        description: descriptionMatch
-      });
+  
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
     }
-    
-    return descriptionMatch;
-  });
+  }
+  
+  return errors;
 }
 
 async function summarize(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -2245,14 +2606,19 @@ async function summarize(req, res) {
 
   try {
     // Validar y sanitizar el request
-    if (!isValidSummarizeRequest(req.body)) {
+    const validationErrors = validateSummarizeRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for summarization",
-        request: req.body
+        request: req.body,
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
 
@@ -2274,7 +2640,10 @@ async function summarize(req, res) {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
-        model: 'summarize'
+        model: 'summarize',
+        myuuid: req.body.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2288,7 +2657,7 @@ async function summarize(req, res) {
         insights.error(emailError);
       }
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
       
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         return res.status(200).send({ 
@@ -2323,7 +2692,7 @@ async function summarize(req, res) {
 
     // 3. Llamar a AI con failover
 
-    let endpoint= 'https://apiopenai.azure-api.net/v2/eu1/summarize/gpt-4o-mini';
+    let endpoint = `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`;
     const diagnoseResponse = await axios.post(endpoint, requestBody, {
       headers: {
         'Content-Type': 'application/json',
@@ -2332,6 +2701,14 @@ async function summarize(req, res) {
     });
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "Empty AI summarize response",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'summarize',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       throw new Error('Empty AI summarize response');
     }
 
@@ -2360,14 +2737,18 @@ async function summarize(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+    
     let infoError = {
       body: req.body,
       error: error.message,
-      model: 'summarize'
+      model: 'summarize',
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
+    insights.error(infoError);
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -2459,10 +2840,91 @@ async function checkHealth(req, res) {
   return res.status(200).send(health);
 }
 
+function getHeader(req, name) {
+  return req.headers[name.toLowerCase()];
+}
+
+function validateDiagnoseRequest(data) {
+  const errors = [];
+  
+  if (!data || typeof data !== 'object') {
+    errors.push({ field: 'request', reason: 'Request must be a JSON object' });
+    return errors;
+  }
+  
+  if (!data.description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof data.description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (data.description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (data.description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
+  }
+  
+  if (!data.myuuid) {
+    errors.push({ field: 'myuuid', reason: 'Field is required' });
+  } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
+    errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
+  }
+  
+  if (!data.timezone) {
+    errors.push({ field: 'timezone', reason: 'Field is required' });
+  } else if (typeof data.timezone !== 'string') {
+    errors.push({ field: 'timezone', reason: 'Must be a string' });
+  }
+  
+  if (data.lang !== undefined) {
+    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
+      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    }
+  }
+  
+  if (data.diseases_list !== undefined) {
+    if (typeof data.diseases_list !== 'string') {
+      errors.push({ field: 'diseases_list', reason: 'Must be a string' });
+    } else if (data.diseases_list.length > 1000) {
+      errors.push({ field: 'diseases_list', reason: 'Must not exceed 1000 characters' });
+    }
+  }
+  
+  // Verificar patrones sospechosos
+  const suspiciousPatterns = [
+    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
+    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
+    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
+    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
+  ];
+  
+  if (data.description) {
+    const normalizedDescription = data.description.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDescription)) {
+        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  
+  if (data.diseases_list) {
+    const normalizedDiseasesList = data.diseases_list.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDiseasesList)) {
+        errors.push({ field: 'diseases_list', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
+  
+  return errors;
+}
+
 async function diagnose(req, res) {
-  // Extraer el modelo de la solicitud o usar gpt4o como predeterminado
   const model = req.body.model || 'gpt4o';
-  const useQueue = model === 'gpt4o'; // Solo usar colas para el modelo principal (rápido)
+  const useQueue = model === 'gpt4o';
+  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
   
   const requestInfo = {
     method: req.method,
@@ -2478,41 +2940,37 @@ async function diagnose(req, res) {
   };
 
   try {
-    if (!isValidDiagnoseRequest(req.body)) {
+    const validationErrors = validateDiagnoseRequest(req.body);
+    if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content",
-        request: req.body
+        request: req.body,
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
-        message: "Invalid request format or content"
+        message: "Invalid request format",
+        details: validationErrors
       });
     }
-
+    
     const sanitizedData = sanitizeAiData(req.body);
-
+    sanitizedData.tenantId = tenantId;
+    sanitizedData.subscriptionKeyHash = subscriptionKeyHash;
     // Sistema de colas (solo para gpt4o)
     if (useQueue) {
       // Verificar el estado de la cola específica de la región
       const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
-      console.log('queueProperties for region:', queueProperties);
-      console.log('queueUtilizationThreshold:', config.queueUtilizationThreshold);
-      console.log('queueProperties.utilizationPercentage:', queueProperties.utilizationPercentage);
-      
       if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-        // Si estamos por encima del umbral para esta región, usar su cola específica
-        console.log('Adding to queue for region:', sanitizedData.timezone);
         const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
-        console.log('Queue info received:', queueInfo);
-
         if (!queueInfo || !queueInfo.ticketId) {
-          console.error('Invalid queue info received:', queueInfo);
           return res.status(500).send({
             result: 'error',
             message: 'Error adding request to queue'
           });
         }
-
         return res.status(200).send({
           result: 'queued',
           queueInfo: {
@@ -2524,10 +2982,7 @@ async function diagnose(req, res) {
           }
         });
       }
-
-      // Si no usamos la cola, registrar la petición activa en la región
       const region = await queueService.registerActiveRequest(sanitizedData.timezone);
-
       try {
         const result = await processAIRequest(sanitizedData, requestInfo, model);
         await queueService.releaseActiveRequest(region);
@@ -2541,7 +2996,6 @@ async function diagnose(req, res) {
       const result = await processAIRequest(sanitizedData, requestInfo, model);
       return res.status(200).send(result);
     }
-
   } catch (error) {
     console.error('Error:', error);
     insights.error({
@@ -2567,10 +3021,13 @@ async function diagnose(req, res) {
     let infoError = {
       body: req.body,
       error: error.message,
-      model: model
+      model: model,
+      myuuid: req.body.myuuid,
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash
     };
     
-    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError);
+    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -2619,5 +3076,6 @@ module.exports = {
   translateInvertWithRetry,
   translateTextWithRetry,
   getSystemStatus,
-  checkHealth
+  checkHealth,
+  hashSubscriptionKey
 };

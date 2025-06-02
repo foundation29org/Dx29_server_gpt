@@ -246,7 +246,9 @@ class QueueService {
           diseases_list: data.diseases_list,
           timestamp: new Date().toISOString(),
           timezone: data.timezone,
-          region: region
+          region: region,
+          tenantId: data.tenantId,
+          subscriptionKeyHash: data.subscriptionKeyHash
         },
         requestInfo: requestInfo,
         model: model,

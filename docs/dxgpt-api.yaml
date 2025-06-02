@@ -59,7 +59,7 @@ components:
         timezone:
           type: string
           description: |
-            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            User's timezone. Used to determine which regional endpoint will process the request.
             - If timezone contains "america" → North America region
             - If timezone contains "europe" → Europe region
             - If timezone contains "asia" → Asia region
@@ -72,9 +72,15 @@ components:
           description: List of previously identified diseases (optional)
           maxLength: 1000
           example: "Migraine, Tension headache, Cluster headache"
+        model:
+          type: string
+          description: Model to use for diagnosis. Defaults to gpt4o.
+          enum: ["gpt4o", "o1"]
+          default: "gpt4o"
       required:
         - description
         - myuuid
+        - timezone
     DiagnoseResponse:
       type: object
       properties:
@@ -175,7 +181,7 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         lang:
           type: string
-          description: Two-letter language code
+          description: Two-letter language code (optional)
           minLength: 2
           maxLength: 2
           example: "en"
@@ -188,7 +194,7 @@ components:
         timezone:
           type: string
           description: |
-            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            User's timezone. Used to determine which regional endpoint will process the request.
             - If timezone contains "america" → North America region
             - If timezone contains "europe" → Europe region
             - If timezone contains "asia" → Asia region
@@ -206,13 +212,14 @@ components:
         - questionType
         - disease
         - myuuid
+        - timezone
     QuestionsResponse:
       type: object
       properties:
         result:
           type: string
           description: Status of the request
-          enum: [success, error]
+          enum: [success, error, translation error, unsupported_language]
           example: "success"
         data:
           type: object
@@ -241,7 +248,12 @@ components:
                     example: false
         detectedLang:
           type: string
+          description: Detected language of the request
           example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
     FollowUpQuestionsRequest:
       type: object
       properties:
@@ -271,7 +283,7 @@ components:
         timezone:
           type: string
           description: |
-            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            User's timezone. Used to determine which regional endpoint will process the request.
             - If timezone contains "america" → North America region
             - If timezone contains "europe" → Europe region
             - If timezone contains "asia" → Asia region
@@ -283,6 +295,7 @@ components:
         - description
         - diseases
         - myuuid
+        - timezone
     FollowUpQuestionsResponse:
       type: object
       properties:
@@ -304,6 +317,10 @@ components:
           type: string
           description: Detected language of the patient's description
           example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
     ERQuestionsRequest:
       type: object
       properties:
@@ -327,7 +344,7 @@ components:
         timezone:
           type: string
           description: |
-            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            User's timezone. Used to determine which regional endpoint will process the request.
             - If timezone contains "america" → North America region
             - If timezone contains "europe" → Europe region
             - If timezone contains "asia" → Asia region
@@ -338,6 +355,7 @@ components:
       required:
         - description
         - myuuid
+        - timezone
     ERQuestionsResponse:
       type: object
       properties:
@@ -359,6 +377,10 @@ components:
           type: string
           description: Detected language of the patient's description
           example: "en"
+        message:
+          type: string
+          description: Error message (only when result is error or unsupported_language)
+          example: "An error occurred during translation"
     FollowUpAnswersRequest:
       type: object
       properties:
@@ -392,14 +414,14 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         lang:
           type: string
-          description: Two-letter language code
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, English will be used.
           minLength: 2
           maxLength: 2
           example: "en"
         timezone:
           type: string
           description: |
-            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            User's timezone. Used to determine which regional endpoint will process the request.
             - If timezone contains "america" → North America region
             - If timezone contains "europe" → Europe region
             - If timezone contains "asia" → Asia region
@@ -411,13 +433,14 @@ components:
         - description
         - answers
         - myuuid
+        - timezone
     FollowUpAnswersResponse:
       type: object
       properties:
         result:
           type: string
           description: Status of the request
-          enum: [success, error, unsupported_language]
+          enum: [success, error, translation error, unsupported_language]
           example: "success"
         data:
           type: object
@@ -458,7 +481,7 @@ components:
         timezone:
           type: string
           description: |
-            User's timezone (optional). Used to determine which regional endpoint will process the request.
+            User's timezone. Used to determine which regional endpoint will process the request.
             - If timezone contains "america" → North America region
             - If timezone contains "europe" → Europe region
             - If timezone contains "asia" → Asia region
@@ -469,13 +492,14 @@ components:
       required:
         - description
         - myuuid
+        - timezone
     SummarizeResponse:
       type: object
       properties:
         result:
           type: string
           description: Status of the request
-          enum: [success, error, unsupported_language]
+          enum: [success, error, translation error, unsupported_language]
           example: "success"
         data:
           type: object
@@ -498,33 +522,76 @@ components:
       properties:
         status:
           type: string
+          description: Current status of the request
           enum:
             - pending
             - processing
             - completed
             - failed
+          example: "processing"
         position:
           type: integer
+          description: Current position in the queue (only for pending status)
+          example: 3
         estimatedTime:
           type: integer
-          description: Estimated time in seconds
+          description: Estimated time in seconds until completion
+          example: 300
+        region:
+          type: string
+          description: Region processing the request
+          example: "WestUS"
+        utilizationPercentage:
+          type: number
+          format: float
+          description: Current utilization percentage of the region
+          example: 85.5
     SystemStatusResponse:
       type: object
       properties:
         status:
           type: string
+          description: Overall system status
           enum:
             - online
             - degraded
             - offline
+          example: "online"
         services:
           type: object
+          description: Status of individual services
           additionalProperties:
             type: string
             enum:
               - online
               - degraded
               - offline
+          example:
+            translation: "online"
+            ai: "online"
+            queue: "online"
+        queues:
+          type: object
+          description: Status of regional queues
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: ["healthy", "unhealthy"]
+                example: "healthy"
+              activeMessages:
+                type: integer
+                description: Number of messages currently being processed
+                example: 5
+              queuedMessages:
+                type: integer
+                description: Number of messages waiting in queue
+                example: 10
+              error:
+                type: string
+                description: Error message if status is unhealthy
+                example: "Connection timeout"
     OpinionRequest:
       type: object
       properties:
@@ -657,7 +724,7 @@ components:
                 type: string
                 example: Too many requests, please try again later
 paths:
-  /langs:
+  /internal/langs:
     get:
       summary: Get list of supported languages
       description: Returns a list of all available languages
@@ -678,7 +745,7 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /homesupport:
+  /internal/homesupport:
     post:
       summary: Submit support message from users
       description: Submit a support message from users
@@ -686,6 +753,14 @@ paths:
         - Support
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -745,6 +820,14 @@ paths:
         - Diagnosis
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -863,6 +946,14 @@ paths:
         - MedicalInfo
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -934,6 +1025,14 @@ paths:
         - Questions
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -996,6 +1095,14 @@ paths:
         - Questions
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1054,6 +1161,14 @@ paths:
         - Patient
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1110,6 +1225,14 @@ paths:
         - Content
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1140,8 +1263,8 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /status/{ticketId}:
-    get:
+  /internal/status/{ticketId}:
+    post:
       summary: Check status of queued diagnose request
       description: Get the status of a request in the processing queue
       tags:
@@ -1165,7 +1288,7 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /getSystemStatus:
+  /internal/getSystemStatus:
     get:
       summary: Get overall system status and health
       description: Retrieve the current status of the system and its components
@@ -1184,7 +1307,7 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /health:
+  /internal/health:
     get:
       summary: Simple health check endpoint
       description: Simple health check endpoint to verify the API is running
@@ -1207,7 +1330,7 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /opinion:
+  /internal/opinion:
     post:
       summary: Send user feedback on diagnosis accuracy
       description: |
@@ -1217,6 +1340,14 @@ paths:
         - Feedback
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1234,7 +1365,7 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /generalfeedback:
+  /internal/generalfeedback:
     post:
       summary: Submit general application feedback
       description: |
@@ -1244,6 +1375,14 @@ paths:
         - Feedback
       security:
         - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
