@@ -11,7 +11,9 @@ const GeneralfeedbackSchema = new Schema({
   moreFunct: String,
   freeText: String,
   email: String,
-  date: { type: Date, default: Date.now }
+  date: { type: Date, default: Date.now },
+  tenantId: String,
+  subscriptionKeyHash: String
 });
 
 module.exports = mongoose.model('Generalfeedback', GeneralfeedbackSchema);
