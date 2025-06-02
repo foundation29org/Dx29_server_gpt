@@ -3076,5 +3076,6 @@ module.exports = {
   translateInvertWithRetry,
   translateTextWithRetry,
   getSystemStatus,
-  checkHealth
+  checkHealth,
+  hashSubscriptionKey
 };
