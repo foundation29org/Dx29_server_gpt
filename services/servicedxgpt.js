@@ -5,6 +5,7 @@ const serviceEmail = require('../services/email')
 const Support = require('../models/support')
 const Generalfeedback = require('../models/generalfeedback')
 const axios = require('axios');
+const crypto = require('crypto');
 const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const supportService = require('../controllers/all/support');
 const { encodingForModel } = require("js-tiktoken");
@@ -14,13 +15,51 @@ const queueService = require('./queueService');
 const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const OpinionStats = require('../models/opinionstats');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
+const ENCRYPTION_KEY = config.SECRET_KEY_CRYPTO;
+const IV_LENGTH = 16;
+
+const encryptSubscriptionKey = (subscriptionKey) => {
+  if (!subscriptionKey) return null;
+  
+  // Crear un IV aleatorio
+  const iv = crypto.randomBytes(IV_LENGTH);
+  
+  // Crear cipher con la clave secreta y el IV
+  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+  
+  // Encriptar la subscription key
+  let encrypted = cipher.update(subscriptionKey, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  
+  // Obtener el auth tag
+  const authTag = cipher.getAuthTag();
+  
+  return {
+    encrypted: encrypted,
+    iv: iv.toString('hex'),
+    tag: authTag.toString('hex')
+  };
+};
+
+const decryptSubscriptionKey = (encrypted, iv, tag) => {
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), Buffer.from(iv, 'hex'));
+    decipher.setAuthTag(Buffer.from(tag, 'hex'));
+    
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return decrypted;
+  } catch (error) {
+    console.error('Error decrypting:', error);
+    return null;
+  }
+};
+
 const hashSubscriptionKey = (subscriptionKey) => {
   if (!subscriptionKey) return null;
-  return require('crypto')
-    .createHash('sha256')
-    .update(subscriptionKey)
-    .digest('hex')
-    .substring(0, 8);
+  const encryptedData = encryptSubscriptionKey(subscriptionKey);
+  return encryptedData.encrypted; // Usamos el valor encriptado completo
 };
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -140,7 +179,7 @@ const REGION_MAPPING_STATUS = {
 // Añadir esta constante para definir las capacidades de cada región
 const REGION_CAPACITY = config.REGION_CAPACITY;
 
-async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0) {
+async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0, dataRequest = null) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, model, 'call');
@@ -158,10 +197,14 @@ async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryC
       insights.error({
         message: `Fallo AI endpoint ${endpoints[retryCount]}`,
         error: error.message,
-        retryCount
+        retryCount,
+        requestBody,
+        timezone,
+        model,
+        dataRequest
       });
       await delay(RETRY_DELAY);
-      return callAiWithFailover(requestBody, timezone, model, retryCount + 1);
+      return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
     }
     throw error;
   }
@@ -316,14 +359,29 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     requestBody.presence_penalty = 0;
   }
 
-  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model);
+  let dataRequest = {
+    tenantId: data.tenantId,
+    subscriptionKeyHash: data.subscriptionKeyHash,
+    myuuid: data.myuuid
+  }
+  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model, dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "No response from AI",
+        requestData: data,
+        model: model,
+        response: diagnoseResponse,
+        operation: 'diagnosis',
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionKeyHash: data.subscriptionKeyHash
+      });
     throw new Error("No response from AI");
     }
 
   // 3. Anonimizar el texto
-  let anonymizedResult = await anonymizeText(englishDescription, data.timezone);
+  let anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionKeyHash, data.myuuid);
     let anonymizedDescription = anonymizedResult.anonymizedText;
     let anonymizedDescriptionEnglish = anonymizedDescription;
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
@@ -504,7 +562,7 @@ function calculateMaxTokens(jsonText) {
 }
 
 // Función auxiliar para anonimizar texto
-async function anonymizeText(text, timezone) {
+async function anonymizeText(text, timezone, tenantId, subscriptionKeyHash, myuuid) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, 'gpt4o', 'anonymized');
@@ -562,7 +620,14 @@ async function anonymizeText(text, timezone) {
       insights.error({
         message: `Failed to call anonymization endpoint ${endpoints[i]}`,
         error: error.message,
-        retryCount: i
+        retryCount: i,
+        operation: 'anonymizeText',
+        requestData: text,
+        model: 'gpt4o',
+        timezone: timezone,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        myuuid: myuuid
       });
       await delay(RETRY_DELAY);
     }
@@ -713,7 +778,9 @@ async function callInfoDisease(req, res) {
     query: req.query,
     header_language: header_language,
     timezone: req.body.timezone,
-    myuuid: req.body.myuuid
+    myuuid: req.body.myuuid,
+    tenantId: tenantId,
+    subscriptionKeyHash: subscriptionKeyHash
   };
   try {
     // Validar los datos de entrada
@@ -776,21 +843,28 @@ async function callInfoDisease(req, res) {
     }
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
     if (!result.data.choices[0].message.content) {
       try {
         await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, req.body, result.data.choices, requestInfo);
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      insights.error('error ai callInfoDisease');
+      
       let infoError = {
         error: result.data,
         requestInfo: requestInfo,
         myuuid: req.body.myuuid,
         tenantId: tenantId,
+        operation: 'callInfoDisease',
         subscriptionKeyHash: subscriptionKeyHash
       }
+      insights.error(infoError);
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
       return res.status(200).send({ result: "error ai" });
     }
@@ -836,7 +910,15 @@ async function callInfoDisease(req, res) {
           processedContent = translatedContent;
         } catch (translationError) {
           console.error('Translation error:', translationError);
-          insights.error(translationError);
+          let infoError = {
+            error: translationError,
+            requestInfo: requestInfo,
+            myuuid: req.body.myuuid,
+            tenantId: tenantId,
+            operation: 'callInfoDisease',
+            subscriptionKeyHash: subscriptionKeyHash
+          }
+          insights.error(infoError);
         }
       }
 
@@ -871,7 +953,15 @@ async function callInfoDisease(req, res) {
           processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
         } catch (translationError) {
           console.error('Translation error:', translationError);
-          insights.error(translationError);
+          let infoError = {
+            error: translationError,
+            requestInfo: requestInfo,
+            myuuid: req.body.myuuid,
+            tenantId: tenantId,
+            operation: 'callInfoDisease',
+            subscriptionKeyHash: subscriptionKeyHash
+          }
+          insights.error(infoError);
         }
       }
 
@@ -1090,12 +1180,19 @@ function sanitizeOpinionData(data) {
 
 async function opinion(req, res) {
   try {
+    // Obtener headers
+    const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+    const tenantId = getHeader(req, 'X-Tenant-Id');
+    const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+
     const validationErrors = validateOpinionData(req.body);
     if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content",
         request: req.body,
-        errors: validationErrors
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
@@ -1104,10 +1201,7 @@ async function opinion(req, res) {
       });
     }
     
-    // Obtener headers
-    const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
-    const tenantId = getHeader(req, 'X-Tenant-Id');
-    const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+    
 
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
@@ -1134,7 +1228,15 @@ async function opinion(req, res) {
     }
     res.status(200).send({ send: true })
   } catch (e) {
-    insights.error(e);
+    let infoError = {
+      error: e,
+      requestInfo: req.body,
+      tenantId: tenantId,
+      operation: 'opinion',
+      subscriptionKeyHash: subscriptionKeyHash
+    }
+
+    insights.error(infoError);
     console.error("[ERROR] opinion responded with status: " + e)
     let lang = req.body.lang ? req.body.lang : 'en';
     serviceEmail.sendMailError(lang, req.body.value, e)
@@ -1268,7 +1370,14 @@ async function sendGeneralFeedback(req, res) {
 
     return res.status(200).send({ send: true })
   } catch (e) {
-    insights.error(e);
+    let infoError = {
+      error: e,
+      requestInfo: req.body,
+      tenantId: tenantId,
+      operation: 'sendGeneralFeedback',
+      subscriptionKeyHash: subscriptionKeyHash
+    }
+    insights.error(infoError);
     console.error("[ERROR] sendGeneralFeedback responded with status: " + e)
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1310,7 +1419,14 @@ async function sendFlow(generalfeedback, lang, tenantId, subscriptionKeyHash) {
   } catch (error) {
     console.log(error)
     console.error('Error al enviar datos:', error.message);
-    insights.error(error);
+    let infoError = {
+      error: error,
+      requestInfo: requestBody,
+      tenantId: tenantId,
+      operation: 'sendFlow',
+      subscriptionKeyHash: subscriptionKeyHash
+    }
+    insights.error(infoError);
   }
 
 }
@@ -1430,7 +1546,9 @@ async function generateFollowUpQuestions(req, res) {
       insights.error({
         message: "Invalid request format or content for follow-up questions",
         request: req.body,
-        errors: validationErrors
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
@@ -1484,7 +1602,11 @@ async function generateFollowUpQuestions(req, res) {
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
+          message: translationError.message,
+          tenantId: tenantId,
+          subscriptionKeyHash: subscriptionKeyHash,
+          operation: 'generateFollowUpQuestions',
+          requestInfo: requestInfo
         });
 
         return res.status(200).send({ 
@@ -1496,7 +1618,11 @@ async function generateFollowUpQuestions(req, res) {
       // Otros errores de traducción
       insights.error({
         type: 'TRANSLATION_ERROR',
-        message: translationError.message
+        message: translationError.message,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateFollowUpQuestions',
+        requestInfo: requestInfo
       });
 
       return res.status(500).send({ 
@@ -1561,9 +1687,24 @@ async function generateFollowUpQuestions(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "No response from AI",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'follow-up',
+        myuuid: sanitizedData.myuuid,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
+
       throw new Error('Empty AI follow-up response');
     }
 
@@ -1583,7 +1724,11 @@ async function generateFollowUpQuestions(req, res) {
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: diagnoseResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateFollowUpQuestions',
+        requestInfo: requestInfo
       });
       
       let infoError = {
@@ -1657,7 +1802,7 @@ async function generateFollowUpQuestions(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+
     let infoError = {
       body: req.body,
       error: error.message,
@@ -1666,6 +1811,7 @@ async function generateFollowUpQuestions(req, res) {
       tenantId: tenantId,
       subscriptionKeyHash: subscriptionKeyHash
     };
+    insights.error(infoError);
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
@@ -1780,7 +1926,9 @@ async function generateERQuestions(req, res) {
       insights.error({
         message: "Invalid request format or content for ER questions",
         request: req.body,
-        errors: validationErrors
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
@@ -1830,7 +1978,11 @@ async function generateERQuestions(req, res) {
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
+          message: translationError.message,
+          tenantId: tenantId,
+          subscriptionKeyHash: subscriptionKeyHash,
+          operation: 'generateERQuestions',
+          requestInfo: requestInfo
         });
 
         return res.status(200).send({ 
@@ -1842,7 +1994,11 @@ async function generateERQuestions(req, res) {
       // Otros errores de traducción
       insights.error({
         type: 'TRANSLATION_ERROR',
-        message: translationError.message
+        message: translationError.message,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateERQuestions',
+        requestInfo: requestInfo
       });
 
       return res.status(500).send({ 
@@ -1903,9 +2059,22 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "No response from AI",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'er-questions',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       throw new Error('Empty AI er-questions response');
     }
 
@@ -1925,7 +2094,11 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
-        rawResponse: diagnoseResponse.data.choices[0].message.content
+        rawResponse: diagnoseResponse.data.choices[0].message.content,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'generateERQuestions',
+        requestInfo: requestInfo
       });
       
       let infoError = {
@@ -1997,7 +2170,6 @@ Your response should be ONLY the JSON array, with no additional text or explanat
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
     let infoError = {
       body: req.body,
       error: error.message,
@@ -2006,6 +2178,8 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       tenantId: tenantId,
       subscriptionKeyHash: subscriptionKeyHash
     };
+    insights.error(infoError);
+    
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
@@ -2163,7 +2337,9 @@ async function processFollowUpAnswers(req, res) {
       insights.error({
         message: "Invalid request format or content for processing follow-up answers",
         request: req.body,
-        errors: validationErrors
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
@@ -2223,7 +2399,11 @@ async function processFollowUpAnswers(req, res) {
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
-          message: translationError.message
+          message: translationError.message,
+          tenantId: tenantId,
+          subscriptionKeyHash: subscriptionKeyHash,
+          operation: 'process-follow-up',
+          requestInfo: requestInfo
         });
 
         return res.status(200).send({ 
@@ -2235,7 +2415,11 @@ async function processFollowUpAnswers(req, res) {
       // Otros errores de traducción
       insights.error({
         type: 'TRANSLATION_ERROR',
-        message: translationError.message
+        message: translationError.message,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash,
+        operation: 'process-follow-up',
+        requestInfo: requestInfo
       });
 
       return res.status(500).send({ 
@@ -2279,9 +2463,22 @@ async function processFollowUpAnswers(req, res) {
     };
 
     // Reemplazar la llamada directa a axios con nuestra función de failover
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o');
+    let dataRequest = {
+      tenantId: tenantId,
+      subscriptionKeyHash: subscriptionKeyHash,
+      myuuid: sanitizedData.myuuid
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', dataRequest);
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "Empty AI process-follow-up response",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'process-follow-up',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       throw new Error('Empty AI process-follow-up response');
     }
 
@@ -2330,7 +2527,7 @@ async function processFollowUpAnswers(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+    
     let infoError = {
       body: req.body,
       error: error.message,
@@ -2339,7 +2536,8 @@ async function processFollowUpAnswers(req, res) {
       tenantId: tenantId,
       subscriptionKeyHash: subscriptionKeyHash
     };
-    
+
+    insights.error(infoError);
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
     let lang = req.body.lang ? req.body.lang : 'en';
@@ -2443,7 +2641,9 @@ async function summarize(req, res) {
       insights.error({
         message: "Invalid request format or content for summarization",
         request: req.body,
-        errors: validationErrors
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",
@@ -2531,6 +2731,14 @@ async function summarize(req, res) {
     });
 
     if (!diagnoseResponse.data.choices[0].message.content) {
+      insights.error({
+        message: "Empty AI summarize response",
+        requestInfo: requestInfo,
+        response: diagnoseResponse,
+        operation: 'summarize',
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
+      });
       throw new Error('Empty AI summarize response');
     }
 
@@ -2559,7 +2767,7 @@ async function summarize(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    insights.error(error);
+    
     let infoError = {
       body: req.body,
       error: error.message,
@@ -2568,6 +2776,7 @@ async function summarize(req, res) {
       tenantId: tenantId,
       subscriptionKeyHash: subscriptionKeyHash
     };
+    insights.error(infoError);
     
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
     
@@ -2766,7 +2975,9 @@ async function diagnose(req, res) {
       insights.error({
         message: "Invalid request format or content",
         request: req.body,
-        errors: validationErrors
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionKeyHash: subscriptionKeyHash
       });
       return res.status(400).send({
         result: "error",

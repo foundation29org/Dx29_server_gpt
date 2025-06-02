@@ -8,20 +8,12 @@ const serviceEmail = require('../../services/email')
 const insights = require('../../services/insights')
 const axios = require('axios');
 const config = require('../../config')
+const { hashSubscriptionKey } = require('../../services/servicedxgpt');
 
 function getHeader(req, name) {
 	return req.headers[name.toLowerCase()];
   }
 
-  const hashSubscriptionKey = (subscriptionKey) => {
-	if (!subscriptionKey) return null;
-	return require('crypto')
-	  .createHash('sha256')
-	  .update(subscriptionKey)
-	  .digest('hex')
-	  .substring(0, 8);
-  };
-  
 function isValidSupportData(data) {
 	if (!data || typeof data !== 'object') return false;
   
@@ -83,13 +75,11 @@ function isValidSupportData(data) {
   }
 
   async function sendMsgLogoutSupport(req, res) {
+	// Obtener headers
+	const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+	const tenantId = getHeader(req, 'X-Tenant-Id');
+	const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 	try {
-		// Obtener headers
-		const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
-		const tenantId = getHeader(req, 'X-Tenant-Id');
-		const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
-		
-
 	  // Validar los datos de entrada
 	  if (!isValidSupportData(req.body)) {
 		return res.status(400).send({ 
@@ -138,8 +128,15 @@ function isValidSupportData(data) {
 	  }
   
 	} catch (e) {
-	  insights.error(e);
-	  return res.status(500).send({ message: 'Internal server error' });
+		let infoError = {
+			body: req.body,
+			error: e.message,
+			type: e.code || 'SUPPORT_ERROR',
+			tenantId: tenantId,
+			subscriptionKeyHash: subscriptionKeyHash
+		}
+		insights.error(infoError);
+		return res.status(500).send({ message: 'Internal server error' });
 	}
   }
 
@@ -169,6 +166,14 @@ async function sendFlow(support, lang, tenantId, subscriptionKeyHash){
     } catch (error) {
 		console.log(error)
         console.error('Error al enviar datos:', error.message);
+		let infoError = {
+			body: requestBody,
+			error: error.message,
+			type: error.code || 'SUPPORT_ERROR',
+			tenantId: tenantId,
+			subscriptionKeyHash: subscriptionKeyHash
+		}
+		insights.error(infoError);
     }
 
 }
