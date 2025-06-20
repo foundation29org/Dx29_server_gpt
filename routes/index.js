@@ -6,6 +6,7 @@ const express = require('express')
 const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
 const serviceDxGPTCtrl = require('../services/servicedxgpt')
+const multimodalCtrl = require('../controllers/all/multimodalInput')
 const api = express.Router()
 const { needsLimiter, healthLimiter, globalLimiter } = require('../services/rateLimiter')
 // Lista de dominios permitidos
@@ -24,6 +25,8 @@ api.post('/questions/emergency', needsLimiter, serviceDxGPTCtrl.generateERQuesti
 api.post('/patient/update', needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
 
 api.post('/medical/summarize', needsLimiter, serviceDxGPTCtrl.summarize)
+
+api.post('/medical/analyze', needsLimiter, multimodalCtrl.processMultimodalInput)
 
 api.post('/internal/status/:ticketId', needsLimiter, serviceDxGPTCtrl.getQueueStatus)
 
