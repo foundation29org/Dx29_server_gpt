@@ -15,23 +15,6 @@ const queueService = require('./queueService');
 const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const OpinionStats = require('../models/opinionstats');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
-const ENCRYPTION_KEY = config.SECRET_KEY_CRYPTO;
-
-function encryptSubscriptionKey(data) {
-  var cipher = crypto.createCipher('aes-256-ecb', ENCRYPTION_KEY);
-  return cipher.update(data, 'utf8', 'hex') + cipher.final('hex');
-}
-
-function decryptSubscriptionKey(data) {
-  var cipher = crypto.createDecipher('aes-256-ecb', ENCRYPTION_KEY);
-  return cipher.update(data, 'hex', 'utf8') + cipher.final('utf8');
-}
-
-const hashSubscriptionKey = (subscriptionKey) => {
-  if (!subscriptionKey) return null;
-  const encryptedData = encryptSubscriptionKey(subscriptionKey);
-  return encryptedData; // Usamos el valor encriptado completo
-};
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -116,6 +99,66 @@ function sanitizeAiData(data) {
       `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
       `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
     ]
+  },
+    o3: {
+      asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2
+      ],
+      europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+      ],
+      northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
+      ],
+      southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
+      ],
+      africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+      ],
+      oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
+      ],
+      other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+    ]
+  },
+  o3pro: {
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
+    ],
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`  // Suiza como backup
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`  // Suiza como backup
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`  // Suiza como backup
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
+    ]
   }
 };
 
@@ -137,17 +180,14 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
 
 // También necesitamos un mapeo de regiones para el status
 const REGION_MAPPING_STATUS = {
-  'asia': 'India',
+  'asia': 'Suiza',
   'europe': 'Suiza',
   'northamerica': 'WestUS',
   'southamerica': 'WestUS',
-  'africa': 'WestUS',
-  'oceania': 'Japan',
+  'africa': 'Suiza',
+  'oceania': 'WestUS',
   'other': 'WestUS'
 };
-
-// Añadir esta constante para definir las capacidades de cada región
-const REGION_CAPACITY = config.REGION_CAPACITY;
 
 async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0, dataRequest = null) {
   const RETRY_DELAY = 1000;
@@ -276,10 +316,10 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         model: model,
         myuuid: data.myuuid,
         tenantId: data.tenantId,
-        subscriptionKeyHash: data.subscriptionKeyHash
+        subscriptionId: data.subscriptionId
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionKeyHash);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionId);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -309,49 +349,172 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     //throw translationError;
     }
 
-    // 2. Llamar a AI con el texto en inglés
-    const prompt = englishDiseasesList ?
-      PROMPTS.diagnosis.withDiseases
+    // 2. FASE 1: Obtener solo los nombres de los diagnósticos
+    const namesOnlyPrompt = englishDiseasesList ?
+      PROMPTS.diagnosis.namesOnlyExcludingPrevious
         .replace("{{description}}", englishDescription)
-        .replace("{{diseases_list}}", englishDiseasesList) :
-      PROMPTS.diagnosis.withoutDiseases
+        .replace("{{previous_diagnoses}}", englishDiseasesList) :
+      PROMPTS.diagnosis.namesOnly
         .replace("{{description}}", englishDescription);
-
-    const messages = [{ role: "user", content: prompt }];
-
-    const requestBody = {
-    messages
-  };
-  if(model == 'gpt4o'){
-    requestBody.temperature = 0;
-    requestBody.top_p = 1;
-    requestBody.frequency_penalty = 0;
-    requestBody.presence_penalty = 0;
-  }
+    console.log('Calling diseases')
+    let requestBody;
+    
+    if (model === 'o3') {
+      // Formato específico para o3
+      requestBody = {
+        model: "o3-dxgpt",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: namesOnlyPrompt }
+            ]
+          }
+        ],
+        tools: [],
+        text: {
+          format: {
+            type: "text"
+          }
+        },
+        reasoning: {
+          effort: "high"
+        }
+      };
+    }else if (model === 'o3pro') {
+      requestBody = {
+        model: "o3-pro",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: namesOnlyPrompt }
+            ]
+          }
+        ],
+        tools: [],
+        text: {
+          format: {
+            type: "text"
+          }
+        },
+        reasoning: {
+          effort: "high"
+        }
+      };
+    } else {
+      // Formato para gpt4o y o1
+      const messages = [{ role: "user", content: namesOnlyPrompt }];
+      requestBody = {
+        messages
+      };
+      if(model == 'gpt4o'){
+        requestBody.temperature = 0;
+        requestBody.top_p = 1;
+        requestBody.frequency_penalty = 0;
+        requestBody.presence_penalty = 0;
+      }
+    }
 
   let dataRequest = {
     tenantId: data.tenantId,
-    subscriptionKeyHash: data.subscriptionKeyHash,
+    subscriptionId: data.subscriptionId,
     myuuid: data.myuuid
   }
-  const diagnoseResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+  const namesResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+  let usage = null;
+    // Procesar la respuesta de nombres según el modelo
+    let namesResponseText;
+    if (model === 'o3' || model === 'o3pro') {
+      // Formato de respuesta para o3
+      usage = namesResponse.data.usage;
+      console.log('usage', namesResponse.data.usage);
+      namesResponseText = namesResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
+    } else {
+      // Formato de respuesta para gpt4o y o1
+      namesResponseText = namesResponse.data.choices[0].message.content;
+    }
 
-    if (!diagnoseResponse.data.choices[0].message.content) {
+    if (!namesResponseText) {
       insights.error({
-        message: "No response from AI",
+        message: "No response from AI for names",
+        requestData: data,
+        model: model,
+        response: namesResponse,
+        operation: 'diagnosis-names',
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId
+      });
+    throw new Error("No response from AI for names");
+    }
+
+    // Parsear los nombres de diagnósticos
+    let diagnosisNames;
+    try {
+      // Limpiar la respuesta para asegurar que es un JSON válido
+      const cleanResponse = namesResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
+      diagnosisNames = JSON.parse(cleanResponse);
+      
+      if (!Array.isArray(diagnosisNames)) {
+        throw new Error('Response is not an array');
+      }
+      
+      // Validar que todos los elementos son strings
+      for (let i = 0; i < diagnosisNames.length; i++) {
+        if (typeof diagnosisNames[i] !== 'string' || diagnosisNames[i].trim() === '') {
+          throw new Error(`Diagnosis name at index ${i} is not a valid string`);
+        }
+      }
+    } catch (parseError) {
+      insights.error({
+        message: "Failed to parse diagnosis names",
+        error: parseError.message,
+        rawResponse: namesResponseText,
+        phase: 'names-parsing',
+        model: model,
+        requestData: data
+      });
+      throw parseError;
+    }
+    console.log('Calling details')
+    // 3. FASE 2: Obtener detalles para todos los diagnósticos en una sola llamada
+    // Crear un prompt que maneje múltiples diagnósticos usando detailsForDiagnosis como base
+    const detailsPrompt = PROMPTS.diagnosis.detailsForMultipleDiagnoses
+      .replace("{{description}}", englishDescription)
+      .replace("{{diagnoses}}", diagnosisNames.join(', '));
+
+    // Para la Fase 2, usar solo gpt4o para detailsForMultipleDiagnoses
+    const messages = [{ role: "user", content: detailsPrompt }];
+    const detailsRequestBody = {
+      messages,
+      temperature: 0,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+  const diagnoseResponse = await callAiWithFailover(detailsRequestBody, data.timezone, 'gpt4o', 0, dataRequest);
+    console.log('usage details Calling details', diagnoseResponse.data);
+    // Procesar la respuesta según el modelo (siempre gpt4o para detalles)
+    let aiResponse = diagnoseResponse.data.choices[0].message.content;
+
+    if (!aiResponse) {
+      insights.error({
+        message: "No response from AI for details",
         requestData: data,
         model: model,
         response: diagnoseResponse,
-        operation: 'diagnosis',
+        operation: 'diagnosis-details',
         myuuid: data.myuuid,
         tenantId: data.tenantId,
-        subscriptionKeyHash: data.subscriptionKeyHash
+        subscriptionId: data.subscriptionId
       });
-    throw new Error("No response from AI");
+    throw new Error("No response from AI for details");
     }
 
-  // 3. Anonimizar el texto
-  let anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionKeyHash, data.myuuid);
+  // 4. Anonimizar el texto
+  let anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid);
     let anonymizedDescription = anonymizedResult.anonymizedText;
     let anonymizedDescriptionEnglish = anonymizedDescription;
     const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
@@ -375,37 +538,105 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       }
     }
 
-    // 4. Procesar la respuesta
+    // 5. Procesar la respuesta de detalles
     let parsedResponse;
     let parsedResponseEnglish;
     try {
-      const match = diagnoseResponse.data.choices[0].message.content
-        .match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
-
-      if (!match || !match[1]) {
-        const error = new Error("Failed to match diagnosis output");
-        error.rawResponse = diagnoseResponse.data.choices[0].message.content;
-        throw error;
-      }
-
+      // Limpiar la respuesta para asegurar que es un JSON válido
+      let jsonContent = aiResponse.trim();
+      
+      // Remover backticks y marcadores de código si existen
+      jsonContent = jsonContent.replace(/^```json\s*|\s*```$/g, '');
+      jsonContent = jsonContent.replace(/^```\s*|\s*```$/g, '');
+      
+      // Intentar parsear directamente
       try {
-        parsedResponse = JSON.parse(match[1]);
-        parsedResponseEnglish = JSON.parse(match[1]);
-      } catch (jsonError) {
-        const error = new Error("Failed to parse JSON");
-        error.matchedContent = match[1];
-        error.jsonError = jsonError.message;
+        parsedResponse = JSON.parse(jsonContent);
+        parsedResponseEnglish = JSON.parse(jsonContent);
+      } catch (directParseError) {
+        // Si falla, intentar con el formato XML como fallback
+        const match = aiResponse.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
+        if (match && match[1]) {
+          jsonContent = match[1].trim();
+          parsedResponse = JSON.parse(jsonContent);
+          parsedResponseEnglish = JSON.parse(jsonContent);
+        } else {
+          throw directParseError;
+        }
+      }
+
+      // Validar que es una lista con los parámetros esperados
+      if (!Array.isArray(parsedResponse)) {
+        const error = new Error("Response is not an array");
+        error.rawResponse = aiResponse;
+        error.parsedResponse = parsedResponse;
         throw error;
       }
+
+      // Validar cada elemento de la lista
+      const requiredFields = ['diagnosis', 'description', 'symptoms_in_common', 'symptoms_not_in_common'];
+      for (let i = 0; i < parsedResponse.length; i++) {
+        const item = parsedResponse[i];
+        if (!item || typeof item !== 'object') {
+          const error = new Error(`Item at index ${i} is not an object`);
+          error.rawResponse = aiResponse;
+          error.item = item;
+          throw error;
+        }
+
+        for (const field of requiredFields) {
+          if (!item.hasOwnProperty(field)) {
+            const error = new Error(`Missing required field '${field}' in item at index ${i}`);
+            error.rawResponse = aiResponse;
+            error.item = item;
+            error.missingField = field;
+            throw error;
+          }
+        }
+
+        // Validar que symptoms_in_common y symptoms_not_in_common son arrays
+        if (!Array.isArray(item.symptoms_in_common)) {
+          const error = new Error(`'symptoms_in_common' in item at index ${i} is not an array`);
+          error.rawResponse = aiResponse;
+          error.item = item;
+          throw error;
+        }
+
+        if (!Array.isArray(item.symptoms_not_in_common)) {
+          const error = new Error(`'symptoms_not_in_common' in item at index ${i} is not an array`);
+          error.rawResponse = aiResponse;
+          error.item = item;
+          throw error;
+        }
+
+        // Validar que diagnosis y description son strings
+        if (typeof item.diagnosis !== 'string' || item.diagnosis.trim() === '') {
+          const error = new Error(`'diagnosis' in item at index ${i} is not a valid string`);
+          error.rawResponse = aiResponse;
+          error.item = item;
+          throw error;
+        }
+
+        if (typeof item.description !== 'string' || item.description.trim() === '') {
+          const error = new Error(`'description' in item at index ${i} is not a valid string`);
+          error.rawResponse = aiResponse;
+          error.item = item;
+          throw error;
+        }
+      }
+
     } catch (parseError) {
       insights.error({
-        message: "Failed to parse diagnosis output",
+        message: "Failed to parse or validate diagnosis output",
         error: parseError.message,
         stack: parseError.stack,
         rawResponse: parseError.rawResponse,
         description: data.description,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError,
+        parsedResponse: parseError.parsedResponse,
+        item: parseError.item,
+        missingField: parseError.missingField,
         phase: 'parsing',
         model: model,
         requestData: data
@@ -420,11 +651,14 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         rawResponse: parseError.rawResponse,
         matchedContent: parseError.matchedContent,
         jsonError: parseError.jsonError,
+        parsedResponse: parseError.parsedResponse,
+        item: parseError.item,
+        missingField: parseError.missingField,
         model: model,
         tenantId: data.tenantId,
-        subscriptionKeyHash: data.subscriptionKeyHash
+        subscriptionId: data.subscriptionId
       };
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionKeyHash);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionId);
       try {
         await serviceEmail.sendMailErrorGPTIP(
           data.lang,
@@ -440,7 +674,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
     throw parseError;
   }
 
-  // 5. Traducir la respuesta si es necesario
+  // 6. Traducir la respuesta si es necesario
     if (detectedLanguage !== 'en') {
       try {
         parsedResponse = await Promise.all(
@@ -474,7 +708,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       }
     }
 
-  // 6. Guardar información de seguimiento si es una llamada directa
+  // 7. Guardar información de seguimiento si es una llamada directa
   if (requestInfo) {
     let infoTrack = {
       value: anonymizedDescription,
@@ -490,19 +724,24 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       timezone: data.timezone,
       model: model,
       tenantId: data.tenantId,
-      subscriptionKeyHash: data.subscriptionKeyHash
+      subscriptionId: data.subscriptionId,
+      usage: usage
     };
-    if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionKeyHash: data.subscriptionKeyHash })) {
+    if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
       console.log('Saving to blob');
       if(model == 'gpt4o'){
         await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');        
-      }else{
+      }else if(model == 'o1'){
         await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+      }else if(model == 'o3'){
+        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
+      }else if(model == 'o3pro'){
+        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v4');
       }
     }
   }
 
-  // 7. Retornar el resultado
+  // 8. Retornar el resultado
   return {
       result: 'success',
       data: parsedResponse,
@@ -532,7 +771,7 @@ function calculateMaxTokens(jsonText) {
 }
 
 // Función auxiliar para anonimizar texto
-async function anonymizeText(text, timezone, tenantId, subscriptionKeyHash, myuuid) {
+async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid) {
   const RETRY_DELAY = 1000;
 
   const endpoints = getEndpointsByTimezone(timezone, 'gpt4o', 'anonymized');
@@ -596,7 +835,7 @@ async function anonymizeText(text, timezone, tenantId, subscriptionKeyHash, myuu
         model: 'gpt4o',
         timezone: timezone,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash,
+        subscriptionId: subscriptionId,
         myuuid: myuuid
       });
       await delay(RETRY_DELAY);
@@ -733,9 +972,8 @@ async function callInfoDisease(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
 
   const requestInfo = {
     method: req.method,
@@ -750,7 +988,7 @@ async function callInfoDisease(req, res) {
     timezone: req.body.timezone,
     myuuid: req.body.myuuid,
     tenantId: tenantId,
-    subscriptionKeyHash: subscriptionKeyHash
+    subscriptionId: subscriptionId
   };
   try {
     // Validar los datos de entrada
@@ -815,7 +1053,7 @@ async function callInfoDisease(req, res) {
     // Reemplazar la llamada directa a axios con nuestra función de failover
     let dataRequest = {
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash,
+      subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     }
     const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
@@ -832,10 +1070,10 @@ async function callInfoDisease(req, res) {
         myuuid: req.body.myuuid,
         tenantId: tenantId,
         operation: 'callInfoDisease',
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       }
       insights.error(infoError);
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error ai" });
     }
 
@@ -886,7 +1124,7 @@ async function callInfoDisease(req, res) {
             myuuid: req.body.myuuid,
             tenantId: tenantId,
             operation: 'callInfoDisease',
-            subscriptionKeyHash: subscriptionKeyHash
+            subscriptionId: subscriptionId
           }
           insights.error(infoError);
         }
@@ -929,7 +1167,7 @@ async function callInfoDisease(req, res) {
             myuuid: req.body.myuuid,
             tenantId: tenantId,
             operation: 'callInfoDisease',
-            subscriptionKeyHash: subscriptionKeyHash
+            subscriptionId: subscriptionId
           }
           insights.error(infoError);
         }
@@ -952,7 +1190,7 @@ async function callInfoDisease(req, res) {
       endpoint: 'callInfoDisease',
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash,
+      subscriptionId: subscriptionId,
       requestData: {
         body: req.body,
         questionType: req.body?.questionType,
@@ -971,9 +1209,9 @@ async function callInfoDisease(req, res) {
       details: errorDetails,
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     });
-    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails, tenantId, subscriptionKeyHash);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails, tenantId, subscriptionId);
 
     if (e.response) {
       console.log(e.response.status);
@@ -1151,9 +1389,9 @@ function sanitizeOpinionData(data) {
 async function opinion(req, res) {
   try {
     // Obtener headers
-    const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+    const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
-    const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+    
 
     const validationErrors = validateOpinionData(req.body);
     if (validationErrors.length > 0) {
@@ -1162,7 +1400,7 @@ async function opinion(req, res) {
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       return res.status(400).send({
         result: "error",
@@ -1177,7 +1415,7 @@ async function opinion(req, res) {
     const sanitizedData = sanitizeOpinionData(req.body);
     sanitizedData.version = PROMPTS.version;
     sanitizedData.tenantId = tenantId;
-    sanitizedData.subscriptionKeyHash = subscriptionKeyHash;
+    sanitizedData.subscriptionId = subscriptionId;
 
     // Guardar SIEMPRE la estadística (sin value)
     const stats = new OpinionStats({
@@ -1188,12 +1426,12 @@ async function opinion(req, res) {
       topRelatedConditions: sanitizedData.topRelatedConditions,
       isNewModel: sanitizedData.isNewModel,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     });
     await stats.save();
 
     // Guardar en blob SOLO si la política lo permite
-    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
     }
     res.status(200).send({ send: true })
@@ -1203,7 +1441,7 @@ async function opinion(req, res) {
       requestInfo: req.body,
       tenantId: tenantId,
       operation: 'opinion',
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     }
 
     insights.error(infoError);
@@ -1298,9 +1536,9 @@ function sanitizeGeneralFeedbackData(data) {
 
 async function sendGeneralFeedback(req, res) {
   // Obtener headers
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+  
 
 
   try {
@@ -1327,12 +1565,12 @@ async function sendGeneralFeedback(req, res) {
       email: sanitizedData.value.email,
       date: new Date(Date.now()).toString(),
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     });
-    sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionKeyHash)
+    sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionId)
     await generalfeedback.save();
     try {
-      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionKeyHash);
+      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionId);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');
@@ -1345,7 +1583,7 @@ async function sendGeneralFeedback(req, res) {
       requestInfo: req.body,
       tenantId: tenantId,
       operation: 'sendGeneralFeedback',
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     }
     insights.error(infoError);
     console.error("[ERROR] sendGeneralFeedback responded with status: " + e)
@@ -1361,7 +1599,7 @@ async function sendGeneralFeedback(req, res) {
   }
 }
 
-async function sendFlow(generalfeedback, lang, tenantId, subscriptionKeyHash) {
+async function sendFlow(generalfeedback, lang, tenantId, subscriptionId) {
   let requestBody = {
     myuuid: generalfeedback.myuuid,
     pregunta1: generalfeedback.pregunta1,
@@ -1373,7 +1611,7 @@ async function sendFlow(generalfeedback, lang, tenantId, subscriptionKeyHash) {
     email: generalfeedback.email,
     lang: lang,
     tenantId: tenantId,
-    subscriptionKeyHash: subscriptionKeyHash
+    subscriptionId: subscriptionId
   }
 
   const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
@@ -1394,7 +1632,7 @@ async function sendFlow(generalfeedback, lang, tenantId, subscriptionKeyHash) {
       requestInfo: requestBody,
       tenantId: tenantId,
       operation: 'sendFlow',
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     }
     insights.error(infoError);
   }
@@ -1492,9 +1730,9 @@ async function generateFollowUpQuestions(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+  
 
   const requestInfo = {
     method: req.method,
@@ -1518,7 +1756,7 @@ async function generateFollowUpQuestions(req, res) {
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       return res.status(400).send({
         result: "error",
@@ -1552,10 +1790,10 @@ async function generateFollowUpQuestions(req, res) {
         model: 'follow-up',
         myuuid: req.body.myuuid,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1574,7 +1812,7 @@ async function generateFollowUpQuestions(req, res) {
           type: 'UNSUPPORTED_LANGUAGE',
           message: translationError.message,
           tenantId: tenantId,
-          subscriptionKeyHash: subscriptionKeyHash,
+          subscriptionId: subscriptionId,
           operation: 'generateFollowUpQuestions',
           requestInfo: requestInfo
         });
@@ -1590,7 +1828,7 @@ async function generateFollowUpQuestions(req, res) {
         type: 'TRANSLATION_ERROR',
         message: translationError.message,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash,
+        subscriptionId: subscriptionId,
         operation: 'generateFollowUpQuestions',
         requestInfo: requestInfo
       });
@@ -1659,7 +1897,7 @@ async function generateFollowUpQuestions(req, res) {
     // Reemplazar la llamada directa a axios con nuestra función de failover
     let dataRequest = {
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash,
+      subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     }
     const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
@@ -1672,7 +1910,7 @@ async function generateFollowUpQuestions(req, res) {
         operation: 'follow-up',
         myuuid: sanitizedData.myuuid,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
 
       throw new Error('Empty AI follow-up response');
@@ -1696,7 +1934,7 @@ async function generateFollowUpQuestions(req, res) {
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash,
+        subscriptionId: subscriptionId,
         operation: 'generateFollowUpQuestions',
         requestInfo: requestInfo
       });
@@ -1710,7 +1948,7 @@ async function generateFollowUpQuestions(req, res) {
         rawResponse: diagnoseResponse.data.choices[0].message.content,
         model: 'follow-up',
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1724,7 +1962,7 @@ async function generateFollowUpQuestions(req, res) {
         insights.error(emailError);
       }
       
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error" });
     }
 
@@ -1754,10 +1992,10 @@ async function generateFollowUpQuestions(req, res) {
       timezone: timezone,
       model: 'follow-up',
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     
-    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
     }
 
@@ -1779,11 +2017,11 @@ async function generateFollowUpQuestions(req, res) {
       model: 'follow-up',
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     insights.error(infoError);
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -1855,6 +2093,15 @@ function validateERQuestionsRequest(data) {
       }
     }
   }
+  if (data.diseases) {
+    const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
+    for (const { pattern, reason } of suspiciousPatterns) {
+      if (pattern.test(normalizedDiseases)) {
+        errors.push({ field: 'diseases', reason: `Contains suspicious content: ${reason}` });
+        break;
+      }
+    }
+  }
 
   return errors;
 }
@@ -1872,9 +2119,9 @@ async function generateERQuestions(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+  
 
   const requestInfo = {
     method: req.method,
@@ -1898,7 +2145,7 @@ async function generateERQuestions(req, res) {
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       return res.status(400).send({
         result: "error",
@@ -1928,10 +2175,10 @@ async function generateERQuestions(req, res) {
         model: 'follow-up',
         myuuid: req.body.myuuid,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -1950,7 +2197,7 @@ async function generateERQuestions(req, res) {
           type: 'UNSUPPORTED_LANGUAGE',
           message: translationError.message,
           tenantId: tenantId,
-          subscriptionKeyHash: subscriptionKeyHash,
+          subscriptionId: subscriptionId,
           operation: 'generateERQuestions',
           requestInfo: requestInfo
         });
@@ -1966,7 +2213,7 @@ async function generateERQuestions(req, res) {
         type: 'TRANSLATION_ERROR',
         message: translationError.message,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash,
+        subscriptionId: subscriptionId,
         operation: 'generateERQuestions',
         requestInfo: requestInfo
       });
@@ -2031,7 +2278,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     // Reemplazar la llamada directa a axios con nuestra función de failover
     let dataRequest = {
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash,
+      subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     }
     const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
@@ -2043,7 +2290,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         response: diagnoseResponse,
         operation: 'er-questions',
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       throw new Error('Empty AI er-questions response');
     }
@@ -2066,7 +2313,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash,
+        subscriptionId: subscriptionId,
         operation: 'generateERQuestions',
         requestInfo: requestInfo
       });
@@ -2080,7 +2327,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         rawResponse: diagnoseResponse.data.choices[0].message.content,
         model: 'follow-up',
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2094,7 +2341,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         insights.error(emailError);
       }
       
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error" });
     }
 
@@ -2122,10 +2369,10 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       timezone: timezone,
       model: 'er-questions',
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     
-    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
     }
 
@@ -2146,12 +2393,12 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       model: 'follow-up',
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     insights.error(infoError);
     
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -2283,9 +2530,9 @@ async function processFollowUpAnswers(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+  
 
   const requestInfo = {
     method: req.method,
@@ -2309,7 +2556,7 @@ async function processFollowUpAnswers(req, res) {
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       return res.status(400).send({
         result: "error",
@@ -2349,10 +2596,10 @@ async function processFollowUpAnswers(req, res) {
         model: 'process-follow-up',
         myuuid: req.body.myuuid,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       };
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
       
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2371,7 +2618,7 @@ async function processFollowUpAnswers(req, res) {
           type: 'UNSUPPORTED_LANGUAGE',
           message: translationError.message,
           tenantId: tenantId,
-          subscriptionKeyHash: subscriptionKeyHash,
+          subscriptionId: subscriptionId,
           operation: 'process-follow-up',
           requestInfo: requestInfo
         });
@@ -2387,7 +2634,7 @@ async function processFollowUpAnswers(req, res) {
         type: 'TRANSLATION_ERROR',
         message: translationError.message,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash,
+        subscriptionId: subscriptionId,
         operation: 'process-follow-up',
         requestInfo: requestInfo
       });
@@ -2435,7 +2682,7 @@ async function processFollowUpAnswers(req, res) {
     // Reemplazar la llamada directa a axios con nuestra función de failover
     let dataRequest = {
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash,
+      subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     }
     const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
@@ -2447,7 +2694,7 @@ async function processFollowUpAnswers(req, res) {
         response: diagnoseResponse,
         operation: 'process-follow-up',
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       throw new Error('Empty AI process-follow-up response');
     }
@@ -2479,10 +2726,10 @@ async function processFollowUpAnswers(req, res) {
       timezone: timezone,
       model: 'process-follow-up',
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     
-    if (await shouldSaveToBlob({ tenantId, subscriptionKeyHash })) {
+    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
     }
 
@@ -2504,11 +2751,11 @@ async function processFollowUpAnswers(req, res) {
       model: 'process-follow-up',
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
 
     insights.error(infoError);
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
     
     let lang = req.body.lang ? req.body.lang : 'en';
     try {
@@ -2587,9 +2834,9 @@ async function summarize(req, res) {
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+  
 
   const requestInfo = {
     method: req.method,
@@ -2613,7 +2860,7 @@ async function summarize(req, res) {
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       return res.status(400).send({
         result: "error",
@@ -2643,7 +2890,7 @@ async function summarize(req, res) {
         model: 'summarize',
         myuuid: req.body.myuuid,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
@@ -2657,7 +2904,7 @@ async function summarize(req, res) {
         insights.error(emailError);
       }
       
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionKeyHash);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
       
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         return res.status(200).send({ 
@@ -2707,7 +2954,7 @@ async function summarize(req, res) {
         response: diagnoseResponse,
         operation: 'summarize',
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       throw new Error('Empty AI summarize response');
     }
@@ -2744,11 +2991,11 @@ async function summarize(req, res) {
       model: 'summarize',
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     insights.error(infoError);
     
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -2798,20 +3045,25 @@ async function getSystemStatus(req, res) {
     const status = await queueService.getAllRegionsStatus();
     
     // Añadir información de endpoints sin exponer las URLs
+    // Mostrar todas las regiones de todos los modelos
     const endpointsStatus = {};
-    for (const [region] of Object.entries(endpointsMap.gpt4o)) {
-      const mappedRegion = REGION_MAPPING_STATUS[region];
-      const regionStatus = status.regions[mappedRegion];
-      endpointsStatus[region] = {
-        capacity: REGION_CAPACITY[mappedRegion] || 'N/A',  // Usar REGION_CAPACITY en lugar de regionStatus?.capacity
-        utilizationPercentage: regionStatus?.utilizationPercentage || 0,
-        activeRequests: regionStatus?.activeRequests || 0,
-        queuedMessages: regionStatus?.queuedMessages || 0,
-        status: {
-          primary: regionStatus?.activeRequests > 0 ? 'active' : 'idle',
-          backup: 'standby'
-        }
-      };
+    
+    // Iterar sobre todos los modelos y sus regiones
+    for (const [model, regions] of Object.entries(status.models)) {
+      endpointsStatus[model] = {};
+      
+      for (const [region, regionStatus] of Object.entries(regions)) {
+        endpointsStatus[model][region] = {
+          capacity: regionStatus.capacity || 'N/A',
+          utilizationPercentage: regionStatus.utilizationPercentage || 0,
+          activeRequests: regionStatus.activeRequests || 0,
+          queuedMessages: regionStatus.queuedMessages || 0,
+          status: {
+            primary: (regionStatus.activeRequests || 0) > 0 ? 'active' : 'idle',
+            backup: 'standby'
+          }
+        };
+      }
     }
 
     return res.status(200).send({
@@ -2819,7 +3071,7 @@ async function getSystemStatus(req, res) {
       data: {
         queues: {
           timestamp: status.timestamp,
-          regions: status.regions,
+          models: status.models,
           global: status.global
         },
         endpoints: endpointsStatus,
@@ -2921,10 +3173,8 @@ function validateDiagnoseRequest(data) {
 
 async function diagnose(req, res) {
   const model = req.body.model || 'gpt4o';
-  const useQueue = model === 'gpt4o';
-  const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+  const subscriptionId = getHeader(req, 'x-subscription-id');
   
   const requestInfo = {
     method: req.method,
@@ -2947,7 +3197,7 @@ async function diagnose(req, res) {
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionKeyHash: subscriptionKeyHash
+        subscriptionId: subscriptionId
       });
       return res.status(400).send({
         result: "error",
@@ -2958,44 +3208,46 @@ async function diagnose(req, res) {
     
     const sanitizedData = sanitizeAiData(req.body);
     sanitizedData.tenantId = tenantId;
-    sanitizedData.subscriptionKeyHash = subscriptionKeyHash;
-    // Sistema de colas (solo para gpt4o)
-    if (useQueue) {
-      // Verificar el estado de la cola específica de la región
-      const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone);
-      if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-        const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
-        if (!queueInfo || !queueInfo.ticketId) {
-          return res.status(500).send({
-            result: 'error',
-            message: 'Error adding request to queue'
-          });
-        }
-        return res.status(200).send({
-          result: 'queued',
-          queueInfo: {
-            ticketId: queueInfo.ticketId,
-            position: queueInfo.queuePosition,
-            estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
-            region: queueInfo.region,
-            utilizationPercentage: queueProperties.utilizationPercentage
-          }
+    sanitizedData.subscriptionId = subscriptionId;
+    
+    // Sistema de colas para todos los modelos cuando sea necesario
+    const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone, model);
+    if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
+      const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
+      if (!queueInfo || !queueInfo.ticketId) {
+        return res.status(500).send({
+          result: 'error',
+          message: 'Error adding request to queue'
         });
       }
-      const region = await queueService.registerActiveRequest(sanitizedData.timezone);
-      try {
-        const result = await processAIRequest(sanitizedData, requestInfo, model);
-        await queueService.releaseActiveRequest(region);
-        return res.status(200).send(result);
-      } catch (error) {
-        await queueService.releaseActiveRequest(region);
-        throw error;
-      }
-    } else {
-      // Para otros modelos (o1), procesamiento directo sin cola
-      const result = await processAIRequest(sanitizedData, requestInfo, model);
-      return res.status(200).send(result);
+      return res.status(200).send({
+        result: 'queued',
+        queueInfo: {
+          ticketId: queueInfo.ticketId,
+          position: queueInfo.queuePosition,
+          estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
+          region: queueInfo.region,
+          model: queueInfo.model,
+          utilizationPercentage: queueProperties.utilizationPercentage
+        }
+      });
     }
+    
+    // Registrar uso activo para el modelo específico
+    const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
+    try {
+      const result = await processAIRequest(sanitizedData, requestInfo, model);
+      await queueService.releaseActiveRequest(region, model);
+      return res.status(200).send(result);
+    } catch (error) {
+      await queueService.releaseActiveRequest(region, model);
+      throw error;
+    }
+
+    /*
+    const result = await processAIRequest(sanitizedData, requestInfo, model);
+      return res.status(200).send(result);
+      */
   } catch (error) {
     console.error('Error:', error);
     insights.error({
@@ -3024,10 +3276,10 @@ async function diagnose(req, res) {
       model: model,
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionKeyHash: subscriptionKeyHash
+      subscriptionId: subscriptionId
     };
     
-    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
     
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
@@ -3076,6 +3328,5 @@ module.exports = {
   translateInvertWithRetry,
   translateTextWithRetry,
   getSystemStatus,
-  checkHealth,
-  hashSubscriptionKey
+  checkHealth
 };

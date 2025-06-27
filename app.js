@@ -19,7 +19,7 @@ if (isLocal) {
   app.use(cors({
     origin: '*', // O pon la URL de tu frontend, ej: 'http://localhost:4200'
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Ocp-Apim-Subscription-Key', 'X-MS-AUTH-TOKEN', 'X-Tenant-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Ocp-Apim-Subscription-Key', 'X-MS-AUTH-TOKEN', 'X-Tenant-Id', 'x-subscription-id'],
   }));
 }
 

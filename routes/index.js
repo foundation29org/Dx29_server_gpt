@@ -30,7 +30,7 @@ api.post('/medical/analyze', needsLimiter, multimodalCtrl.processMultimodalInput
 
 api.post('/internal/status/:ticketId', needsLimiter, serviceDxGPTCtrl.getQueueStatus)
 
-api.get('/internal/getSystemStatus', needsLimiter, serviceDxGPTCtrl.getSystemStatus)
+api.get('/internal/getSystemStatus', healthLimiter, serviceDxGPTCtrl.getSystemStatus)
 api.get('/internal/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
 
 api.post('/internal/opinion', needsLimiter, serviceDxGPTCtrl.opinion)

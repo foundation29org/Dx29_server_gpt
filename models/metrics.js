@@ -15,6 +15,12 @@ const MetricsSchema = new Schema({
     required: true,
     index: true
   },
+  model: {
+    type: String,
+    required: true,
+    index: true,
+    enum: ['gpt4o', 'o1', 'o3', 'o3pro']
+  },
   period: {
     type: String,
     required: true,
@@ -36,6 +42,10 @@ const MetricsSchema = new Schema({
     type: Number,
     default: 0
   },
+  activeRequests: {
+    type: Number,
+    default: 0
+  },
   utilizationPercentage: {
     type: Number,
     default: 0
@@ -43,6 +53,6 @@ const MetricsSchema = new Schema({
 });
 
 // Índice compuesto
-MetricsSchema.index({ timestamp: 1, region: 1, period: 1 });
+MetricsSchema.index({ timestamp: 1, region: 1, model: 1, period: 1 });
 
 module.exports = mongoose.model('Metrics', MetricsSchema);

@@ -47,13 +47,42 @@ function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
 
-// Función para hashear subscription key (igual que en servicedxgpt.js)
-const hashSubscriptionKey = (subscriptionKey) => {
-    if (!subscriptionKey) return null;
-    const crypto = require('crypto');
-    const encryptedData = crypto.createCipher('aes-256-ecb', config.SECRET_KEY_CRYPTO).update(subscriptionKey, 'utf8', 'hex') + crypto.createCipher('aes-256-ecb', config.SECRET_KEY_CRYPTO).final('hex');
-    return encryptedData;
-};
+// Función de delay para retry
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Endpoints para o3-images
+const o3ImagesEndpoints = [
+    `${config.API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
+    `${config.API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2
+];
+
+// Función para llamar a o3-images con failover
+async function callO3ImagesWithFailover(requestBody, retryCount = 0) {
+    const RETRY_DELAY = 1000;
+
+    try {
+        const response = await axios.post(o3ImagesEndpoints[retryCount], requestBody, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Ocp-Apim-Subscription-Key': config.API_MANAGEMENT_KEY,
+            }
+        });
+        return response;
+    } catch (error) {
+        if (retryCount < o3ImagesEndpoints.length - 1) {
+            console.warn(`❌ Error en ${o3ImagesEndpoints[retryCount]} — Reintentando en ${RETRY_DELAY}ms...`);
+            insights.error({
+                message: `Fallo o3-images endpoint ${o3ImagesEndpoints[retryCount]}`,
+                error: error.message,
+                retryCount,
+                requestBody
+            });
+            await delay(RETRY_DELAY);
+            return callO3ImagesWithFailover(requestBody, retryCount + 1);
+        }
+        throw error;
+    }
+}
 
 const processDocument = async (fileBuffer, originalName, blobUrl) => {
     try {
@@ -127,7 +156,8 @@ const detectTypeDoc = async (base64Image) => {
   - mri                (magnetic resonance imaging)
   - ultrasound         (ultrasound / echography)
   - ecg                (electrocardiogram traces)
-  - clinical_photo     (photographs of body parts, skin, wounds, lesions)
+  - face_photo         (photographs where the main focus is the patient's face, especially for dysmorphic features or genetic syndromes)
+  - clinical_photo     (photographs of other body parts, skin, wounds, lesions, but NOT the face as main focus)
   - text_document      (scanned or photographed medical documents)
   - other              (anything else)
   
@@ -135,42 +165,35 @@ const detectTypeDoc = async (base64Image) => {
   `.trim();
   
     try {
-      const { data } = await axios.post(
-        'https://nav29sweden.openai.azure.com/openai/responses?api-version=2025-04-01-preview',
-        {
-          model: "o3-images",
-          input: [
-            {
-              role: "user",
-              content: [
-                { type: "input_text", text: promptClassifier },
-                { type: "input_image", image_url: `data:image/jpeg;base64,${base64Image}` }
-              ]
-            }
-          ],
-          tools: [],
-          text: {
-              format: {
-                  type: "text"
-              }
-          },
-          reasoning: {
-              effort: "medium"
+      const requestBody = {
+        model: "o3-images",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: promptClassifier },
+              { type: "input_image", image_url: `data:image/jpeg;base64,${base64Image}` }
+            ]
           }
-        },
-        {
-            headers: {
-                'Content-Type': 'application/json',
-                'api-key': config.AZURE_OPENAI_API_KEY
+        ],
+        tools: [],
+        text: {
+            format: {
+                type: "text"
             }
+        },
+        reasoning: {
+            effort: "medium"
         }
-      );
+      };
+
+      const { data } = await callO3ImagesWithFailover(requestBody);
   
       // Azure devuelve un array "output" con elementos type === "message"
       const raw = data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim().toLowerCase();
   
       // Validamos la salida para evitar sorpresas
-      const valid = ["radiograph", "ct", "mri", "ultrasound", "ecg", "clinical_photo", "text_document", "other"];
+      const valid = ["radiograph", "ct", "mri", "ultrasound", "ecg", "clinical_photo", "face_photo", "text_document", "other"];
       if (!raw || !valid.includes(raw)) {
         throw new Error(`Unexpected category: ${raw}`);
       }
@@ -185,58 +208,50 @@ const detectTypeDoc = async (base64Image) => {
 
 const processImage = async (base64Image, promptImage, effort) => {
     try {
-        
-
-        const response = await axios.post(
-            'https://nav29sweden.openai.azure.com/openai/responses?api-version=2025-04-01-preview',
-            {
-                model: "o3-images",
-                input: [
-                    {
-                        role: "developer",
-                        content: [
-                            {
-                                type: "input_text",
-                                text: "You are a certified medical-imaging technologist. Follow every instruction exactly."
-                            }
-                        ]
-                    },
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "input_text",
-                                text: promptImage
-                            },
-                            {
-                                type: "input_image",
-                                image_url: `data:image/jpeg;base64,${base64Image}`
-                            }
-                        ]
-                    }
-                ],
-                tools: [],
-                text: {
-                    format: {
-                        type: "text"
-                    }
-                },
-                reasoning: {
-                    effort: effort
+        const requestBody = {
+            model: "o3-images",
+            input: [
+                /*{
+                    role: "developer",
+                    content: [
+                        {
+                            type: "input_text",
+                            text: "You are a certified medical-imaging technologist. Follow every instruction exactly."
+                        }
+                    ]
+                },*/
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "input_text",
+                            text: promptImage
+                        },
+                        {
+                            type: "input_image",
+                            image_url: `data:image/jpeg;base64,${base64Image}`
+                        }
+                    ]
+                }
+            ],
+            tools: [],
+            text: {
+                format: {
+                    type: "text"
                 }
             },
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'api-key': config.AZURE_OPENAI_API_KEY
-                }
+            reasoning: {
+                effort: effort
             }
-        );
+        };
+
+        const response = await callO3ImagesWithFailover(requestBody);
 
         console.log(response.data);
         
         // Buscar el elemento de tipo "message" en el output
         const messageElement = response.data.output.find(item => item.type === "message");
+        console.log(messageElement);
         if (messageElement && messageElement.content && messageElement.content[0]) {
             return messageElement.content[0].text;
         } else {
@@ -249,9 +264,8 @@ const processImage = async (base64Image, promptImage, effort) => {
 };
 
 const processMultimodalInput = async (req, res) => {
-    const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+    const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
-    const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
     
     const requestInfo = {
         method: req.method,
@@ -273,7 +287,7 @@ const processMultimodalInput = async (req, res) => {
                     message: "Error en multer",
                     error: err.message,
                     tenantId: tenantId,
-                    subscriptionKeyHash: subscriptionKeyHash,
+                    subscriptionId: subscriptionId,
                     requestInfo: requestInfo
                 });
                 return res.status(400).json({ error: err.message });
@@ -312,7 +326,7 @@ const processMultimodalInput = async (req, res) => {
                     const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
                         ...req.body,
                         tenantId: tenantId,
-                        subscriptionKeyHash: subscriptionKeyHash
+                        subscriptionId: subscriptionId
                     });
                     console.log('Documento subido a Azure Blob:', blobUrl);
                     
@@ -325,7 +339,7 @@ const processMultimodalInput = async (req, res) => {
                         error: error.message,
                         originalName: req.files.document[0].originalname,
                         tenantId: tenantId,
-                        subscriptionKeyHash: subscriptionKeyHash,
+                        subscriptionId: subscriptionId,
                         requestInfo: requestInfo
                     });
                     throw error;
@@ -342,7 +356,7 @@ const processMultimodalInput = async (req, res) => {
                     const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
                         ...req.body,
                         tenantId: tenantId,
-                        subscriptionKeyHash: subscriptionKeyHash
+                        subscriptionId: subscriptionId
                     });
                     console.log('Imagen subida a Azure Blob:', blobUrl);
                     const base64Image = fileBuffer.toString("base64");
@@ -351,26 +365,13 @@ const processMultimodalInput = async (req, res) => {
                     console.log('Tipo de imagen:', typeImage);
                     switch (typeImage) {
                         case "radiograph":
-
-                        /*const promptImage = "**Task – two stages (no diagnosis):**\n\
-                            1️⃣ Identify imaging modality, projection/sequence and every anatomical region present.\n\
-                            2️⃣ For **each region** list:\n\
-                            • normal structures visible;\n\
-                            • abnormal radiographic features (opacity, fractures, devices, artefacts…).\n\
-                            **Hard rules – must be obeyed:**\n\
-                            - ✅ Output **ONLY** the two sections: \"Imaging Identification\" and \"Radiographic Findings\".\n\
-                            - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.\n\
-                            - ❌ Do **NOT** name diseases, pathologies, or clinical conditions (e.g. pneumonia, pleural effusion, atelectasis, tumour…). \
-                            If an abnormality is visible, describe it strictly by appearance (e.g. \"homogeneous left-sided opacity\") without attributing cause.\n\
-                            - If uncertain, say \"uncertain\" rather than propose a disease.\n\
-                            - Keep total length ≤ 150 words.\n"*/
-                            const promptRadiology = `
+                            let promptRadiology = `
                             **Task – two stages (no diagnosis):**
                             1️⃣ Identify imaging modality:
                             • X-ray → state projection (PA, lateral, oblique…)
                             • CT or MRI → state plane (axial, coronal, sagittal) and sequence/phase
                             • Ultrasound → state view (longitudinal, transverse, apical four-chamber…)
-                            • Otherwise say “uncertain modality”
+                            • Otherwise say "uncertain modality"
                             2️⃣ For **each anatomical region** list:
                             • normal structures visible
                             • abnormal radiographic features (opacity, fractures, devices, artefacts, masses…)
@@ -381,20 +382,23 @@ const processMultimodalInput = async (req, res) => {
                             "Radiographic Findings"
                             - ❌ NO section named diagnosis, impression, assessment, conclusión…
                             - ❌ Do NOT name diseases (pneumonia, effusion, tumour…). Describe appearances only
-                            (e.g. “homogeneous left-sided opacity”).
-                            - If uncertain, write “uncertain” rather than propose a disease.
+                            (e.g. "homogeneous left-sided opacity").
+                            - If uncertain, write "uncertain" rather than propose a disease.
                             - Keep total length ≤ 150 words.
                             `.trim();
-                        const imageAnalysisRadiology = await processImage(base64Image, promptRadiology, "high");
-                        results.imageAnalysis = imageAnalysisRadiology;
-                        break;
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptRadiology += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
+                            const imageAnalysisRadiology = await processImage(base64Image, promptRadiology, "high");
+                            results.imageAnalysis = imageAnalysisRadiology;
+                            break;
                         case "ct":
-                            const promptCT = `
+                            let promptCT = `
                             **Task – two stages (no diagnosis)**  
                             1️⃣ **Imaging Identification**  
                             • Confirm modality is CT (computed tomography).  
                             • State acquisition plane(s) shown (axial, coronal, sagittal, 3-D MPR…).  
-                            • Mention contrast phase if recognizable (non-contrast, arterial, venous, delayed) or “uncertain phase”.  
+                            • Mention contrast phase if recognizable (non-contrast, arterial, venous, delayed) or "uncertain phase".  
                             • Note slice thickness or kernel only if obvious (e.g. bone algorithm).  
 
                             2️⃣ **For each anatomical region imaged** list:  
@@ -407,21 +411,24 @@ const processMultimodalInput = async (req, res) => {
                             **Tomographic Findings**  
                             - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
                             - ❌ Do **NOT** name diseases, pathologies, or clinical conditions (e.g. appendicitis, PE, metastasis).  
-                            Describe appearances only (e.g. “focal high-density crescent adjacent to skull inner table”).  
-                            - If uncertain, write **“uncertain”** rather than propose a disease.  
+                            Describe appearances only (e.g. "focal high-density crescent adjacent to skull inner table").  
+                            - If uncertain, write **"uncertain"** rather than propose a disease.  
                             - Keep total length ≤ 150 words.
                             `.trim();
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptCT += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
                             const imageAnalysisCT = await processImage(base64Image, promptCT, "high");
                             results.imageAnalysis = imageAnalysisCT;
                             break;
                         case "mri":
-                            const promptMRI = `
+                            let promptMRI = `
                             **Task – two stages (no diagnosis)**  
                             1️⃣ **Imaging Identification**  
                             • Confirm modality is MRI (magnetic resonance imaging).  
                             • Specify main sequence(s) seen (T1-w, T2-w, FLAIR, DWI, GRE, etc.).  
                             • State acquisition plane(s) (axial, coronal, sagittal) and contrast use if obvious  
-                                (pre-contrast, post-gadolinium, or “uncertain”).  
+                                (pre-contrast, post-gadolinium, or "uncertain").  
 
                             2️⃣ **For each anatomical region imaged** list:  
                             • normal structures visualised;  
@@ -433,15 +440,18 @@ const processMultimodalInput = async (req, res) => {
                             **MR Findings**  
                             - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
                             - ❌ Do **NOT** name diseases or clinical conditions (e.g. multiple sclerosis, tumour, infarct).  
-                            Describe appearances only (e.g. “hyperintense lesion on T2 with mild mass effect”).  
-                            - If uncertain, write **“uncertain”** rather than propose a disease.  
+                            Describe appearances only (e.g. "hyperintense lesion on T2 with mild mass effect").  
+                            - If uncertain, write **"uncertain"** rather than propose a disease.  
                             - Keep total length ≤ 150 words.
                             `.trim();
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptMRI += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
                             const imageAnalysisMRI = await processImage(base64Image, promptMRI, "high");
                             results.imageAnalysis = imageAnalysisMRI;
                             break;
                         case "ultrasound":
-                            const promptUltrasound = `
+                            let promptUltrasound = `
                             **Task – two stages (no diagnosis)**  
                             1️⃣ **Imaging Identification**  
                             • Confirm modality is ultrasound.  
@@ -457,20 +467,24 @@ const processMultimodalInput = async (req, res) => {
                             **Sonographic Findings**  
                             - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
                             - ❌ Do **NOT** name diseases, pathologies, or clinical conditions (e.g. cholecystitis, DVT, carcinoma).  
-                            Describe appearances only (e.g. “well-defined round anechoic lesion with posterior enhancement”).  
-                            - If uncertain, write **“uncertain”** rather than propose a disease.  
+                            Describe appearances only (e.g. "well-defined round anechoic lesion with posterior enhancement").  
+                            - If uncertain, write **"uncertain"** rather than propose a disease.  
                             - Keep total length ≤ 150 words.
                             `.trim();   
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptUltrasound += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
                             const imageAnalysisUltrasound = await processImage(base64Image, promptUltrasound, "high");
                             results.imageAnalysis = imageAnalysisUltrasound;
+                            break;
                         case "ecg":
-                            const promptECG = `
+                            let promptECG = `
                             **Task – two stages (no diagnosis)**  
                             1️⃣ **ECG Identification**  
                                • Confirm modality is ECG.  
                                • State type (12-lead, rhythm strip, telemetry snapshot).  
                                • Note paper speed if visible (25 mm/s, 50 mm/s) and calibration (10 mm/mV).  
-                               • List the leads displayed (e.g. I, II, III, V1–V6) or say “uncertain leads”.  
+                               • List the leads displayed (e.g. I, II, III, V1–V6) or say "uncertain leads".  
                             
                             2️⃣ **For the waveform displayed** list:  
                                • normal features observed (regular rhythm, narrow QRS, upright T in lead II, etc.);  
@@ -482,15 +496,18 @@ const processMultimodalInput = async (req, res) => {
                               **ECG Findings**  
                             - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
                             - ❌ Do **NOT** name diseases or clinical conditions (e.g. atrial fibrillation, myocardial infarction, bundle-branch block).  
-                              Describe appearances only (e.g. “irregularly irregular rhythm”, “ST-segment elevation 2 mm in V2–V3”).  
-                            - If uncertain, write **“uncertain”** rather than propose a disease.  
+                              Describe appearances only (e.g. "irregularly irregular rhythm", "ST-segment elevation 2 mm in V2–V3").  
+                            - If uncertain, write **"uncertain"** rather than propose a disease.  
                             - Keep total length ≤ 150 words.
                             `.trim();
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptECG += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
                           const imageAnalysisECG = await processImage(base64Image, promptECG, "high");
                           results.imageAnalysis = imageAnalysisECG;
                           break;
                         case "clinical_photo":
-                            const promptClinicalPhoto = `
+                            let promptClinicalPhoto = `
                             **Task – two stages (no diagnosis)**  
                             1️⃣ **Photo Identification**  
                                • Confirm modality is a clinical photograph.  
@@ -507,13 +524,25 @@ const processMultimodalInput = async (req, res) => {
                               **Photo Findings**  
                             - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
                             - ❌ Do **NOT** name diseases or clinical conditions (e.g. psoriasis, cellulitis, melanoma).  
-                              Describe appearances only (e.g. “round erythematous patch with central crust”).  
-                            - If uncertain, write **“uncertain”** rather than propose a disease.  
+                              Describe appearances only (e.g. "round erythematous patch with central crust").  
+                            - If uncertain, write **"uncertain"** rather than propose a disease.  
                             - Keep total length ≤ 150 words.
                             `.trim();
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptClinicalPhoto += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
                           const imageAnalysisClinicalPhoto = await processImage(base64Image, promptClinicalPhoto, "high");
                           results.imageAnalysis = imageAnalysisClinicalPhoto;
                           break;
+                        case "face_photo":
+                            let promptFace = `You are an expert clinician in pediatric dysmorphology.\n\nTASK\nBased solely on the facial features visible in the provided photograph, return a valid JSON array with the names of 5 possible rare genetic syndromes or diseases that could be considered as differential diagnoses.\n\nOUTPUT RULES\n• Output only the JSON array—no XML, Markdown, or extra text.\n• Use double quotes for all strings.\n• List diagnoses in order from most to least likely.\n If you are unsure, make your best guess based on the visible features.\n\nPATIENT IMAGE: (attach the image as input)`;
+                            if (results.textInput && results.textInput.trim() !== '') {
+                                promptFace += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
+                            }
+                            promptFace = promptFace.trim();
+                            const imageAnalysisFace = await processImage(base64Image, promptFace, "high");
+                            results.imageAnalysis = imageAnalysisFace;
+                            break;
                         case "text_document":
                             const promptTextDocument = `
                             **Task – two stages (no interpretation)**  
@@ -529,10 +558,10 @@ const processMultimodalInput = async (req, res) => {
                             - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
                               **Raw Text**  
                               **Document Summary**  
-                            - ❌ Do **NOT** include any other sections (no “Impression”, “Assessment”, etc.).  
-                            - ❌ Do **NOT** infer or guess missing information. If part of the text is unreadable, write “[illegible]”.  
+                            - ❌ Do **NOT** include any other sections ("Impression", "Assessment", etc.).  
+                            - ❌ Do **NOT** infer or guess missing information. If part of the text is unreadable, write "[illegible]".  
                             - Keep *Raw Text* exactly as seen; keep *Document Summary* ≤ 25 lines.  
-                            - If a usual field (e.g. medications, tests) is absent, state “None reported.”  
+                            - If a usual field (e.g. medications, tests) is absent, state "None reported."  
                             `.trim();
                           const imageAnalysisTextDocument = await processImage(base64Image, promptTextDocument, "high");
                           results.imageAnalysis = imageAnalysisTextDocument;
@@ -554,7 +583,7 @@ const processMultimodalInput = async (req, res) => {
                         error: error.message,
                         originalName: req.files.image[0].originalname,
                         tenantId: tenantId,
-                        subscriptionKeyHash: subscriptionKeyHash,
+                        subscriptionId: subscriptionId,
                         requestInfo: requestInfo
                     });
                     throw error;
@@ -620,7 +649,7 @@ const processMultimodalInput = async (req, res) => {
             requestInfo: requestInfo,
             requestData: req.body,
             tenantId: tenantId,
-            subscriptionKeyHash: subscriptionKeyHash
+            subscriptionId: subscriptionId
         });
         
         let infoError = {
@@ -628,10 +657,10 @@ const processMultimodalInput = async (req, res) => {
             error: error.message,
             myuuid: req.body.myuuid,
             tenantId: tenantId,
-            subscriptionKeyHash: subscriptionKeyHash
+            subscriptionId: subscriptionId
         };
         
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionKeyHash);
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
         
         try {
             let lang = req.body.lang ? req.body.lang : 'en';

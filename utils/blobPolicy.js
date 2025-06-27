@@ -1,21 +1,21 @@
 const ClientConfig = require('../models/clientconfig');
 const insights = require('../services/insights');
 
-async function shouldSaveToBlobOld({ tenantId, subscriptionKeyHash }) {
-    const clientId = tenantId || subscriptionKeyHash;
+async function shouldSaveToBlobOld({ tenantId, subscriptionId }) {
+    const clientId = tenantId || subscriptionId;
     if (!clientId) return true; // Por defecto, guardar
   
     const config = await ClientConfig.findOne({ clientId });
     return config ? config.saveToBlob : true; // true por defecto
   }
 
-async function shouldSaveToBlob({ tenantId, subscriptionKeyHash }) {
-  const clientId = tenantId || subscriptionKeyHash;
+async function shouldSaveToBlob({ tenantId, subscriptionId }) {
+  const clientId = tenantId || subscriptionId;
   if (!clientId) {
     insights.error({
-      message: "No tenantId ni subscriptionKeyHash proporcionados",
+      message: "No tenantId ni subscriptionId proporcionados",
       tenantId,
-      subscriptionKeyHash
+      subscriptionId
     });
     return false; // No guardar si no hay identificador de cliente
   }

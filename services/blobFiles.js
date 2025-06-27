@@ -76,10 +76,10 @@ async function createBlobFile(fileBuffer, originalName, body) {
     let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
-    } else if (body.subscriptionKeyHash) {
-        clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
+    } else if (body.subscriptionId) {
+        clientPrefix = `marketplace/${body.subscriptionId}/`;
     } else {
-        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
+        throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
     const tempUrl = `${clientPrefix}files/${url}`;
