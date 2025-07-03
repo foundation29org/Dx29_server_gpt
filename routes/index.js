@@ -8,34 +8,35 @@ const supportCtrl = require('../controllers/all/support')
 const serviceDxGPTCtrl = require('../services/servicedxgpt')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
 const api = express.Router()
-const { needsLimiter, healthLimiter, globalLimiter } = require('../services/rateLimiter')
-// Lista de dominios permitidos
-api.use(globalLimiter);
+const { smartLimiter, healthLimiter } = require('../services/rateLimiter')
 
-api.get('/internal/langs/', needsLimiter, langCtrl.getLangs)
+// Aplicar rate limiting inteligente globalmente
+api.use(smartLimiter);
 
-api.post('/internal/homesupport/', needsLimiter, supportCtrl.sendMsgLogoutSupport)
+api.get('/internal/langs/', smartLimiter, langCtrl.getLangs)
 
-api.post('/diagnose', needsLimiter, serviceDxGPTCtrl.diagnose)
+api.post('/internal/homesupport/', smartLimiter, supportCtrl.sendMsgLogoutSupport)
 
-api.post('/disease/info', needsLimiter, serviceDxGPTCtrl.callInfoDisease)
+api.post('/diagnose', smartLimiter, serviceDxGPTCtrl.diagnose)
 
-api.post('/questions/followup', needsLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
-api.post('/questions/emergency', needsLimiter, serviceDxGPTCtrl.generateERQuestions)
-api.post('/patient/update', needsLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
+api.post('/disease/info', smartLimiter, serviceDxGPTCtrl.callInfoDisease)
 
-api.post('/medical/summarize', needsLimiter, serviceDxGPTCtrl.summarize)
+api.post('/questions/followup', smartLimiter, serviceDxGPTCtrl.generateFollowUpQuestions)
+api.post('/questions/emergency', smartLimiter, serviceDxGPTCtrl.generateERQuestions)
+api.post('/patient/update', smartLimiter, serviceDxGPTCtrl.processFollowUpAnswers)
 
-api.post('/medical/analyze', needsLimiter, multimodalCtrl.processMultimodalInput)
+api.post('/medical/summarize', smartLimiter, serviceDxGPTCtrl.summarize)
 
-api.post('/internal/status/:ticketId', needsLimiter, serviceDxGPTCtrl.getQueueStatus)
+api.post('/medical/analyze', smartLimiter, multimodalCtrl.processMultimodalInput)
+
+api.post('/internal/status/:ticketId', smartLimiter, serviceDxGPTCtrl.getQueueStatus)
 
 api.get('/internal/getSystemStatus', healthLimiter, serviceDxGPTCtrl.getSystemStatus)
 api.get('/internal/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
 
-api.post('/internal/opinion', needsLimiter, serviceDxGPTCtrl.opinion)
+api.post('/internal/opinion', smartLimiter, serviceDxGPTCtrl.opinion)
 
-api.post('/internal/generalfeedback', needsLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
+api.post('/internal/generalfeedback', smartLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
 
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
