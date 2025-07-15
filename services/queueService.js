@@ -29,7 +29,7 @@ const MODEL_PROCESSING_TIMES = {
   gpt4o: 15,    // 15 segundos
   o1: 30,       // 30 segundos  
   o3: 60,       // 1 minuto
-  o3pro: 60     // 1 minuto
+  o3pro: 180     // 3 minutos
 };
 
 // Función helper para obtener el tiempo de procesamiento de un modelo
@@ -359,7 +359,8 @@ class QueueService {
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId,
           requestInfo: requestInfo,
-          model: model
+          model: model,
+          iframeParams: data.iframeParams || {}
         },
         applicationProperties: {
           requestType: 'diagnosis',
@@ -616,11 +617,11 @@ class QueueService {
     }
   }
 
-  async processMessageWithRetry(message, maxRetries = 3) {
+  async processMessageWithRetry(message, region, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const servicedxgpt = require('./servicedxgpt');
-        const result = await servicedxgpt.processAIRequest(message.body, message.body.requestInfo, message.body.model);
+        const result = await servicedxgpt.processAIRequest(message.body, message.body.requestInfo, message.body.model, region);
         return result;
       } catch (error) {
         if (!this.isRecoverableError(error) || attempt === maxRetries) {
@@ -683,7 +684,7 @@ class QueueService {
       const startTime = Date.now();
 
       try {
-        const result = await this.processMessageWithRetry(message);
+        const result = await this.processMessageWithRetry(message, region);
         
         // Completar el mensaje
         await receiver.completeMessage(message);

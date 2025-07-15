@@ -6,6 +6,8 @@ const PROMPTS = {
         • Do not exclude treatable metabolic/nutritional or structural causes if they match the case.  
         • Important: Return only a valid JSON array of strings with the disease names—no additional text, explanations, or bullet points. Example: ["Disease A","Disease B","Disease C","Disease D","Disease E"]
 
+        IF input includes a clinical scenario (i.e., patient-specific features like symptoms, onset, progression) — not just medical terms — THEN run diagnostic analysis; ELSE return []
+
         PATIENT DESCRIPTION
         {{description}}`,
         namesOnlyExcludingPrevious: `You are an expert clinician. Based on the following patient description, list the 5 additional diseases or syndromes most likely (that are NOT already in the provided list), ordered from most to least likely.
@@ -13,6 +15,8 @@ const PROMPTS = {
         • Carefully analyze the patient's description and consider all plausible conditions that fit the presentation, including common, uncommon, and ultra-rare disorders if relevant.  
         • Do not exclude treatable metabolic/nutritional or structural causes if they match the case.  
         • Important: Return only a valid JSON array of strings with the disease names—no additional text, explanations, or bullet points. Example: ["Disease A","Disease B","Disease C","Disease D","Disease E"]
+
+        IF input includes a clinical scenario (i.e., patient-specific features like symptoms, onset, progression) — not just medical terms — THEN run diagnostic analysis; ELSE return []
 
         PATIENT DESCRIPTION
         {{description}}

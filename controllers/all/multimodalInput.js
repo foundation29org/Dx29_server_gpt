@@ -90,8 +90,16 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         console.log('Tamaño del archivo:', fileBuffer.length, 'bytes');
         console.log('URL del blob:', blobUrl);
         
+        // Verificar si es un archivo de texto (.txt)
+        const fileExtension = originalName.toLowerCase().split('.').pop();
+        if (fileExtension === 'txt') {
+            const textContent = fileBuffer.toString('utf-8');
+            return textContent;
+        }
+        
+        // Para otros tipos de archivo, usar Azure Document Intelligence
+        console.log('Usando Azure Document Intelligence para archivo:', fileExtension);
         const modelId = "prebuilt-layout";
-        console.log('Usando modelo:', modelId);
 
         // Crear el cliente dentro de la función, igual que en el otro proyecto
         const clientIntelligence = createDocumentIntelligenceClient(

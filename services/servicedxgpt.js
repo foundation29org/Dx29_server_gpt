@@ -27,6 +27,25 @@ function sanitizeInput(input) {
     .trim();
 }
 
+// Función para sanitizar parámetros del iframe que pueden incluir información adicional
+// para tenants específicos como centro médico, ámbito, especialidad, etc.
+function sanitizeIframeParams(iframeParams) {
+  if (!iframeParams || typeof iframeParams !== 'object') {
+    return {};
+  }
+
+  const sanitized = {};
+  const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+  
+  for (const field of validFields) {
+    if (iframeParams[field] && typeof iframeParams[field] === 'string') {
+      sanitized[field] = sanitizeInput(iframeParams[field]);
+    }
+  }
+  
+  return sanitized;
+}
+
 function sanitizeAiData(data) {
   return {
     ...data,
@@ -34,98 +53,99 @@ function sanitizeAiData(data) {
     diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
-    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+    timezone: data.timezone?.trim() || '', // Manejar caso donde timezone es undefined
+    iframeParams: sanitizeIframeParams(data.iframeParams) // Sanitizar iframeParams
   };
 }
 
 // Añadir esta constante al inicio del archivo, junto con las otras constantes
-  const endpointsMap = {
-    gpt4o: {
-      asia: [
+const endpointsMap = {
+  gpt4o: {
+    asia: [
       `${API_MANAGEMENT_BASE}/as1/call/gpt4o`, // India: 428 calls/min
       `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
-      ],
-      europe: [
+    ],
+    europe: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt4o`, // Suiza: 428 calls/min
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
-      ],
-      northamerica: [
+    ],
+    northamerica: [
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
       `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
-      ],
-      southamerica: [
+    ],
+    southamerica: [
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
       `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
-      ],
-      africa: [
+    ],
+    africa: [
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
       `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
-      ],
-      oceania: [
+    ],
+    oceania: [
       `${API_MANAGEMENT_BASE}/as2/call/gpt4o`, // Japan: 300 calls/min
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
-      ],
-      other: [
+    ],
+    other: [
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
       `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
-      ]
-    },
-    o1: {
-      asia: [
+    ]
+  },
+  o1: {
+    asia: [
       `${API_MANAGEMENT_BASE}/as1/call/o1`, // India
       `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
-      ],
-      europe: [
+    ],
+    europe: [
       `${API_MANAGEMENT_BASE}/eu1/call/o1`, // Suiza
       `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
-      ],
-      northamerica: [
+    ],
+    northamerica: [
       `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
       `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
-      ],
-      southamerica: [
+    ],
+    southamerica: [
       `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
       `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
-      ],
-      africa: [
+    ],
+    africa: [
       `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
       `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
-      ],
-      oceania: [
+    ],
+    oceania: [
       `${API_MANAGEMENT_BASE}/as2/call/o1`, // Japan
       `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
-      ],
-      other: [
+    ],
+    other: [
       `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
       `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
     ]
   },
-    o3: {
-      asia: [
+  o3: {
+    asia: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2
-      ],
-      europe: [
+    ],
+    europe: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
-      ],
-      northamerica: [
+    ],
+    northamerica: [
       `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
       `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
-      ],
-      southamerica: [
+    ],
+    southamerica: [
       `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
       `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
-      ],
-      africa: [
+    ],
+    africa: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
-      ],
-      oceania: [
+    ],
+    oceania: [
       `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
       `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
-      ],
-      other: [
+    ],
+    other: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
     ]
@@ -291,62 +311,110 @@ async function translateInvertWithRetry(text, toLang, retries = 3, delay = 1000)
 }
 
 // Extraer la lógica principal a una función reutilizable
-async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
-  // 1. Detectar idioma y traducir a inglés si es necesario
-  let englishDescription = data.description;
-  let detectedLanguage = data.lang;
-  let englishDiseasesList = data.diseases_list;
+async function processAIRequest(data, requestInfo = null, model = 'gpt4o', region = null) {
+  // Si es un modelo largo, usar WebPubSub con progreso
+  const isLongModel = (model === 'o3' || model === 'o3pro' || model === 'o1');
+  const userId = data.myuuid;
 
+  if (isLongModel) {
+    console.log(`Processing long model ${model} for user ${userId} via WebPubSub`);
+
+    try {
+      const pubsubService = require('./pubsubService');
+
+      // Enviar progreso inicial
+      await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 10);
+
+      // Continuar con el procesamiento normal pero enviando progreso
+      const result = await processAIRequestInternal(data, requestInfo, model, userId, region);
+
+      // Enviar resultado final via WebPubSub
+      await pubsubService.sendResult(userId, result);
+
+      // Devolver resultado simple para la cola
+      return { result: 'success', message: 'Sent via WebPubSub' };
+
+    } catch (error) {
+      // Enviar error via WebPubSub
+      try {
+        const pubsubService = require('./pubsubService');
+        await pubsubService.sendError(userId, error, 'PROCESSING_ERROR');
+      } catch (pubsubError) {
+        console.error('Error sending WebPubSub error notification:', pubsubError);
+      }
+      throw error;
+    }
+  }
+
+  // Para modelos rápidos, procesamiento normal sin WebPubSub
+  return await processAIRequestInternal(data, requestInfo, model, userId, region);
+}
+
+// Función interna que contiene toda la lógica de procesamiento
+async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o', userId = null, region = null) {
+  const pubsubService = userId ? require('./pubsubService') : null;
   try {
-    detectedLanguage = await detectLanguageWithRetry(data.description, data.lang);
+    // 1. Detectar idioma y traducir a inglés si es necesario
+    let englishDescription = data.description;
+    let detectedLanguage = data.lang;
+    let englishDiseasesList = data.diseases_list;
+
+    try {
+      detectedLanguage = await detectLanguageWithRetry(data.description, data.lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
-      englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
+        englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
         if (englishDiseasesList) {
-        englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
+          englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
         }
+      }
+
+      // Progreso: traducción completada
+      if (pubsubService) {
+        await pubsubService.sendProgress(userId, 'ai_processing', 'Analyzing symptoms with AI...', 30);
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
-    if (requestInfo) {
-      let infoErrorlang = {
-        body: data,
-        error: translationError.message,
-        type: translationError.code || 'TRANSLATION_ERROR',
-        detectedLanguage: detectedLanguage || 'unknown',
-        model: model,
-        myuuid: data.myuuid,
-        tenantId: data.tenantId,
-        subscriptionId: data.subscriptionId
-      };
-      
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionId);
-      
-      try {
-        await serviceEmail.sendMailErrorGPTIP(
-          data.lang,
-          data.description,
-          infoErrorlang,
-          requestInfo
-        );
-      } catch (emailError) {
-        console.log('Fail sending email');
-        insights.error(emailError);
+      if (requestInfo) {
+        let infoErrorlang = {
+          body: data,
+          error: translationError.message,
+          type: translationError.code || 'TRANSLATION_ERROR',
+          detectedLanguage: detectedLanguage || 'unknown',
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId,
+          iframeParams: data.iframeParams || {}
+        };
+
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionId);
+
+        try {
+          await serviceEmail.sendMailErrorGPTIP(
+            data.lang,
+            data.description,
+            infoErrorlang,
+            requestInfo
+          );
+        } catch (emailError) {
+          console.log('Fail sending email');
+          insights.error(emailError);
+        }
       }
-    }
-    if(translationError.code === 'UNSUPPORTED_LANGUAGE'){
-      throw { 
-        result: "unsupported_language",
-        message: translationError.message
-      };
-    }else{
-      throw {
-        result: 'translation error',
-        message: translationError.message,
-        code: translationError.code || 'TRANSLATION_ERROR'
-      };
-    }
-    
-    //throw translationError;
+      if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
+        throw {
+          result: "unsupported_language",
+          message: translationError.message
+        };
+      } else {
+        throw {
+          result: 'translation error',
+          message: translationError.message,
+          code: translationError.code || 'TRANSLATION_ERROR'
+        };
+      }
+
+      //throw translationError;
     }
 
     // 2. FASE 1: Obtener solo los nombres de los diagnósticos
@@ -358,7 +426,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         .replace("{{description}}", englishDescription);
     console.log('Calling diseases')
     let requestBody;
-    
+
     if (model === 'o3') {
       // Formato específico para o3
       requestBody = {
@@ -381,7 +449,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
           effort: "high"
         }
       };
-    }else if (model === 'o3pro') {
+    } else if (model === 'o3pro') {
       requestBody = {
         model: "o3-pro",
         input: [
@@ -408,7 +476,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       requestBody = {
         messages
       };
-      if(model == 'gpt4o'){
+      if (model == 'gpt4o') {
         requestBody.temperature = 0;
         requestBody.top_p = 1;
         requestBody.frequency_penalty = 0;
@@ -416,13 +484,18 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       }
     }
 
-  let dataRequest = {
-    tenantId: data.tenantId,
-    subscriptionId: data.subscriptionId,
-    myuuid: data.myuuid
-  }
-  const namesResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
-  let usage = null;
+    let dataRequest = {
+      tenantId: data.tenantId,
+      subscriptionId: data.subscriptionId,
+      myuuid: data.myuuid
+    }
+    const namesResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+    let usage = null;
+
+    // Progreso: primera fase de IA completada
+    if (pubsubService) {
+      await pubsubService.sendProgress(userId, 'ai_details', 'Getting diagnosis details...', 60);
+    }
     // Procesar la respuesta de nombres según el modelo
     let namesResponseText;
     if (model === 'o3' || model === 'o3pro') {
@@ -434,6 +507,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       // Formato de respuesta para gpt4o y o1
       namesResponseText = namesResponse.data.choices[0].message.content;
     }
+    console.log('namesResponseText', namesResponseText);
 
     if (!namesResponseText) {
       insights.error({
@@ -446,7 +520,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         tenantId: data.tenantId,
         subscriptionId: data.subscriptionId
       });
-    throw new Error("No response from AI for names");
+      throw new Error("No response from AI for names");
     }
 
     // Parsear los nombres de diagnósticos
@@ -455,11 +529,11 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
       // Limpiar la respuesta para asegurar que es un JSON válido
       const cleanResponse = namesResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
       diagnosisNames = JSON.parse(cleanResponse);
-      
+
       if (!Array.isArray(diagnosisNames)) {
         throw new Error('Response is not an array');
       }
-      
+
       // Validar que todos los elementos son strings
       for (let i = 0; i < diagnosisNames.length; i++) {
         if (typeof diagnosisNames[i] !== 'string' || diagnosisNames[i].trim() === '') {
@@ -475,195 +549,327 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         model: model,
         requestData: data
       });
-      throw parseError;
+      // throw parseError;
+      diagnosisNames = [];
     }
-    console.log('Calling details')
-    // 3. FASE 2: Obtener detalles para todos los diagnósticos en una sola llamada
-    // Crear un prompt que maneje múltiples diagnósticos usando detailsForDiagnosis como base
-    const detailsPrompt = PROMPTS.diagnosis.detailsForMultipleDiagnoses
-      .replace("{{description}}", englishDescription)
-      .replace("{{diagnoses}}", diagnosisNames.join(', '));
 
-    // Para la Fase 2, usar solo gpt4o para detailsForMultipleDiagnoses
-    const messages = [{ role: "user", content: detailsPrompt }];
-    const detailsRequestBody = {
-      messages,
-      temperature: 0,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
+    //vars for anonymization
+    let anonymizedResult = {
+      hasPersonalInfo: false,
+      anonymizedText: '',
+      htmlText: ''
     };
 
-  const diagnoseResponse = await callAiWithFailover(detailsRequestBody, data.timezone, 'gpt4o', 0, dataRequest);
-    console.log('usage details Calling details', diagnoseResponse.data);
-    // Procesar la respuesta según el modelo (siempre gpt4o para detalles)
-    let aiResponse = diagnoseResponse.data.choices[0].message.content;
-
-    if (!aiResponse) {
-      insights.error({
-        message: "No response from AI for details",
-        requestData: data,
-        model: model,
-        response: diagnoseResponse,
-        operation: 'diagnosis-details',
-        myuuid: data.myuuid,
-        tenantId: data.tenantId,
-        subscriptionId: data.subscriptionId
-      });
-    throw new Error("No response from AI for details");
-    }
-
-  // 4. Anonimizar el texto
-  let anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid);
-    let anonymizedDescription = anonymizedResult.anonymizedText;
-    let anonymizedDescriptionEnglish = anonymizedDescription;
-    const hasPersonalInfo = anonymizedResult.hasPersonalInfo;
-
-    if (detectedLanguage !== 'en') {
-      try {
-        anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
-        anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
-      } catch (translationError) {
-        console.error('Error en la traducción inversa:', translationError.message);
-        insights.error({
-          message: translationError.message,
-          stack: translationError.stack,
-          code: translationError.code,
-          phase: 'translation',
-          detectedLanguage: detectedLanguage,
-          requestData: data,
-          model: model
-        });
-        throw translationError;
-      }
-    }
-
-    // 5. Procesar la respuesta de detalles
-    let parsedResponse;
+    let anonymizedDescription = '';
+    let anonymizedDescriptionEnglish = '';
+    let hasPersonalInfo = false;
+    let parsedResponse = [];
     let parsedResponseEnglish;
-    try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      let jsonContent = aiResponse.trim();
-      
-      // Remover backticks y marcadores de código si existen
-      jsonContent = jsonContent.replace(/^```json\s*|\s*```$/g, '');
-      jsonContent = jsonContent.replace(/^```\s*|\s*```$/g, '');
-      
-      // Intentar parsear directamente
+
+    if (diagnosisNames.length > 0) {
+      console.log('Calling details')
+      // 3. FASE 2: Obtener detalles para todos los diagnósticos en una sola llamada
+      // Crear un prompt que maneje múltiples diagnósticos usando detailsForDiagnosis como base
+      const detailsPrompt = PROMPTS.diagnosis.detailsForMultipleDiagnoses
+        .replace("{{description}}", englishDescription)
+        .replace("{{diagnoses}}", diagnosisNames.join(', '));
+
+      // Para la Fase 2, usar solo gpt4o para detailsForMultipleDiagnoses
+      const messages = [{ role: "user", content: detailsPrompt }];
+      const detailsRequestBody = {
+        messages,
+        temperature: 0,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+      };
+
+      const diagnoseResponse = await callAiWithFailover(detailsRequestBody, data.timezone, 'gpt4o', 0, dataRequest);
+      console.log('usage details Calling details', diagnoseResponse.data);
+
+      // Progreso: detalles obtenidos, comenzando anonimización
+      if (pubsubService) {
+        await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
+      }
+      // Procesar la respuesta según el modelo (siempre gpt4o para detalles)
+      let aiResponse = diagnoseResponse.data.choices[0].message.content;
+
+      if (!aiResponse) {
+        insights.error({
+          message: "No response from AI for details",
+          requestData: data,
+          model: model,
+          response: diagnoseResponse,
+          operation: 'diagnosis-details',
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+        throw new Error("No response from AI for details");
+      }
+
+
+      // 4. Procesar la respuesta de detalles
       try {
-        parsedResponse = JSON.parse(jsonContent);
-        parsedResponseEnglish = JSON.parse(jsonContent);
-      } catch (directParseError) {
-        // Si falla, intentar con el formato XML como fallback
-        const match = aiResponse.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
-        if (match && match[1]) {
-          jsonContent = match[1].trim();
+        // Limpiar la respuesta para asegurar que es un JSON válido
+        let jsonContent = aiResponse.trim();
+
+        // Remover backticks y marcadores de código si existen
+        jsonContent = jsonContent.replace(/^```json\s*|\s*```$/g, '');
+        jsonContent = jsonContent.replace(/^```\s*|\s*```$/g, '');
+
+        // Intentar parsear directamente
+        try {
           parsedResponse = JSON.parse(jsonContent);
           parsedResponseEnglish = JSON.parse(jsonContent);
-        } else {
-          throw directParseError;
+        } catch (directParseError) {
+          // Si falla, intentar con el formato XML como fallback
+          const match = aiResponse.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
+          if (match && match[1]) {
+            jsonContent = match[1].trim();
+            parsedResponse = JSON.parse(jsonContent);
+            parsedResponseEnglish = JSON.parse(jsonContent);
+          } else {
+            throw directParseError;
+          }
         }
-      }
 
-      // Validar que es una lista con los parámetros esperados
-      if (!Array.isArray(parsedResponse)) {
-        const error = new Error("Response is not an array");
-        error.rawResponse = aiResponse;
-        error.parsedResponse = parsedResponse;
-        throw error;
-      }
-
-      // Validar cada elemento de la lista
-      const requiredFields = ['diagnosis', 'description', 'symptoms_in_common', 'symptoms_not_in_common'];
-      for (let i = 0; i < parsedResponse.length; i++) {
-        const item = parsedResponse[i];
-        if (!item || typeof item !== 'object') {
-          const error = new Error(`Item at index ${i} is not an object`);
+        // Validar que es una lista con los parámetros esperados
+        if (!Array.isArray(parsedResponse)) {
+          const error = new Error("Response is not an array");
           error.rawResponse = aiResponse;
-          error.item = item;
+          error.parsedResponse = parsedResponse;
           throw error;
         }
 
-        for (const field of requiredFields) {
-          if (!item.hasOwnProperty(field)) {
-            const error = new Error(`Missing required field '${field}' in item at index ${i}`);
+        // Validar cada elemento de la lista
+        const requiredFields = ['diagnosis', 'description', 'symptoms_in_common', 'symptoms_not_in_common'];
+        for (let i = 0; i < parsedResponse.length; i++) {
+          const item = parsedResponse[i];
+          if (!item || typeof item !== 'object') {
+            const error = new Error(`Item at index ${i} is not an object`);
             error.rawResponse = aiResponse;
             error.item = item;
-            error.missingField = field;
+            throw error;
+          }
+
+          for (const field of requiredFields) {
+            if (!item.hasOwnProperty(field)) {
+              const error = new Error(`Missing required field '${field}' in item at index ${i}`);
+              error.rawResponse = aiResponse;
+              error.item = item;
+              error.missingField = field;
+              throw error;
+            }
+          }
+
+          // Validar que symptoms_in_common y symptoms_not_in_common son arrays
+          if (!Array.isArray(item.symptoms_in_common)) {
+            const error = new Error(`'symptoms_in_common' in item at index ${i} is not an array`);
+            error.rawResponse = aiResponse;
+            error.item = item;
+            throw error;
+          }
+
+          if (!Array.isArray(item.symptoms_not_in_common)) {
+            const error = new Error(`'symptoms_not_in_common' in item at index ${i} is not an array`);
+            error.rawResponse = aiResponse;
+            error.item = item;
+            throw error;
+          }
+
+          // Validar que diagnosis y description son strings
+          if (typeof item.diagnosis !== 'string' || item.diagnosis.trim() === '') {
+            const error = new Error(`'diagnosis' in item at index ${i} is not a valid string`);
+            error.rawResponse = aiResponse;
+            error.item = item;
+            throw error;
+          }
+
+          if (typeof item.description !== 'string' || item.description.trim() === '') {
+            const error = new Error(`'description' in item at index ${i} is not a valid string`);
+            error.rawResponse = aiResponse;
+            error.item = item;
             throw error;
           }
         }
 
-        // Validar que symptoms_in_common y symptoms_not_in_common son arrays
-        if (!Array.isArray(item.symptoms_in_common)) {
-          const error = new Error(`'symptoms_in_common' in item at index ${i} is not an array`);
-          error.rawResponse = aiResponse;
-          error.item = item;
-          throw error;
+      } catch (parseError) {
+        insights.error({
+          message: "Failed to parse or validate diagnosis output",
+          error: parseError.message,
+          stack: parseError.stack,
+          rawResponse: parseError.rawResponse,
+          description: data.description,
+          matchedContent: parseError.matchedContent,
+          jsonError: parseError.jsonError,
+          parsedResponse: parseError.parsedResponse,
+          item: parseError.item,
+          missingField: parseError.missingField,
+          phase: 'parsing',
+          model: model,
+          requestData: data
+        });
+        if (requestInfo) {
+          let infoError = {
+            myuuid: data.myuuid,
+            operation: 'find disease',
+            lang: data.lang,
+            description: data.description,
+            error: parseError.message,
+            rawResponse: parseError.rawResponse,
+            matchedContent: parseError.matchedContent,
+            jsonError: parseError.jsonError,
+            parsedResponse: parseError.parsedResponse,
+            item: parseError.item,
+            missingField: parseError.missingField,
+            model: model,
+            tenantId: data.tenantId,
+            subscriptionId: data.subscriptionId,
+            iframeParams: data.iframeParams || {}
+          };
+          await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionId);
+          try {
+            await serviceEmail.sendMailErrorGPTIP(
+              data.lang,
+              data.description,
+              infoError,
+              requestInfo
+            );
+          } catch (emailError) {
+            console.log('Fail sending email');
+            insights.error(emailError);
+          }
         }
+        throw parseError;
+      }
 
-        if (!Array.isArray(item.symptoms_not_in_common)) {
-          const error = new Error(`'symptoms_not_in_common' in item at index ${i} is not an array`);
-          error.rawResponse = aiResponse;
-          error.item = item;
-          throw error;
-        }
+      // 5. Anonimizar el texto
+      console.log('parsedResponse', parsedResponse);
+      console.log('parsedResponse.length 1: ', parsedResponse.length);
+      if (parsedResponse.length > 0) {
+        anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid);
+        anonymizedDescription = anonymizedResult.anonymizedText;
+        anonymizedDescriptionEnglish = anonymizedDescription;
+        hasPersonalInfo = anonymizedResult.hasPersonalInfo;
 
-        // Validar que diagnosis y description son strings
-        if (typeof item.diagnosis !== 'string' || item.diagnosis.trim() === '') {
-          const error = new Error(`'diagnosis' in item at index ${i} is not a valid string`);
-          error.rawResponse = aiResponse;
-          error.item = item;
-          throw error;
-        }
-
-        if (typeof item.description !== 'string' || item.description.trim() === '') {
-          const error = new Error(`'description' in item at index ${i} is not a valid string`);
-          error.rawResponse = aiResponse;
-          error.item = item;
-          throw error;
+        if (detectedLanguage !== 'en') {
+          try {
+            anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
+            anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
+          } catch (translationError) {
+            console.error('Error en la traducción inversa:', translationError.message);
+            insights.error({
+              message: translationError.message,
+              stack: translationError.stack,
+              code: translationError.code,
+              phase: 'translation',
+              detectedLanguage: detectedLanguage,
+              requestData: data,
+              model: model
+            });
+            throw translationError;
+          }
         }
       }
 
-    } catch (parseError) {
-      insights.error({
-        message: "Failed to parse or validate diagnosis output",
-        error: parseError.message,
-        stack: parseError.stack,
-        rawResponse: parseError.rawResponse,
-        description: data.description,
-        matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError,
-        parsedResponse: parseError.parsedResponse,
-        item: parseError.item,
-        missingField: parseError.missingField,
-        phase: 'parsing',
-        model: model,
-        requestData: data
-      });
-    if (requestInfo) {
-      let infoError = {
+      // 6. Traducir la respuesta si es necesario
+      if (detectedLanguage !== 'en') {
+        try {
+          parsedResponse = await Promise.all(
+            parsedResponse.map(async diagnosis => ({
+              diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
+              description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
+              symptoms_in_common: await Promise.all(
+                diagnosis.symptoms_in_common.map(symptom =>
+                  translateInvertWithRetry(symptom, detectedLanguage)
+                )
+              ),
+              symptoms_not_in_common: await Promise.all(
+                diagnosis.symptoms_not_in_common.map(symptom =>
+                  translateInvertWithRetry(symptom, detectedLanguage)
+                )
+              )
+            }))
+          );
+        } catch (translationError) {
+          console.error('Error en la traducción inversa:', translationError.message);
+          insights.error({
+            message: translationError.message,
+            stack: translationError.stack,
+            code: translationError.code,
+            phase: 'translation',
+            detectedLanguage: detectedLanguage,
+            requestData: data,
+            model: model
+          });
+          throw translationError;
+        }
+      }
+
+      // 7. Guardar información de seguimiento si es una llamada directa
+      if (requestInfo) {
+        let infoTrack = {
+          value: anonymizedDescription,
+          valueEnglish: anonymizedDescriptionEnglish,
+          myuuid: data.myuuid,
+          operation: 'find disease',
+          lang: data.lang,
+          response: parsedResponse,
+          responseEnglish: parsedResponseEnglish,
+          topRelatedConditions: data.diseases_list,
+          topRelatedConditionsEnglish: englishDiseasesList,
+          header_language: requestInfo.header_language,
+          timezone: data.timezone,
+          model: model,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId,
+          usage: usage,
+          iframeParams: data.iframeParams || {}
+        };
+        if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
+          console.log('Saving to blob');
+          console.log('parsedResponse.length 2: ', parsedResponse.length);
+          if (parsedResponse.length == 0) {
+            await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
+          } else {
+            if (model == 'gpt4o') {
+              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
+            } else if (model == 'o1') {
+              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
+            } else if (model == 'o3') {
+              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
+            } else if (model == 'o3pro') {
+              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v4');
+            }
+          }
+
+        }
+      }
+    } else {
+      let infoTrackNoDiagnosis = {
+        value: data.description,
+        valueEnglish: data.description,
         myuuid: data.myuuid,
         operation: 'find disease',
         lang: data.lang,
-        description: data.description,
-        error: parseError.message,
-        rawResponse: parseError.rawResponse,
-        matchedContent: parseError.matchedContent,
-        jsonError: parseError.jsonError,
-        parsedResponse: parseError.parsedResponse,
-        item: parseError.item,
-        missingField: parseError.missingField,
+        response: namesResponseText,
+        responseEnglish: namesResponseText,
+        topRelatedConditions: data.diseases_list,
+        topRelatedConditionsEnglish: englishDiseasesList,
+        header_language: requestInfo.header_language,
+        timezone: data.timezone,
         model: model,
         tenantId: data.tenantId,
-        subscriptionId: data.subscriptionId
+        subscriptionId: data.subscriptionId,
+        iframeParams: data.iframeParams || {}
       };
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionId);
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrackNoDiagnosis, data.tenantId, data.subscriptionId);
       try {
         await serviceEmail.sendMailErrorGPTIP(
           data.lang,
           data.description,
-          infoError,
+          infoTrackNoDiagnosis,
           requestInfo
         );
       } catch (emailError) {
@@ -671,87 +877,38 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o') {
         insights.error(emailError);
       }
     }
-    throw parseError;
-  }
 
-  // 6. Traducir la respuesta si es necesario
-    if (detectedLanguage !== 'en') {
-      try {
-        parsedResponse = await Promise.all(
-          parsedResponse.map(async diagnosis => ({
-            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
-            symptoms_in_common: await Promise.all(
-              diagnosis.symptoms_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
-              )
-            ),
-            symptoms_not_in_common: await Promise.all(
-              diagnosis.symptoms_not_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
-              )
-            )
-          }))
-        );
-      } catch (translationError) {
-      console.error('Error en la traducción inversa:', translationError.message);
-      insights.error({
-        message: translationError.message,
-        stack: translationError.stack,
-        code: translationError.code,
-        phase: 'translation',
-        detectedLanguage: detectedLanguage,
-        requestData: data,
-        model: model
-      });
-        throw translationError;
-      }
+
+    // Progreso final
+    if (pubsubService) {
+      await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
     }
 
-  // 7. Guardar información de seguimiento si es una llamada directa
-  if (requestInfo) {
-    let infoTrack = {
-      value: anonymizedDescription,
-      valueEnglish: anonymizedDescriptionEnglish,
-      myuuid: data.myuuid,
-      operation: 'find disease',
-      lang: data.lang,
-      response: parsedResponse,
-      responseEnglish: parsedResponseEnglish,
-      topRelatedConditions: data.diseases_list,
-      topRelatedConditionsEnglish: englishDiseasesList,
-      header_language: requestInfo.header_language,
-      timezone: data.timezone,
-      model: model,
-      tenantId: data.tenantId,
-      subscriptionId: data.subscriptionId,
-      usage: usage
-    };
-    if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
-      console.log('Saving to blob');
-      if(model == 'gpt4o'){
-        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');        
-      }else if(model == 'o1'){
-        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
-      }else if(model == 'o3'){
-        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
-      }else if(model == 'o3pro'){
-        await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v4');
-      }
+    // 8. Retornar el resultado
+    let diseasesList = [];
+    if (parsedResponse.length > 0) {
+      diseasesList = parsedResponse;
     }
-  }
 
-  // 8. Retornar el resultado
-  return {
+    const result = {
       result: 'success',
-      data: parsedResponse,
+      data: diseasesList,
       anonymization: {
         hasPersonalInfo,
         anonymizedText: anonymizedDescription,
         anonymizedTextHtml: anonymizedResult.htmlText
       },
-      detectedLang: detectedLanguage
-  };
+      detectedLang: detectedLanguage,
+      model: model
+    };
+    return result;
+  } finally {
+    // Libera el recurso SIEMPRE, aunque haya error
+    if (region) {
+      await queueService.releaseActiveRequest(region, model);
+    }
+  }
+
 }
 
 
@@ -1063,7 +1220,7 @@ async function callInfoDisease(req, res) {
       } catch (emailError) {
         console.log('Fail sending email');
       }
-      
+
       let infoError = {
         error: result.data,
         requestInfo: requestInfo,
@@ -1087,16 +1244,16 @@ async function callInfoDisease(req, res) {
     contentArray = contentArray.flatMap(item => {
       // Si el item contiene saltos de línea y números, dividirlo
       if (item.includes('\n') && /\d+\./.test(item)) {
-          return item.split('\n')
-              .map(line => line.trim())
-              .filter(line => line.length > 0);
+        return item.split('\n')
+          .map(line => line.trim())
+          .filter(line => line.length > 0);
       }
       return [item];
     });
 
     // Encontrar el inicio de la lista numerada
-    const startIndex = contentArray.findIndex(item => 
-        item && typeof item === 'string' && item.trim().startsWith("1.")
+    const startIndex = contentArray.findIndex(item =>
+      item && typeof item === 'string' && item.trim().startsWith("1.")
     );
 
     //const startIndex = contentArray.findIndex(item => item.trim().startsWith("1."));
@@ -1286,12 +1443,12 @@ function sanitizeQuestionData(data) {
 
 function validateOpinionData(data) {
   const errors = [];
-  
+
   if (!data || typeof data !== 'object') {
     errors.push({ field: 'request', reason: 'Request must be a JSON object' });
     return errors;
   }
-  
+
   if (!data.value) {
     errors.push({ field: 'value', reason: 'Field is required' });
   } else if (typeof data.value !== 'string') {
@@ -1299,29 +1456,29 @@ function validateOpinionData(data) {
   } else if (data.value.length > 10000) {
     errors.push({ field: 'value', reason: 'Must not exceed 10000 characters' });
   }
-  
+
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });
   } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
-  
+
   if (!data.vote) {
     errors.push({ field: 'vote', reason: 'Field is required' });
   } else if (typeof data.vote !== 'string' || !['up', 'down'].includes(data.vote)) {
     errors.push({ field: 'vote', reason: 'Must be either "up" or "down"' });
   }
-  
+
   if (data.lang !== undefined) {
     if (typeof data.lang !== 'string' || data.lang.length !== 2) {
       errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
     }
   }
-  
+
   if (typeof data.isNewModel !== 'boolean') {
     errors.push({ field: 'isNewModel', reason: 'Must be a boolean' });
   }
-  
+
   if (data.topRelatedConditions) {
     if (!Array.isArray(data.topRelatedConditions)) {
       errors.push({ field: 'topRelatedConditions', reason: 'Must be an array' });
@@ -1337,7 +1494,7 @@ function validateOpinionData(data) {
       });
     }
   }
-  
+
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
     { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
@@ -1345,7 +1502,7 @@ function validateOpinionData(data) {
     { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
     { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
-  
+
   if (data.value) {
     const normalizedValue = data.value.replace(/\n/g, ' ');
     for (const { pattern, reason } of suspiciousPatterns) {
@@ -1355,7 +1512,7 @@ function validateOpinionData(data) {
       }
     }
   }
-  
+
   return errors;
 }
 
@@ -1364,23 +1521,23 @@ function sanitizeOpinionData(data) {
     ...data,
     value: typeof data.value === 'string'
       ? data.value
-          .replace(/[<>]/g, '')
-          .replace(/(\{|\}|\||\\)/g, '')
-          .replace(/prompt:|system:|assistant:|user:/gi, '')
-          .trim()
+        .replace(/[<>]/g, '')
+        .replace(/(\{|\}|\||\\)/g, '')
+        .replace(/prompt:|system:|assistant:|user:/gi, '')
+        .trim()
       : '',
     myuuid: typeof data.myuuid === 'string' ? data.myuuid.trim() : '',
     lang: data.lang ? String(data.lang).trim().toLowerCase() : 'en',
     topRelatedConditions: Array.isArray(data.topRelatedConditions)
       ? data.topRelatedConditions.map(condition => ({
-          ...condition,
-          name: typeof condition.name === 'string'
-            ? condition.name
-                .replace(/[<>]/g, '')
-                .replace(/(\{|\}|\||\\)/g, '')
-                .trim()
-            : ''
-        }))
+        ...condition,
+        name: typeof condition.name === 'string'
+          ? condition.name
+            .replace(/[<>]/g, '')
+            .replace(/(\{|\}|\||\\)/g, '')
+            .trim()
+          : ''
+      }))
       : [],
     isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
   };
@@ -1391,7 +1548,7 @@ async function opinion(req, res) {
     // Obtener headers
     const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
-    
+
 
     const validationErrors = validateOpinionData(req.body);
     if (validationErrors.length > 0) {
@@ -1408,8 +1565,8 @@ async function opinion(req, res) {
         details: validationErrors
       });
     }
-    
-    
+
+
 
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
@@ -1448,7 +1605,7 @@ async function opinion(req, res) {
     console.error("[ERROR] opinion responded with status: " + e)
     let lang = req.body.lang ? req.body.lang : 'en';
     serviceEmail.sendMailError(lang, req.body.value, e)
-      .then(response => {})
+      .then(response => { })
       .catch(response => {
         insights.error(response);
         console.log('Fail sending email');
@@ -1538,7 +1695,7 @@ async function sendGeneralFeedback(req, res) {
   // Obtener headers
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  
+
 
 
   try {
@@ -1732,7 +1889,7 @@ async function generateFollowUpQuestions(req, res) {
   const header_language = req.headers['accept-language'];
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  
+
 
   const requestInfo = {
     method: req.method,
@@ -1792,9 +1949,9 @@ async function generateFollowUpQuestions(req, res) {
         tenantId: tenantId,
         subscriptionId: subscriptionId
       };
-      
+
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
-      
+
       try {
         await serviceEmail.sendMailErrorGPTIP(
           lang,
@@ -1806,7 +1963,7 @@ async function generateFollowUpQuestions(req, res) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
-      
+
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
@@ -1817,7 +1974,7 @@ async function generateFollowUpQuestions(req, res) {
           requestInfo: requestInfo
         });
 
-        return res.status(200).send({ 
+        return res.status(200).send({
           result: "unsupported_language",
           message: translationError.message
         });
@@ -1833,7 +1990,7 @@ async function generateFollowUpQuestions(req, res) {
         requestInfo: requestInfo
       });
 
-      return res.status(500).send({ 
+      return res.status(500).send({
         result: "error",
         message: "An error occurred during translation"
       });
@@ -1923,7 +2080,7 @@ async function generateFollowUpQuestions(req, res) {
       const content = diagnoseResponse.data.choices[0].message.content.trim();
       const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
       questions = JSON.parse(jsonContent);
-      
+
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
       }
@@ -1938,7 +2095,7 @@ async function generateFollowUpQuestions(req, res) {
         operation: 'generateFollowUpQuestions',
         requestInfo: requestInfo
       });
-      
+
       let infoError = {
         myuuid: sanitizedData.myuuid,
         operation: 'follow-up',
@@ -1961,7 +2118,7 @@ async function generateFollowUpQuestions(req, res) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
-      
+
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error" });
     }
@@ -1994,7 +2151,7 @@ async function generateFollowUpQuestions(req, res) {
       tenantId: tenantId,
       subscriptionId: subscriptionId
     };
-    
+
     if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
     }
@@ -2020,9 +2177,9 @@ async function generateFollowUpQuestions(req, res) {
       subscriptionId: subscriptionId
     };
     insights.error(infoError);
-    
+
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-    
+
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
@@ -2034,7 +2191,7 @@ async function generateFollowUpQuestions(req, res) {
     } catch (emailError) {
       console.log('Fail sending email');
     }
-    
+
     return res.status(500).send({ result: "error" });
   }
 }
@@ -2121,7 +2278,7 @@ async function generateERQuestions(req, res) {
   const header_language = req.headers['accept-language'];
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  
+
 
   const requestInfo = {
     method: req.method,
@@ -2177,9 +2334,9 @@ async function generateERQuestions(req, res) {
         tenantId: tenantId,
         subscriptionId: subscriptionId
       };
-      
+
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
-      
+
       try {
         await serviceEmail.sendMailErrorGPTIP(
           lang,
@@ -2191,7 +2348,7 @@ async function generateERQuestions(req, res) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
-      
+
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
@@ -2202,7 +2359,7 @@ async function generateERQuestions(req, res) {
           requestInfo: requestInfo
         });
 
-        return res.status(200).send({ 
+        return res.status(200).send({
           result: "unsupported_language",
           message: translationError.message
         });
@@ -2218,7 +2375,7 @@ async function generateERQuestions(req, res) {
         requestInfo: requestInfo
       });
 
-      return res.status(500).send({ 
+      return res.status(500).send({
         result: "error",
         message: "An error occurred during translation"
       });
@@ -2302,7 +2459,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       const content = diagnoseResponse.data.choices[0].message.content.trim();
       const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
       questions = JSON.parse(jsonContent);
-      
+
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
       }
@@ -2317,7 +2474,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         operation: 'generateERQuestions',
         requestInfo: requestInfo
       });
-      
+
       let infoError = {
         myuuid: sanitizedData.myuuid,
         operation: 'er-questions',
@@ -2340,7 +2497,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
         console.log('Fail sending email');
         insights.error(emailError);
       }
-      
+
       blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error" });
     }
@@ -2371,7 +2528,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       tenantId: tenantId,
       subscriptionId: subscriptionId
     };
-    
+
     if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
     }
@@ -2396,10 +2553,10 @@ Your response should be ONLY the JSON array, with no additional text or explanat
       subscriptionId: subscriptionId
     };
     insights.error(infoError);
-    
-    
+
+
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-    
+
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
@@ -2411,7 +2568,7 @@ Your response should be ONLY the JSON array, with no additional text or explanat
     } catch (emailError) {
       console.log('Fail sending email');
     }
-    
+
     return res.status(500).send({ result: "error" });
   }
 }
@@ -2532,7 +2689,7 @@ async function processFollowUpAnswers(req, res) {
   const header_language = req.headers['accept-language'];
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  
+
 
   const requestInfo = {
     method: req.method,
@@ -2572,12 +2729,12 @@ async function processFollowUpAnswers(req, res) {
     let englishDescription = description;
     let detectedLanguage = lang;
     let englishAnswers = answers;
-    
+
     try {
       detectedLanguage = await detectLanguageWithRetry(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
         englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        
+
         // Traducir las preguntas y respuestas
         englishAnswers = await Promise.all(
           answers.map(async (item) => ({
@@ -2598,9 +2755,9 @@ async function processFollowUpAnswers(req, res) {
         tenantId: tenantId,
         subscriptionId: subscriptionId
       };
-      
+
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
-      
+
       try {
         await serviceEmail.sendMailErrorGPTIP(
           lang,
@@ -2612,7 +2769,7 @@ async function processFollowUpAnswers(req, res) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
-      
+
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
         insights.error({
           type: 'UNSUPPORTED_LANGUAGE',
@@ -2623,7 +2780,7 @@ async function processFollowUpAnswers(req, res) {
           requestInfo: requestInfo
         });
 
-        return res.status(200).send({ 
+        return res.status(200).send({
           result: "unsupported_language",
           message: translationError.message
         });
@@ -2639,17 +2796,17 @@ async function processFollowUpAnswers(req, res) {
         requestInfo: requestInfo
       });
 
-      return res.status(500).send({ 
+      return res.status(500).send({
         result: "error",
         message: "An error occurred during translation"
       });
     }
 
     // 2. Construir el prompt para procesar las respuestas y actualizar la descripción
-    const questionsAndAnswers = englishAnswers.map(item => 
+    const questionsAndAnswers = englishAnswers.map(item =>
       `Question: ${item.question}\nAnswer: ${item.answer}`
     ).join('\n\n');
-    
+
     const prompt = `
     You are a medical assistant helping to update a patient's symptom description based on their answers to follow-up questions.
     
@@ -2728,7 +2885,7 @@ async function processFollowUpAnswers(req, res) {
       tenantId: tenantId,
       subscriptionId: subscriptionId
     };
-    
+
     if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
     }
@@ -2744,7 +2901,7 @@ async function processFollowUpAnswers(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    
+
     let infoError = {
       body: req.body,
       error: error.message,
@@ -2756,7 +2913,7 @@ async function processFollowUpAnswers(req, res) {
 
     insights.error(infoError);
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-    
+
     let lang = req.body.lang ? req.body.lang : 'en';
     try {
       await serviceEmail.sendMailErrorGPTIP(
@@ -2768,19 +2925,19 @@ async function processFollowUpAnswers(req, res) {
     } catch (emailError) {
       console.log('Fail sending email');
     }
-    
+
     return res.status(500).send({ result: "error" });
   }
 }
 
 function validateSummarizeRequest(data) {
   const errors = [];
-  
+
   if (!data || typeof data !== 'object') {
     errors.push({ field: 'request', reason: 'Request must be a JSON object' });
     return errors;
   }
-  
+
   if (!data.description) {
     errors.push({ field: 'description', reason: 'Field is required' });
   } else if (typeof data.description !== 'string') {
@@ -2790,7 +2947,7 @@ function validateSummarizeRequest(data) {
   } else if (data.description.length > 400000) {
     errors.push({ field: 'description', reason: 'Must not exceed 400000 characters' });
   }
-  
+
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });
   } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
@@ -2802,13 +2959,13 @@ function validateSummarizeRequest(data) {
   } else if (typeof data.timezone !== 'string') {
     errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
-  
+
   if (data.lang !== undefined) {
     if (typeof data.lang !== 'string' || data.lang.length !== 2) {
       errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
     }
   }
-  
+
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
     { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
@@ -2816,7 +2973,7 @@ function validateSummarizeRequest(data) {
     { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
     { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
-  
+
   if (data.description) {
     const normalizedDescription = data.description.replace(/\n/g, ' ');
     for (const { pattern, reason } of suspiciousPatterns) {
@@ -2826,7 +2983,7 @@ function validateSummarizeRequest(data) {
       }
     }
   }
-  
+
   return errors;
 }
 
@@ -2836,7 +2993,7 @@ async function summarize(req, res) {
   const header_language = req.headers['accept-language'];
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
-  
+
 
   const requestInfo = {
     method: req.method,
@@ -2903,17 +3060,17 @@ async function summarize(req, res) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
-      
+
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
-      
+
       if (translationError.code === 'UNSUPPORTED_LANGUAGE') {
-        return res.status(200).send({ 
+        return res.status(200).send({
           result: "unsupported_language",
           message: translationError.message
         });
       }
 
-      return res.status(500).send({ 
+      return res.status(500).send({
         result: "error",
         message: "An error occurred during translation"
       });
@@ -2984,7 +3141,7 @@ async function summarize(req, res) {
 
   } catch (error) {
     console.error('Error:', error);
-    
+
     let infoError = {
       body: req.body,
       error: error.message,
@@ -2994,9 +3151,9 @@ async function summarize(req, res) {
       subscriptionId: subscriptionId
     };
     insights.error(infoError);
-    
+
     blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-    
+
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
@@ -3008,7 +3165,7 @@ async function summarize(req, res) {
     } catch (emailError) {
       console.log('Fail sending email');
     }
-    
+
     return res.status(500).send({ result: "error" });
   }
 }
@@ -3020,19 +3177,19 @@ async function getQueueStatus(req, res) {
     const timezone = req.body.timezone; // Opcional: obtener timezone de query params
 
     if (!ticketId) {
-      return res.status(400).send({ 
-        result: 'error', 
-        message: 'ticketId is required' 
+      return res.status(400).send({
+        result: 'error',
+        message: 'ticketId is required'
       });
     }
 
     const status = await queueService.getTicketStatus(ticketId);
     return res.status(200).send(status);
-    
+
   } catch (error) {
     console.error('Error getting queue status:', error);
     insights.error(error);
-    return res.status(500).send({ 
+    return res.status(500).send({
       result: 'error',
       message: 'Internal server error while checking queue status'
     });
@@ -3043,15 +3200,15 @@ async function getQueueStatus(req, res) {
 async function getSystemStatus(req, res) {
   try {
     const status = await queueService.getAllRegionsStatus();
-    
+
     // Añadir información de endpoints sin exponer las URLs
     // Mostrar todas las regiones de todos los modelos
     const endpointsStatus = {};
-    
+
     // Iterar sobre todos los modelos y sus regiones
     for (const [model, regions] of Object.entries(status.models)) {
       endpointsStatus[model] = {};
-      
+
       for (const [region, regionStatus] of Object.entries(regions)) {
         endpointsStatus[model][region] = {
           capacity: regionStatus.capacity || 'N/A',
@@ -3098,12 +3255,12 @@ function getHeader(req, name) {
 
 function validateDiagnoseRequest(data) {
   const errors = [];
-  
+
   if (!data || typeof data !== 'object') {
     errors.push({ field: 'request', reason: 'Request must be a JSON object' });
     return errors;
   }
-  
+
   if (!data.description) {
     errors.push({ field: 'description', reason: 'Field is required' });
   } else if (typeof data.description !== 'string') {
@@ -3113,25 +3270,25 @@ function validateDiagnoseRequest(data) {
   } else if (data.description.length > 8000) {
     errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
   }
-  
+
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });
   } else if (typeof data.myuuid !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(data.myuuid)) {
     errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
-  
+
   if (!data.timezone) {
     errors.push({ field: 'timezone', reason: 'Field is required' });
   } else if (typeof data.timezone !== 'string') {
     errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
-  
+
   if (data.lang !== undefined) {
     if (typeof data.lang !== 'string' || data.lang.length !== 2) {
       errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
     }
   }
-  
+
   if (data.diseases_list !== undefined) {
     if (typeof data.diseases_list !== 'string') {
       errors.push({ field: 'diseases_list', reason: 'Must be a string' });
@@ -3139,7 +3296,30 @@ function validateDiagnoseRequest(data) {
       errors.push({ field: 'diseases_list', reason: 'Must not exceed 1000 characters' });
     }
   }
-  
+
+  // Validar iframeParams opcional
+  if (data.iframeParams !== undefined) {
+    if (typeof data.iframeParams !== 'object' || data.iframeParams === null) {
+      errors.push({ field: 'iframeParams', reason: 'Must be an object' });
+    } else {
+      // Validar campos específicos de iframeParams
+      const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+      
+      for (const field in data.iframeParams) {
+        if (!validFields.includes(field)) {
+          errors.push({ field: `iframeParams.${field}`, reason: 'Invalid field name' });
+        } else {
+          const value = data.iframeParams[field];
+          if (typeof value !== 'string') {
+            errors.push({ field: `iframeParams.${field}`, reason: 'Must be a string' });
+          } else if (value.length > 500) {
+            errors.push({ field: `iframeParams.${field}`, reason: 'Must not exceed 500 characters' });
+          }
+        }
+      }
+    }
+  }
+
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
     { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
@@ -3147,7 +3327,7 @@ function validateDiagnoseRequest(data) {
     { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
     { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
   ];
-  
+
   if (data.description) {
     const normalizedDescription = data.description.replace(/\n/g, ' ');
     for (const { pattern, reason } of suspiciousPatterns) {
@@ -3157,7 +3337,7 @@ function validateDiagnoseRequest(data) {
       }
     }
   }
-  
+
   if (data.diseases_list) {
     const normalizedDiseasesList = data.diseases_list.replace(/\n/g, ' ');
     for (const { pattern, reason } of suspiciousPatterns) {
@@ -3167,7 +3347,22 @@ function validateDiagnoseRequest(data) {
       }
     }
   }
-  
+
+  // Verificar patrones sospechosos en iframeParams
+  if (data.iframeParams && typeof data.iframeParams === 'object') {
+    for (const [field, value] of Object.entries(data.iframeParams)) {
+      if (typeof value === 'string') {
+        const normalizedValue = value.replace(/\n/g, ' ');
+        for (const { pattern, reason } of suspiciousPatterns) {
+          if (pattern.test(normalizedValue)) {
+            errors.push({ field: `iframeParams.${field}`, reason: `Contains suspicious content: ${reason}` });
+            break;
+          }
+        }
+      }
+    }
+  }
+
   return errors;
 }
 
@@ -3175,7 +3370,7 @@ async function diagnose(req, res) {
   const model = req.body.model || 'gpt4o';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
-  
+
   const requestInfo = {
     method: req.method,
     url: req.url,
@@ -3205,12 +3400,12 @@ async function diagnose(req, res) {
         details: validationErrors
       });
     }
-    
+
     const sanitizedData = sanitizeAiData(req.body);
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;
-    
-    // Sistema de colas para todos los modelos cuando sea necesario
+
+    // 1. Si la petición va a la cola, responde como siempre
     const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone, model);
     if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
       const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
@@ -3232,22 +3427,29 @@ async function diagnose(req, res) {
         }
       });
     }
-    
-    // Registrar uso activo para el modelo específico
+
+    // 2. Si es modelo largo, responde rápido y procesa en background
+    const isLongModel = (model === 'o3' || model === 'o3pro' || model === 'o1');
     const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
-    try {
-      const result = await processAIRequest(sanitizedData, requestInfo, model);
-      await queueService.releaseActiveRequest(region, model);
-      return res.status(200).send(result);
-    } catch (error) {
-      await queueService.releaseActiveRequest(region, model);
-      throw error;
+    if (isLongModel) {
+      res.status(200).send({ result: 'processing' });
+      processAIRequest(sanitizedData, requestInfo, model, region)
+        .catch(error => {
+          console.error('Error in background processing:', error);
+        });
+      return;
     }
 
-    /*
-    const result = await processAIRequest(sanitizedData, requestInfo, model);
+    // 3. Modelos rápidos: espera el resultado y responde por HTTP
+
+    try {
+      const result = await processAIRequest(sanitizedData, requestInfo, model, region);
+      //await queueService.releaseActiveRequest(region, model);
       return res.status(200).send(result);
-      */
+    } catch (error) {
+      //await queueService.releaseActiveRequest(region, model);
+      throw error;
+    }
   } catch (error) {
     console.error('Error:', error);
     insights.error({
@@ -3269,18 +3471,19 @@ async function diagnose(req, res) {
       requestData: req.body,
       model: model
     });
-    
+
     let infoError = {
       body: req.body,
       error: error.message,
       model: model,
       myuuid: req.body.myuuid,
       tenantId: tenantId,
-      subscriptionId: subscriptionId
+      subscriptionId: subscriptionId,
+      iframeParams: req.body.iframeParams || {}
     };
-    
+
     await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-    
+
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
@@ -3292,7 +3495,7 @@ async function diagnose(req, res) {
     } catch (emailError) {
       console.log('Fail sending email');
     }
-    
+
     if (error.result === 'translation error') {
       return res.status(200).send({
         result: "translation error",
@@ -3306,7 +3509,7 @@ async function diagnose(req, res) {
         code: error.code || 'UNSUPPORTED_LANGUAGE'
       });
     }
-    
+
     return res.status(500).send({ result: "error" });
   }
 }

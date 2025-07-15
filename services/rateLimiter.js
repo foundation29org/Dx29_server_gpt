@@ -39,22 +39,37 @@ const externalLimiter = rateLimit({
     },
     keyGenerator: function (req) {
         const tenantId = getHeader(req, 'x-tenant-id');
-        if (tenantId) {
+        const myuuid = req.body?.myuuid || req.query?.myuuid;
+        const ip = req.headers['x-forwarded-for'] || 
+                   req.connection.remoteAddress || 
+                   req.ip || 
+                   '127.0.0.1';
+        
+        if (myuuid) {
+            // Si hay myuuid, usar sesión (con o sin tenantId)
+            if (tenantId) {
+                return `external_${tenantId}_${myuuid}`;
+            } else {
+                return `external_session_${myuuid}`;
+            }
+        } else if (tenantId) {
+            // Solo tenantId sin myuuid
             return `external_${tenantId}`;
+        } else {
+            // Sin tenantId ni myuuid: usar IP
+            return ip;
         }
-        return req.headers['x-forwarded-for'] || 
-               req.connection.remoteAddress || 
-               req.ip || 
-               '127.0.0.1';
     },
     handler: (req, res, next, options) => {
         console.warn('External rate limit exceeded:', {
             tenantId: getHeader(req, 'x-tenant-id'),
+            myuuid: req.body?.myuuid || req.query?.myuuid,
             ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
             timestamp: new Date()
         });
         let infoError = {
             tenantId: getHeader(req, 'x-tenant-id'),
+            myuuid: req.body?.myuuid || req.query?.myuuid,
             ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
             message: options.message
         }
@@ -71,10 +86,14 @@ const smartLimiter = (req, res, next) => {
     const internalTenants = ['dxgpt-local', 'dxgpt-prod', 'dxgpt-dev'];
     
     if (tenantId && internalTenants.includes(tenantId)) {
-        // Tráfico interno DxGPT - usa needsLimiter (100/15min)
+        // Tráfico interno DxGPT - usa needsLimiter (100/15min por IP)
         return needsLimiter(req, res, next);
     } else {
-        // Cliente externo o sin tenant-id - usa externalLimiter (200/min)
+        // Cualquier otro caso (tenants externos, sin tenantId, etc.) - usa externalLimiter
+        // externalLimiter maneja automáticamente:
+        // - Con tenantId + myuuid: 200/min por sesión
+        // - Con solo tenantId: 200/min por tenant
+        // - Sin tenantId: 200/min por IP
         return externalLimiter(req, res, next);
     }
 };
@@ -110,24 +129,11 @@ const healthLimiter = rateLimit({
     }
 });
 
-const globalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 100, // máximo 100 requests por IP por minuto
-  message: 'Too many requests from this IP, please try again later.',
-  handler: (req, res, next, options) => {
-    console.warn('Rate limit exceeded:', {
-      ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
-      timestamp: new Date()
-    });
-    let infoError = {
-        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
-        message: options.message
-    }
-    insights.error(infoError);
-    res.status(429).json(options.message);
-  }
-});
 
 
-
-module.exports = { needsLimiter, healthLimiter, globalLimiter, smartLimiter, externalLimiter };
+module.exports = { 
+    needsLimiter, 
+    healthLimiter,
+    smartLimiter, 
+    externalLimiter
+};

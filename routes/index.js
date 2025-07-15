@@ -7,6 +7,8 @@ const langCtrl = require('../controllers/all/lang')
 const supportCtrl = require('../controllers/all/support')
 const serviceDxGPTCtrl = require('../services/servicedxgpt')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
+const permalinkCtrl = require('../controllers/all/permalink')
+const pubsubRoutes = require('./pubsub')
 const api = express.Router()
 const { smartLimiter, healthLimiter } = require('../services/rateLimiter')
 
@@ -37,6 +39,13 @@ api.get('/internal/health', healthLimiter, serviceDxGPTCtrl.checkHealth)
 api.post('/internal/opinion', smartLimiter, serviceDxGPTCtrl.opinion)
 
 api.post('/internal/generalfeedback', smartLimiter, serviceDxGPTCtrl.sendGeneralFeedback)
+
+// Rutas de Permalinks
+api.post('/internal/permalink', smartLimiter, permalinkCtrl.createPermalink)
+api.get('/internal/permalink/:id', smartLimiter, permalinkCtrl.getPermalink)
+
+// Rutas de Azure Web PubSub
+api.use('/pubsub', smartLimiter, pubsubRoutes)
 
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
