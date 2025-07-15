@@ -54,9 +54,15 @@ components:
           example: "Migraine, Tension headache, Cluster headache"
         model:
           type: string
-          description: Model to use for diagnosis. Defaults to gpt4o.
-          enum: ["gpt4o", "o1"]
+          description: |
+            Model to use for diagnosis. 
+            - "gpt4o" (default): Fast processing with good accuracy, returns HTTP response
+            - "o1": Advanced model with comprehensive analysis, uses WebSocket for progress updates
+            - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates  
+            - "o3pro": Premium advanced model with enhanced reasoning, uses WebSocket for progress updates
+          enum: ["gpt4o", "o1", "o3", "o3pro"]
           default: "gpt4o"
+
       required:
         - description
         - myuuid
@@ -67,7 +73,7 @@ components:
         result:
           type: string
           description: Status of the request
-          enum: [success, error, translation error, unsupported_language, queued]
+          enum: [success, error, translation error, unsupported_language, queued, processing]
           example: "success"
         data:
           type: object
@@ -589,9 +595,52 @@ paths:
       description: |
         Analyzes a patient's medical description and provides a list of possible disease diagnoses. This unified endpoint allows choosing between different models through the optional "model" parameter.
         
-        Available models:
-        - "gpt4o" (default): Faster processing with good accuracy
-        - "o1": More comprehensive analysis with longer processing time
+        **Available Models:**
+        
+        **Standard Models (HTTP Response):**
+        - "gpt4o" (default): Fast processing with good accuracy, returns results directly via HTTP
+        
+        **Advanced Models (WebSocket + HTTP):**
+        - "o1": Comprehensive analysis with longer processing time, uses WebSocket for progress updates
+        - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates
+        - "o3pro": Premium advanced model with enhanced reasoning, uses WebSocket for progress updates
+        
+        **Workflow for Advanced Models:**
+        For models o1, o3, and o3pro, you must follow this workflow:
+        1. Call `/pubsub/negotiate` to establish a WebSocket connection
+        2. Open the WebSocket connection using the provided URL
+        3. Make the diagnosis request via HTTP (this endpoint) with the advanced model
+        4. Receive progress updates and final results via WebSocket
+        5. Close the WebSocket connection when complete
+        
+        **WebSocket Message Types for Advanced Models:**
+        ```json
+        // Progress update
+        {
+          "type": "progress",
+          "stage": "translation",
+          "message": "Translating description...",
+          "percentage": 10
+        }
+        
+        // Final result
+        {
+          "type": "complete",
+          "result": {
+            "result": "success",
+            "data": [...],
+            "anonymization": {...},
+            "detectedLang": "en",
+            "model": "o3"
+          }
+        }
+        
+        // Error
+        {
+          "type": "error",
+          "error": "Processing error message"
+        }
+        ```
         
         For best results:
         - Provide relevant patient details such as age, gender, main symptoms, and when they started
@@ -677,6 +726,14 @@ paths:
                             type: number
                             format: float
                             example: 85.5
+                  - type: object
+                    properties:
+                      result:
+                        type: string
+                        example: "processing"
+                      message:
+                        type: string
+                        example: "Sent via WebSocket"
         "400":
           description: Invalid request
           content:
@@ -690,6 +747,82 @@ paths:
                   message:
                     type: string
                     example: "Invalid request format or content"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /pubsub/negotiate:
+    post:
+      summary: Negotiate WebSocket connection for advanced models
+      description: |
+        Establishes a WebSocket connection for receiving real-time progress updates from advanced AI models (o1, o3, o3pro).
+        
+        This endpoint is required before making diagnosis requests with advanced models. It returns a temporary WebSocket URL
+        that will be used to receive progress updates, final results, and error messages.
+        
+        **Workflow for Advanced Models:**
+        1. Call this endpoint to get a WebSocket URL
+        2. Open the WebSocket connection using the provided URL
+        3. Make the diagnosis request via HTTP (not WebSocket) with an advanced model
+        4. Receive progress updates and final results via WebSocket
+        5. Close the WebSocket connection when complete
+        
+        **WebSocket Message Types:**
+        - `progress`: Real-time progress updates with percentage and status
+        - `complete`: Final diagnosis result with full analysis
+        - `error`: Error message if processing fails
+        
+        **Note:** This endpoint is only required for advanced models (o1, o3, o3pro). 
+        Standard models (gpt4o) return results directly via HTTP.
+      tags:
+        - WebSocket
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                  description: User identifier (myuuid) for the WebSocket connection
+                  pattern: "^[0-9a-fA-F-]{36}$"
+                  example: "550e8400-e29b-41d4-a716-446655440000"
+              required:
+                - userId
+      responses:
+        "200":
+          description: WebSocket connection established
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    description: Temporary WebSocket URL for receiving updates
+                    example: "wss://your-api-gateway.com/ws?token=abc123"
+                  connectionId:
+                    type: string
+                    description: Unique connection identifier
+                    example: "conn_12345"
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    description: When the WebSocket URL expires
+                    example: "2024-01-15T11:30:00Z"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Invalid userId format"
         "401":
           $ref: "#/components/responses/UnauthorizedError"
         "429":
@@ -1103,3 +1236,19 @@ paths:
                   error:
                     type: string
                     example: "Error procesando la entrada multimodal"
+
+tags:
+  - name: Diagnosis
+    description: Medical diagnosis and analysis endpoints
+  - name: MedicalInfo
+    description: Disease information and educational content
+  - name: Questions
+    description: Question generation for patient assessment
+  - name: Patient
+    description: Patient data processing and updates
+  - name: Content
+    description: Content processing and summarization
+  - name: Multimodal
+    description: Multimodal analysis (text, documents, images)
+  - name: WebSocket
+    description: WebSocket connections for real-time updates
