@@ -26,10 +26,8 @@ const REGION_MAPPING = {
 
 // Configuración de tiempos de procesamiento por modelo (en segundos)
 const MODEL_PROCESSING_TIMES = {
-  gpt4o: 15,    // 15 segundos
-  o1: 30,       // 30 segundos  
+  gpt4o: 15,    // 15 segundos 
   o3: 60,       // 1 minuto
-  o3pro: 180     // 3 minutos
 };
 
 // Función helper para obtener el tiempo de procesamiento de un modelo
@@ -45,8 +43,8 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     throw new Error(`Model ${model} not supported`);
   }
 
-  // Lógica especial para o3 y o3pro
-  if (model === 'o3' || model === 'o3pro') {
+  // Lógica especial para o3
+  if (model === 'o3') {
     if (
       tz?.includes('america') ||
       tz?.includes('asia')
@@ -56,7 +54,7 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     return 'Suiza'; // Europa, África, Oceanía, etc.
   }
 
-  // Para gpt4o y o1, usar todas las regiones disponibles según continente
+  // Para gpt4o, usar todas las regiones disponibles según continente
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
     if (tz?.includes('europe')) return 'europe';

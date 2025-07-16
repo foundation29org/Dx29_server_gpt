@@ -90,36 +90,6 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
     ]
   },
-  o1: {
-    asia: [
-      `${API_MANAGEMENT_BASE}/as1/call/o1`, // India
-      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
-    ],
-    europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o1`, // Suiza
-      `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
-    ],
-    northamerica: [
-      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
-      `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
-    ],
-    southamerica: [
-      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
-      `${API_MANAGEMENT_BASE}/us2/call/o1`  // EastUS2
-    ],
-    africa: [
-      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
-      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
-    ],
-    oceania: [
-      `${API_MANAGEMENT_BASE}/as2/call/o1`, // Japan
-      `${API_MANAGEMENT_BASE}/us1/call/o1`  // WestUS como backup
-    ],
-    other: [
-      `${API_MANAGEMENT_BASE}/us1/call/o1`, // WestUS
-      `${API_MANAGEMENT_BASE}/as2/call/o1`  // Japan
-    ]
-  },
   o3: {
     asia: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
@@ -148,36 +118,6 @@ const endpointsMap = {
     other: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
-    ]
-  },
-  o3pro: {
-    asia: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
-    ],
-    europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
-    ],
-    northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`  // Suiza como backup
-    ],
-    southamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`  // Suiza como backup
-    ],
-    africa: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
-    ],
-    oceania: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`  // Suiza como backup
-    ],
-    other: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3-pro`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3-pro`  // EastUS2 como backup
     ]
   }
 };
@@ -313,7 +253,7 @@ async function translateInvertWithRetry(text, toLang, retries = 3, delay = 1000)
 // Extraer la lógica principal a una función reutilizable
 async function processAIRequest(data, requestInfo = null, model = 'gpt4o', region = null) {
   // Si es un modelo largo, usar WebPubSub con progreso
-  const isLongModel = (model === 'o3' || model === 'o3pro' || model === 'o1');
+  const isLongModel = (model === 'o3');
   const userId = data.myuuid;
 
   if (isLongModel) {
@@ -449,29 +389,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           effort: "high"
         }
       };
-    } else if (model === 'o3pro') {
-      requestBody = {
-        model: "o3-pro",
-        input: [
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: namesOnlyPrompt }
-            ]
-          }
-        ],
-        tools: [],
-        text: {
-          format: {
-            type: "text"
-          }
-        },
-        reasoning: {
-          effort: "high"
-        }
-      };
     } else {
-      // Formato para gpt4o y o1
+      // Formato para gpt4o
       const messages = [{ role: "user", content: namesOnlyPrompt }];
       requestBody = {
         messages
@@ -498,13 +417,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     }
     // Procesar la respuesta de nombres según el modelo
     let namesResponseText;
-    if (model === 'o3' || model === 'o3pro') {
+    if (model === 'o3') {
       // Formato de respuesta para o3
       usage = namesResponse.data.usage;
       console.log('usage', namesResponse.data.usage);
       namesResponseText = namesResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
     } else {
-      // Formato de respuesta para gpt4o y o1
+      // Formato de respuesta para gpt4o
       namesResponseText = namesResponse.data.choices[0].message.content;
     }
     console.log('namesResponseText', namesResponseText);
@@ -835,12 +754,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           } else {
             if (model == 'gpt4o') {
               await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-            } else if (model == 'o1') {
-              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v2');
             } else if (model == 'o3') {
               await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
-            } else if (model == 'o3pro') {
-              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v4');
             }
           }
 
@@ -3429,7 +3344,7 @@ async function diagnose(req, res) {
     }
 
     // 2. Si es modelo largo, responde rápido y procesa en background
-    const isLongModel = (model === 'o3' || model === 'o3pro' || model === 'o1');
+    const isLongModel = (model === 'o3');
     const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
     if (isLongModel) {
       res.status(200).send({ result: 'processing' });

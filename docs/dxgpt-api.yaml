@@ -57,10 +57,8 @@ components:
           description: |
             Model to use for diagnosis. 
             - "gpt4o" (default): Fast processing with good accuracy, returns HTTP response
-            - "o1": Advanced model with comprehensive analysis, uses WebSocket for progress updates
             - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates  
-            - "o3pro": Premium advanced model with enhanced reasoning, uses WebSocket for progress updates
-          enum: ["gpt4o", "o1", "o3", "o3pro"]
+          enum: ["gpt4o", "o3"]
           default: "gpt4o"
 
       required:
@@ -601,12 +599,10 @@ paths:
         - "gpt4o" (default): Fast processing with good accuracy, returns results directly via HTTP
         
         **Advanced Models (WebSocket + HTTP):**
-        - "o1": Comprehensive analysis with longer processing time, uses WebSocket for progress updates
         - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates
-        - "o3pro": Premium advanced model with enhanced reasoning, uses WebSocket for progress updates
         
         **Workflow for Advanced Models:**
-        For models o1, o3, and o3pro, you must follow this workflow:
+        For model o3, you must follow this workflow:
         1. Call `/pubsub/negotiate` to establish a WebSocket connection
         2. Open the WebSocket connection using the provided URL
         3. Make the diagnosis request via HTTP (this endpoint) with the advanced model
@@ -690,7 +686,7 @@ paths:
                     model:
                       type: string
                       description: Model to use for diagnosis
-                      enum: ["gpt4o", "o1"]
+                      enum: ["gpt4o", "o3"]
                       default: "gpt4o"
                       example: "gpt4o"
       responses:
@@ -755,7 +751,7 @@ paths:
     post:
       summary: Negotiate WebSocket connection for advanced models
       description: |
-        Establishes a WebSocket connection for receiving real-time progress updates from advanced AI models (o1, o3, o3pro).
+        Establishes a WebSocket connection for receiving real-time progress updates from advanced AI models (o3).
         
         This endpoint is required before making diagnosis requests with advanced models. It returns a temporary WebSocket URL
         that will be used to receive progress updates, final results, and error messages.
@@ -772,7 +768,7 @@ paths:
         - `complete`: Final diagnosis result with full analysis
         - `error`: Error message if processing fails
         
-        **Note:** This endpoint is only required for advanced models (o1, o3, o3pro). 
+        **Note:** This endpoint is only required for advanced models (o3). 
         Standard models (gpt4o) return results directly via HTTP.
       tags:
         - WebSocket
