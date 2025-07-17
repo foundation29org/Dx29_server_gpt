@@ -93,6 +93,8 @@ To run the project locally using Docker:
 
 ```bash
 # Local development environment
+docker-compose build app-local --no-cache    ||   docker-compose build --no-cache
+
 docker-compose up app-local
 
 # Development environment for Azure

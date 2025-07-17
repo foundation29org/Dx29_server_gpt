@@ -12,22 +12,63 @@ function clean(s) {
 const namespace = clean(config.serviceBusName);
 const key       = clean(config.serviceBusKey);
 const connectionString = `Endpoint=sb://${namespace}.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=${key}`;
-const queueName = "diagnosis-queue";
+const baseQueueName = "diagnosis-queue";
 
 const REGION_MAPPING = {
-  asia: 'India',
-  europe: 'Suiza',
-  northamerica: 'WestUS',
-  southamerica: 'WestUS',
-  africa: 'WestUS',
-  oceania: 'Japan',
-  other: 'WestUS'
+  asia: 'India',        // Redirigir a India para gpt4o
+  europe: 'Suiza',      // Europa
+  northamerica: 'WestUS', // Estados Unidos
+  southamerica: 'WestUS', // Redirigir a Estados Unidos
+  africa: 'Suiza',      // Redirigir a Europa
+  oceania: 'Japan',     // Redirigir a Japan para gpt4o
+  other: 'WestUS'       // Redirigir a Estados Unidos
 };
 
-const REGION_CAPACITY = config.REGION_CAPACITY;
+// Configuración de tiempos de procesamiento por modelo (en segundos)
+const MODEL_PROCESSING_TIMES = {
+  gpt4o: 15,    // 15 segundos 
+  o3: 60,       // 1 minuto
+};
 
-// Tiempo promedio de procesamiento por solicitud en segundos
-const AVG_PROCESSING_TIME = 10;
+// Función helper para obtener el tiempo de procesamiento de un modelo
+function getProcessingTime(model) {
+  return MODEL_PROCESSING_TIMES[model] || MODEL_PROCESSING_TIMES.gpt4o; // fallback a gpt4o
+}
+
+// Función para obtener la región específica según el modelo y timezone
+function getRegionFromTimezoneAndModel(timezone, model) {
+  const tz = timezone?.split('/')[0]?.toLowerCase();
+  const availableRegions = MODEL_CAPACITY[model];
+  if (!availableRegions) {
+    throw new Error(`Model ${model} not supported`);
+  }
+
+  // Lógica especial para o3
+  if (model === 'o3') {
+    if (
+      tz?.includes('america') ||
+      tz?.includes('asia')
+    ) {
+      return 'WestUS';
+    }
+    return 'Suiza'; // Europa, África, Oceanía, etc.
+  }
+
+  // Para gpt4o, usar todas las regiones disponibles según continente
+  const region = (() => {
+    if (tz?.includes('america')) return 'northamerica';
+    if (tz?.includes('europe')) return 'europe';
+    if (tz?.includes('asia')) return 'asia';
+    if (tz?.includes('africa')) return 'africa';
+    if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
+    return 'WestUS';
+  })();
+
+ // Usar REGION_MAPPING para traducir a la región real
+ return REGION_MAPPING[region] || Object.keys(availableRegions)[0];
+}
+
+const MODEL_CAPACITY = config.MODEL_CAPACITY;
 
 // Función auxiliar para delay con backoff exponencial
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -38,17 +79,14 @@ class QueueService {
       throw new Error('Service Bus connection string is required');
     }
 
-    // 1. Inicializar estructuras de datos
-    this.receivers = new Map();
-    this.regionQueues = new Map();
-    this.activeRequests = {};
+    // 1. Inicializar estructuras de datos por modelo
+    this.receivers = new Map(); // Map<`${model}-${region}`, receiver>
+    this.regionQueues = new Map(); // Map<`${model}-${region}`, queueInfo>
+    this.activeRequests = {}; // {[`${model}-${region}`]: number}
     this.ticketStatus = new Map();
 
-    // 2. Inicializar las colas por región
-    Object.keys(REGION_CAPACITY).forEach(region => {
-      this.regionQueues.set(region, { activeRequests: 0, queueLength: 0 });
-      this.activeRequests[region] = 0;
-    });
+    // 2. Inicializar las colas por modelo y región
+    this.initializeQueuesByModel();
 
     // 3. Inicializar Service Bus
     this.sbClient = new ServiceBusClient(connectionString);
@@ -77,9 +115,30 @@ class QueueService {
     this.startPeriodicTasks();
   }
 
+  initializeQueuesByModel() {
+    // Inicializar colas para cada modelo y región
+    for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
+      for (const [region, capacity] of Object.entries(capacities)) {
+        const queueKey = `${model}-${region}`;
+        this.regionQueues.set(queueKey, { activeRequests: 0, queueLength: 0 });
+        this.activeRequests[queueKey] = 0;
+      }
+    }
+  }
+
+  // Obtener nombre de cola para modelo y región
+  getQueueName(model, region) {
+    return `${baseQueueName}-${model}-${region}`;
+  }
+
+  // Obtener clave de cola para modelo y región
+  getQueueKey(model, region) {
+    return `${model}-${region}`;
+  }
+
   validateConfiguration() {
-    if (!REGION_CAPACITY || Object.keys(REGION_CAPACITY).length === 0) {
-      throw new Error('REGION_CAPACITY configuration is required');
+    if (!MODEL_CAPACITY || Object.keys(MODEL_CAPACITY).length === 0) {
+      throw new Error('MODEL_CAPACITY configuration is required');
     }
     if (!REGION_MAPPING || Object.keys(REGION_MAPPING).length === 0) {
       throw new Error('REGION_MAPPING configuration is required');
@@ -123,21 +182,23 @@ class QueueService {
 
   async initialize() {
     try {
-      // Crear una cola para cada región si no existe
-      for (const region of Object.keys(REGION_CAPACITY)) {
-        const regionQueueName = `${queueName}-${region}`;
-        const queueExists = await this.adminClient.queueExists(regionQueueName);
-        
-        if (!queueExists) {
-          await this.adminClient.createQueue(regionQueueName, {
-            maxSizeInMegabytes: 1024,
-            defaultMessageTimeToLive: 'PT1H',
-            lockDuration: 'PT30S',
-            maxDeliveryCount: 3,
-            enablePartitioning: false,
-            enableBatchedOperations: true
-          });
-          console.log(`Cola ${regionQueueName} creada exitosamente`);
+      // Crear una cola para cada modelo y región si no existe
+      for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
+        for (const [region, capacity] of Object.entries(capacities)) {
+          const queueName = this.getQueueName(model, region);
+          const queueExists = await this.adminClient.queueExists(queueName);
+          
+          if (!queueExists) {
+            await this.adminClient.createQueue(queueName, {
+              maxSizeInMegabytes: 1024,
+              defaultMessageTimeToLive: 'PT1H',
+              lockDuration: 'PT30S',
+              maxDeliveryCount: 3,
+              enablePartitioning: false,
+              enableBatchedOperations: true
+            });
+            console.log(`Cola ${queueName} creada exitosamente`);
+          }
         }
       }
     } catch (error) {
@@ -146,10 +207,10 @@ class QueueService {
     }
   }
 
-  async getRegionQueueStatus(region) {
+  async getRegionQueueStatus(model, region) {
     try {
-      // Obtener las propiedades de runtime de la cola para esta región
-      const runtimeProperties = await this.adminClient.getQueueRuntimeProperties(`${queueName}-${region}`);
+      const queueName = this.getQueueName(model, region);
+      const runtimeProperties = await this.adminClient.getQueueRuntimeProperties(queueName);
       
       return {
         activeRequests: runtimeProperties.activeMessageCount,
@@ -157,18 +218,25 @@ class QueueService {
         queueLength: runtimeProperties.activeMessageCount + runtimeProperties.scheduledMessageCount
       };
     } catch (error) {
-      console.error(`Error getting queue status for region ${region}:`, error);
+      console.error(`Error getting queue status for ${model}-${region}:`, error);
       return { activeRequests: 0, scheduledRequests: 0, queueLength: 0 };
     }
   }
 
-  async getBestRegion() {
+  async getBestRegion(model) {
     let bestRegion = null;
     let lowestLoad = Infinity;
 
-    for (const [region, capacity] of Object.entries(REGION_CAPACITY)) {
-      const queueStatus = await this.getRegionQueueStatus(region);
-      const currentLoad = queueStatus.queueLength / capacity;
+    const capacities = MODEL_CAPACITY[model];
+    if (!capacities) {
+      throw new Error(`Model ${model} not supported`);
+    }
+
+    for (const [region, capacity] of Object.entries(capacities)) {
+      const queueStatus = await this.getRegionQueueStatus(model, region);
+      const queueKey = this.getQueueKey(model, region);
+      const activeRequests = this.activeRequests[queueKey] || 0;
+      const currentLoad = (queueStatus.queueLength + activeRequests) / capacity;
       
       if (currentLoad < lowestLoad) {
         lowestLoad = currentLoad;
@@ -179,64 +247,103 @@ class QueueService {
     return bestRegion;
   }
 
-  async getRegionsStatus() {
+  async getRegionsStatus(model) {
     const status = [];
+    const capacities = MODEL_CAPACITY[model];
     
-    for (const [region, capacity] of Object.entries(REGION_CAPACITY)) {
-      const queueStatus = await this.getRegionQueueStatus(region);
+    if (!capacities) {
+      throw new Error(`Model ${model} not supported`);
+    }
+    
+    for (const [region, capacity] of Object.entries(capacities)) {
+      const queueStatus = await this.getRegionQueueStatus(model, region);
+      const queueKey = this.getQueueKey(model, region);
+      const activeRequests = this.activeRequests[queueKey] || 0;
       
       status.push({
         region,
-        activeRequests: queueStatus.activeRequests,
+        model,
+        activeRequests: activeRequests,
         queueLength: queueStatus.queueLength,
         capacity,
-        estimatedWaitTime: queueStatus.queueLength * AVG_PROCESSING_TIME
+        estimatedWaitTime: (queueStatus.queueLength + activeRequests) * getProcessingTime(model)
       });
     }
 
     return status;
   }
 
-  // Obtener la región basada en timezone
-  getRegionFromTimezone(timezone) {
-    const tz = timezone?.split('/')[0]?.toLowerCase();
-    const region = (() => {
-      if (tz?.includes('america')) return 'northamerica';
-      if (tz?.includes('europe')) return 'europe';
-      if (tz?.includes('asia')) return 'asia';
-      if (tz?.includes('africa')) return 'africa';
-      if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
-      return 'other';
-    })();
-    return REGION_MAPPING[region];
+  // Obtener la región basada en timezone y modelo
+  getRegionFromTimezone(timezone, model = 'gpt4o') {
+    return getRegionFromTimezoneAndModel(timezone, model);
   }
 
-  // Obtener propiedades de una región específica
-  async getRegionQueueProperties(region) {
+  // Obtener propiedades de una región específica para un modelo
+  async getRegionQueueProperties(model, region) {
+    const queueKey = this.getQueueKey(model, region);
+    const queueInfo = this.regionQueues.get(queueKey) || { activeRequests: 0, queueLength: 0 };
+    const capacity = MODEL_CAPACITY[model]?.[region] || 0;
+    
     return {
-      activeMessageCount: this.activeRequests[region] + this.regionQueues.get(region).queueLength,
-      capacity: REGION_CAPACITY[region],
-      utilizationPercentage: ((this.activeRequests[region] + this.regionQueues.get(region).queueLength) / REGION_CAPACITY[region]) * 100
+      activeMessageCount: this.activeRequests[queueKey] + queueInfo.queueLength,
+      capacity: capacity,
+      utilizationPercentage: capacity > 0 ? ((this.activeRequests[queueKey] + queueInfo.queueLength) / capacity) * 100 : 0
     };
   }
 
-  // Modificar getQueueProperties para trabajar con una región específica
-  async getQueueProperties(timezone) {
-    const region = this.getRegionFromTimezone(timezone);
-    return await this.getRegionQueueProperties(region);
+  // Obtener propiedades de cola basadas en timezone y modelo
+  async getQueueProperties(timezone, model) {
+    const region = this.getRegionFromTimezone(timezone, model);
+    return await this.getRegionQueueProperties(model, region);
   }
 
-  // Añadir a la cola de la región específica
+  // Añadir a la cola específica del modelo
   async addToQueue(data, requestInfo, model) {
-    let sender;
     try {
-      const region = this.getRegionFromTimezone(data.timezone);
-      console.log('Adding to queue for region:', data.timezone);
+      const region = this.getRegionFromTimezone(data.timezone, model);
+      const queueName = this.getQueueName(model, region);
+      const queueKey = this.getQueueKey(model, region);
       
-      const ticketId = data.myuuid;
-      console.log('Processing ticket:', ticketId);
+      // Verificar si ya existe un ticket activo con el mismo myuuid
+      const existingTicket = await Ticket.findOne({ myuuid: data.myuuid });
+      
+      if (existingTicket) {
+        // Si el ticket existe y está activo (queued o processing), devolver el existente
+        if (existingTicket.status === 'queued' || existingTicket.status === 'processing') {
+          console.log(`Ticket activo encontrado para myuuid ${data.myuuid}, devolviendo existente`);
+          
+          // Obtener posición en la cola
+          const position = await this.getCurrentPosition(model, region, data.myuuid);
+          const estimatedWaitTime = position * getProcessingTime(model);
 
-      // Crear el mensaje
+          return {
+            ticketId: data.myuuid,
+            queuePosition: position,
+            estimatedWaitTime: estimatedWaitTime,
+            region: region,
+            model: model
+          };
+        } else {
+          // Si el ticket está completado o con error, eliminar el anterior y crear uno nuevo
+          console.log(`Ticket anterior encontrado para myuuid ${data.myuuid} con status ${existingTicket.status}, eliminando y creando nuevo`);
+          await Ticket.deleteOne({ myuuid: data.myuuid });
+        }
+      }
+      
+      // Crear nuevo ticket
+      const ticket = new Ticket({
+        myuuid: data.myuuid,
+        status: 'queued',
+        region: region,
+        model: model,
+        timestamp: Date.now(),
+        requestData: data,
+        requestInfo: requestInfo
+      });
+      await ticket.save();
+
+      // Añadir mensaje a la cola
+      const sender = this.sbClient.createSender(queueName);
       const message = {
         body: {
           description: data.description,
@@ -248,152 +355,92 @@ class QueueService {
           timezone: data.timezone,
           region: region,
           tenantId: data.tenantId,
-          subscriptionKeyHash: data.subscriptionKeyHash
+          subscriptionId: data.subscriptionId,
+          requestInfo: requestInfo,
+          model: model,
+          iframeParams: data.iframeParams || {}
         },
-        requestInfo: requestInfo,
-        model: model,
         applicationProperties: {
           requestType: 'diagnosis',
           priority: 1,
-          region: region,
-          ticketId: ticketId
+          ticketId: data.myuuid
         }
       };
-
-      // Crear sender y enviar mensaje
-      sender = this.sbClient.createSender(`${queueName}-${region}`);
-      console.log('Sending message to queue...');
       await sender.sendMessages(message);
-      console.log('Message sent successfully');
+      await sender.close();
 
-      // Obtener estado de la cola
-      const queueStatus = await this.getRegionQueueStatus(region);
-      console.log('Queue status:', queueStatus);
-
-      // Crear el ticket en la base de datos
-      const ticket = await this.updateTicketStatus(ticketId, {
-        status: 'queued',
-        region: region,
-        position: queueStatus.queueLength,
-        timestamp: Date.now()
-      });
-      console.log('Ticket created in database:', ticket);
-
-      // Preparar la respuesta
-      const response = {
-        ticketId,
-        region,
-        queuePosition: queueStatus.queueLength,
-        estimatedWaitTime: queueStatus.queueLength * AVG_PROCESSING_TIME
-      };
-
-      console.log('Preparing queue response:', response);
-      
-      // Cerrar el sender antes de retornar
-      if (sender) {
-        await sender.close();
-        console.log('Sender closed successfully');
+      // Actualizar estado de la cola
+      const queueInfo = this.regionQueues.get(queueKey);
+      if (queueInfo) {
+        queueInfo.queueLength++;
       }
 
-      return response;
+      // Obtener posición en la cola
+      const position = await this.getCurrentPosition(model, region, data.myuuid);
+      const estimatedWaitTime = position * getProcessingTime(model);
+
+      return {
+        ticketId: data.myuuid,
+        queuePosition: position,
+        estimatedWaitTime: estimatedWaitTime,
+        region: region,
+        model: model
+      };
 
     } catch (error) {
       console.error('Error adding to queue:', error);
-      // Si hay un error, intentar actualizar el estado del ticket a error
-      try {
-        await this.updateTicketStatus(data.myuuid, {
-          status: 'error',
-          error: error.message,
-          timestamp: Date.now()
-        });
-      } catch (updateError) {
-        console.error('Error updating ticket status:', updateError);
-      }
+      insights.error({
+        message: 'Error adding to queue',
+        error: error.message,
+        model: model,
+        data: data
+      });
       throw error;
-    } finally {
-      // Asegurarse de que el sender se cierre incluso si hay un error
-      if (sender) {
-        try {
-          await sender.close();
-          console.log('Sender closed in finally block');
-        } catch (closeError) {
-          console.error('Error closing sender:', closeError);
-        }
-      }
     }
   }
 
-  // Registrar una petición activa en una región específica
-  async registerActiveRequest(timezone) {
-    const region = this.getRegionFromTimezone(timezone);
-    this.activeRequests[region]++;
-    return region;
+  // Registrar una petición activa en una región específica para un modelo
+  async registerActiveRequest(timezone, model) {
+    const region = this.getRegionFromTimezone(timezone, model);
+    const queueKey = this.getQueueKey(model, region);
+    this.activeRequests[queueKey]++;
+    return { region, model, queueKey };
   }
 
-  // Liberar una petición activa en una región específica
-  async releaseActiveRequest(region) {
-    if (this.activeRequests[region] > 0) {
-      this.activeRequests[region]--;
-    }
-  }
-
-  async getQueueProperties() {
-    try {
-      let totalActiveMessages = 0;
-      let totalCapacity = 0;
-
-      // Sumar las capacidades totales y mensajes activos de todas las regiones
-      for (const [region, capacity] of Object.entries(REGION_CAPACITY)) {
-        const regionQueueName = `${queueName}-${region}`;
-        const queueExists = await this.adminClient.queueExists(regionQueueName);
-        
-        if (!queueExists) {
-          await this.initialize();
-        }
-
-        // Obtiene el estado real de la cola y las peticiones activas
-        const runtimeProperties = await this.adminClient.getQueueRuntimeProperties(regionQueueName);
-        const regionInfo = this.regionQueues.get(region) || { activeRequests: 0, queueLength: 0 };
-        
-        totalActiveMessages += runtimeProperties.activeMessageCount + 
-                             runtimeProperties.scheduledMessageCount +
-                             (this.activeRequests[region] || 0); // Usar activeRequests del objeto
-        totalCapacity += capacity;
-      }
-
-      // Calcular el porcentaje de utilización total
-      const utilizationPercentage = (totalActiveMessages / totalCapacity) * 100;
-
-      return {
-        activeMessageCount: totalActiveMessages,
-        totalCapacity: totalCapacity,
-        utilizationPercentage: utilizationPercentage
-      };
-    } catch (error) {
-      console.error('Error getting queue properties:', error);
-      throw error;
+  // Liberar una petición activa en una región específica para un modelo
+  async releaseActiveRequest(region, model) {
+    const queueKey = this.getQueueKey(model, region);
+    if (this.activeRequests[queueKey] > 0) {
+      this.activeRequests[queueKey]--;
     }
   }
 
   async startMessageProcessing() {
     try {
       console.log('Starting message processing...');
-      for (const region of Object.keys(REGION_CAPACITY)) {
-        const receiver = this.sbClient.createReceiver(`${queueName}-${region}`);
-        this.receivers.set(region, receiver);
-        
-        receiver.subscribe({
-          processMessage: async (message) => {
-            await this.processMessage(message, receiver);
-          },
-          processError: async (args) => {
-            console.error(`Error en el procesamiento de la cola ${region}:`, args.error);
-          }
-        });
+      
+      // Crear receivers para cada modelo y región
+      for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
+        for (const [region, capacity] of Object.entries(capacities)) {
+          const queueName = this.getQueueName(model, region);
+          const receiver = this.sbClient.createReceiver(queueName);
+          const receiverKey = this.getQueueKey(model, region);
+          
+          this.receivers.set(receiverKey, receiver);
+          
+          receiver.subscribe({
+            processMessage: async (message) => {
+              await this.processMessage(message, receiver, model, region);
+            },
+            processError: async (args) => {
+              console.error(`Error en el procesamiento de la cola ${model}-${region}:`, args.error);
+            }
+          });
 
-        console.log(`Message processing started for region ${region}`);
+          console.log(`Message processing started for ${model}-${region}`);
+        }
       }
-      console.log('Message processing started for all regions');
+      console.log('Message processing started for all models and regions');
     } catch (error) {
       console.error('Error starting message processing:', error);
       throw error;
@@ -405,16 +452,15 @@ class QueueService {
 
     try {
       const updateData = {
-        ticketId,
         ...status,
         timestamp: new Date()
       };
 
-      console.log('Update data prepared:', updateData.ticketId);
+      console.log('Update data prepared:', ticketId);
 
       // Usar findOneAndUpdate para actualizar o crear si no existe
       const ticket = await Ticket.findOneAndUpdate(
-        { ticketId },
+        { myuuid: ticketId },
         { $set: updateData },
         { 
           new: true,          // Retorna el documento actualizado
@@ -423,7 +469,7 @@ class QueueService {
         }
       );
 
-      console.log('Database operation completed. Ticket:', ticket.ticketId);
+      console.log('Database operation completed. Ticket:', ticket.myuuid);
 
       // También mantener en memoria para acceso rápido
       if (!this.ticketStatus) {
@@ -435,7 +481,7 @@ class QueueService {
         throw new Error('Failed to create/update ticket in database');
       }
 
-      console.log('Ticket successfully updated in database:', ticket.ticketId);
+      console.log('Ticket successfully updated in database:', ticket.myuuid);
       return ticket;
 
     } catch (error) {
@@ -456,7 +502,7 @@ class QueueService {
 
   async getTicketStatus(ticketId) {
     try {
-      const ticket = await Ticket.findOne({ ticketId });
+      const ticket = await Ticket.findOne({ myuuid: ticketId });
       
       if (!ticket) {
         return {
@@ -479,12 +525,12 @@ class QueueService {
         };
       } else {
         // Obtener la posición actualizada
-        const currentPosition = await this.getCurrentPosition(ticket.region, ticketId);
+        const currentPosition = await this.getCurrentPosition(ticket.model, ticket.region, ticketId);
         return {
           result: 'queued',
           status: 'processing',
           position: currentPosition,
-          estimatedWaitTime: Math.ceil(currentPosition * AVG_PROCESSING_TIME / 60)
+          estimatedWaitTime: Math.ceil(currentPosition * getProcessingTime(ticket.model) / 60)
         };
       }
     } catch (error) {
@@ -569,11 +615,11 @@ class QueueService {
     }
   }
 
-  async processMessageWithRetry(message, maxRetries = 3) {
+  async processMessageWithRetry(message, region, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const servicedxgpt = require('./servicedxgpt');
-        const result = await servicedxgpt.processAIRequest(message.body, message.requestInfo, message.model);
+        const result = await servicedxgpt.processAIRequest(message.body, message.body.requestInfo, message.body.model, region);
         return result;
       } catch (error) {
         if (!this.isRecoverableError(error) || attempt === maxRetries) {
@@ -629,35 +675,33 @@ class QueueService {
   }
 
   // Modificar processMessage para reflejar el cambio
-  async processMessage(message, receiver) {
+  async processMessage(message, receiver, model, region) {
     try {
       this.validateMessage(message);
       
-      const region = message.applicationProperties.region;
-      const ticketId = message.body.myuuid;
       const startTime = Date.now();
 
       try {
-        const result = await this.processMessageWithRetry(message);
+        const result = await this.processMessageWithRetry(message, region);
         
         // Completar el mensaje
         await receiver.completeMessage(message);
 
         const processingTime = Date.now() - startTime;
-        const queueStatus = await this.getRegionQueueStatus(region);
+        const queueStatus = await this.getRegionQueueStatus(model, region);
 
         // Registrar métricas detalladas
-        await metricsService.recordMetric(region, {
+        await metricsService.recordMetric(region, model, {
           period: 'minute',
           messagesProcessed: 1,
           messagesFailed: 0,
           averageProcessingTime: processingTime,
           queueLength: queueStatus.queueLength,
-          utilizationPercentage: (queueStatus.queueLength / REGION_CAPACITY[region]) * 100
+          utilizationPercentage: (queueStatus.queueLength / MODEL_CAPACITY[model][region]) * 100
         });
 
         // Actualizar el ticket
-        await this.updateTicketStatus(ticketId, {
+        await this.updateTicketStatus(message.body.myuuid, {
           status: 'completed',
           result: result,
           region: region,
@@ -675,18 +719,18 @@ class QueueService {
       } catch (error) {
         console.error('Error processing message:', error);
         
-        const queueStatus = await this.getRegionQueueStatus(region);
+        const queueStatus = await this.getRegionQueueStatus(model, region);
         
         // Registrar métricas de error
-        await metricsService.recordMetric(region, {
+        await metricsService.recordMetric(region, model, {
           period: 'minute',
           messagesProcessed: 0,
           messagesFailed: 1,
           queueLength: queueStatus.queueLength,
-          utilizationPercentage: (queueStatus.queueLength / REGION_CAPACITY[region]) * 100
+          utilizationPercentage: (queueStatus.queueLength / MODEL_CAPACITY[model][region]) * 100
         });
 
-        await this.updateTicketStatus(ticketId, {
+        await this.updateTicketStatus(message.body.myuuid, {
           status: 'error',
           error: error.message,
           region: region,
@@ -704,11 +748,12 @@ class QueueService {
   }
 
   // Añadir nuevo método para actualizar posiciones
-  async updateQueuePositions(region) {
+  async updateQueuePositions(model, region) {
     try {
-      // Obtener tickets sin ordenar
+      // Obtener tickets sin ordenar para el modelo y región específicos
       const queuedTickets = await Ticket.find({
         region: region,
+        model: model,
         status: { $in: ['queued', 'processing'] }
       });
 
@@ -722,15 +767,15 @@ class QueueService {
         const ticket = sortedTickets[i];
         if (ticket.position !== i + 1) {
           await Ticket.updateOne(
-            { ticketId: ticket.ticketId },
+            { myuuid: ticket.myuuid },
             { 
               $set: { 
                 position: i + 1,
-                estimatedWaitTime: (i + 1) * AVG_PROCESSING_TIME
+                estimatedWaitTime: (i + 1) * getProcessingTime(model)
               }
             }
           );
-          console.log(`Updated position for ticket ${ticket.ticketId} to ${i + 1}`);
+          console.log(`Updated position for ticket ${ticket.myuuid} to ${i + 1}`);
         }
       }
 
@@ -742,11 +787,12 @@ class QueueService {
   }
 
   // Método auxiliar para obtener la posición actual
-  async getCurrentPosition(region, ticketId) {
+  async getCurrentPosition(model, region, ticketId) {
     try {
-      // Obtener todos los tickets en cola sin ordenar
+     
       const queuedTickets = await Ticket.find({
         region: region,
+        model: model,
         status: { $in: ['queued', 'processing'] }
       });
 
@@ -755,7 +801,7 @@ class QueueService {
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       );
 
-      const position = sortedTickets.findIndex(t => t.ticketId === ticketId) + 1;
+      const position = sortedTickets.findIndex(t => t.myuuid === ticketId) + 1;
       return position > 0 ? position : 1;
     } catch (error) {
       console.error('Error getting current position:', error);
@@ -765,44 +811,89 @@ class QueueService {
 
   async getAllRegionsStatus() {
     try {
-      const regionsStatus = {};
+      const allModelsStatus = {};
       
-      for (const [region, capacity] of Object.entries(REGION_CAPACITY)) {
-        const regionQueueName = `${queueName}-${region}`;
-        const runtimeProperties = await this.adminClient.getQueueRuntimeProperties(regionQueueName);
+      // Obtener estado para cada modelo
+      for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
+        const modelStatus = {};
         
-        regionsStatus[region] = {
-          capacity: capacity,
-          activeRequests: this.activeRequests[region] || 0,
-          queuedMessages: runtimeProperties.activeMessageCount,
-          scheduledMessages: runtimeProperties.scheduledMessageCount,
-          totalActiveMessages: (this.activeRequests[region] || 0) + 
-                             runtimeProperties.activeMessageCount + 
-                             runtimeProperties.scheduledMessageCount,
-          utilizationPercentage: (((this.activeRequests[region] || 0) + 
-                                runtimeProperties.activeMessageCount + 
-                                runtimeProperties.scheduledMessageCount) / capacity) * 100,
-          estimatedWaitTime: Math.ceil(((this.activeRequests[region] || 0) + 
-                                     runtimeProperties.activeMessageCount) * AVG_PROCESSING_TIME / 60) // en minutos
-        };
+        for (const [region, capacity] of Object.entries(capacities)) {
+          const queueName = this.getQueueName(model, region);
+          const queueKey = this.getQueueKey(model, region);
+          
+          try {
+            const runtimeProperties = await this.adminClient.getQueueRuntimeProperties(queueName);
+            const activeRequests = this.activeRequests[queueKey] || 0;
+            const queuedMessages = runtimeProperties.activeMessageCount;
+            const scheduledMessages = runtimeProperties.scheduledMessageCount;
+            const totalActiveMessages = activeRequests + queuedMessages + scheduledMessages;
+            
+            modelStatus[region] = {
+              capacity: capacity,
+              activeRequests: activeRequests,
+              queuedMessages: queuedMessages,
+              scheduledMessages: scheduledMessages,
+              totalActiveMessages: totalActiveMessages,
+              utilizationPercentage: capacity > 0 ? (totalActiveMessages / capacity) * 100 : 0,
+              estimatedWaitTime: Math.ceil((activeRequests + queuedMessages) * getProcessingTime(model) / 60) // en minutos
+            };
+          } catch (error) {
+            console.error(`Error getting queue status for ${model}-${region}:`, error);
+            modelStatus[region] = {
+              capacity: capacity,
+              activeRequests: 0,
+              queuedMessages: 0,
+              scheduledMessages: 0,
+              totalActiveMessages: 0,
+              utilizationPercentage: 0,
+              estimatedWaitTime: 0
+            };
+          }
+        }
+        
+        allModelsStatus[model] = modelStatus;
       }
+
+      // Calcular estadísticas globales
+      const globalStats = this.calculateGlobalStats(allModelsStatus);
 
       return {
         timestamp: new Date().toISOString(),
-        regions: regionsStatus,
-        global: {
-          totalCapacity: Object.values(REGION_CAPACITY).reduce((a, b) => a + b, 0),
-          totalActiveRequests: Object.values(this.activeRequests).reduce((a, b) => a + b, 0),
-          totalQueuedMessages: Object.values(regionsStatus).reduce((a, b) => a + b.queuedMessages, 0),
-          globalUtilizationPercentage: Object.values(regionsStatus)
-            .reduce((acc, region) => acc + region.totalActiveMessages, 0) / 
-            Object.values(REGION_CAPACITY).reduce((a, b) => a + b, 0) * 100
-        }
+        models: allModelsStatus,
+        global: globalStats
       };
     } catch (error) {
-      console.error('Error getting regions status:', error);
+      console.error('Error getting all regions status:', error);
       throw error;
     }
+  }
+
+  calculateGlobalStats(allModelsStatus) {
+    let totalCapacity = 0;
+    let totalActiveRequests = 0;
+    let totalQueuedMessages = 0;
+    let totalScheduledMessages = 0;
+
+    for (const [model, regions] of Object.entries(allModelsStatus)) {
+      for (const [region, stats] of Object.entries(regions)) {
+        totalCapacity += stats.capacity;
+        totalActiveRequests += stats.activeRequests;
+        totalQueuedMessages += stats.queuedMessages;
+        totalScheduledMessages += stats.scheduledMessages;
+      }
+    }
+
+    const totalActiveMessages = totalActiveRequests + totalQueuedMessages + totalScheduledMessages;
+    const globalUtilizationPercentage = totalCapacity > 0 ? (totalActiveMessages / totalCapacity) * 100 : 0;
+
+    return {
+      totalCapacity,
+      totalActiveRequests,
+      totalQueuedMessages,
+      totalScheduledMessages,
+      totalActiveMessages,
+      globalUtilizationPercentage
+    };
   }
 
   async cleanupOldTickets() {
@@ -843,7 +934,7 @@ class QueueService {
         data: {
           currentStatus: {
             timestamp: status.timestamp,
-            regions: status.regions,
+            models: status.models,
             global: status.global
           },
           lastUpdate: new Date().toISOString()
@@ -859,6 +950,7 @@ class QueueService {
   }
 
   validateMessage(message) {
+
     if (!message) {
       throw new Error('Message is required');
     }
@@ -868,12 +960,20 @@ class QueueService {
     if (!message.body.myuuid) {
       throw new Error('Message myuuid is required');
     }
-    if (!message.applicationProperties?.region) {
+    if (!message.body.region) {
       throw new Error('Message region is required');
     }
-    if (!REGION_CAPACITY[message.applicationProperties.region]) {
-      throw new Error(`Invalid region: ${message.applicationProperties.region}`);
+    if (!message.body.model) {
+      throw new Error('Message model is required');
     }
+    
+    const model = message.body.model;
+    const region = message.body.region;
+    
+    if (!MODEL_CAPACITY[model] || !MODEL_CAPACITY[model][region]) {
+      throw new Error(`Invalid model-region combination: ${model}-${region}`);
+    }
+    
     return true;
   }
 
@@ -907,8 +1007,8 @@ class QueueService {
         health.summary = {
             servicebus: health.checks.servicebus.status,
             metrics: health.checks.metrics.status,
-            queues: Object.entries(health.checks.queues).reduce((acc, [region, status]) => {
-                acc[region] = status.status;
+            queues: Object.entries(health.checks.queues).reduce((acc, [queueKey, status]) => {
+                acc[queueKey] = status.status;
                 return acc;
             }, {})
         };
@@ -929,8 +1029,12 @@ class QueueService {
 
   async checkServiceBusConnection() {
     try {
-      // Intentar una operación simple
-      await this.adminClient.getQueueRuntimeProperties(`${queueName}-${Object.keys(REGION_CAPACITY)[0]}`);
+      // Intentar una operación simple con la primera cola disponible
+      const firstModel = Object.keys(MODEL_CAPACITY)[0];
+      const firstRegion = Object.keys(MODEL_CAPACITY[firstModel])[0];
+      const queueName = this.getQueueName(firstModel, firstRegion);
+      
+      await this.adminClient.getQueueRuntimeProperties(queueName);
       return { status: 'healthy' };
     } catch (error) {
       return {
@@ -943,19 +1047,26 @@ class QueueService {
   async checkQueuesHealth() {
     const queuesHealth = {};
     
-    for (const region of Object.keys(REGION_CAPACITY)) {
-      try {
-        const status = await this.getRegionQueueStatus(region);
-        queuesHealth[region] = {
-          status: 'healthy',
-          activeMessages: status.activeRequests,
-          queuedMessages: status.queueLength
-        };
-      } catch (error) {
-        queuesHealth[region] = {
-          status: 'unhealthy',
-          error: error.message
-        };
+    for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
+      for (const [region, capacity] of Object.entries(capacities)) {
+        const queueKey = this.getQueueKey(model, region);
+        
+        try {
+          const status = await this.getRegionQueueStatus(model, region);
+          const activeRequests = this.activeRequests[queueKey] || 0;
+          
+          queuesHealth[queueKey] = {
+            status: 'healthy',
+            activeMessages: activeRequests,
+            queuedMessages: status.queueLength,
+            capacity: capacity
+          };
+        } catch (error) {
+          queuesHealth[queueKey] = {
+            status: 'unhealthy',
+            error: error.message
+          };
+        }
       }
     }
 

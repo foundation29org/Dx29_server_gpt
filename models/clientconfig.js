@@ -6,12 +6,8 @@ const Schema = mongoose.Schema;
 const ClientConfigSchema = new Schema({
   // ID corto para referencias externas (basado en IV)
   clientId: { type: String, required: true, unique: true },
-  // Datos de encriptación
-  subscription: {
-    encrypted: { type: String, required: true },
-    iv: { type: String, required: true },
-    tag: { type: String, required: true }
-  },
+  // APIM Subscription ID para identificación del cliente
+  subscriptionId: { type: String, index: true },
   // 'tenant' o 'marketplace'
   type: { type: String, enum: ['tenant', 'marketplace'], required: true },
   // true = guardar en blob, false = no guardar
@@ -23,14 +19,19 @@ const ClientConfigSchema = new Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// Método para obtener la subscription key desencriptada
-ClientConfigSchema.methods.getSubscriptionKey = async function() {
-  const decryptSubscriptionKey = require('../services/servicedxgpt').decryptSubscriptionKey;
-  return decryptSubscriptionKey(
-    this.subscription.encrypted,
-    this.subscription.iv,
-    this.subscription.tag
-  );
+// Método estático para buscar por subscriptionId
+ClientConfigSchema.statics.findBySubscriptionId = function(subscriptionId) {
+  return this.findOne({ subscriptionId });
+};
+
+// Método estático para buscar por cualquier identificador
+ClientConfigSchema.statics.findByAnyId = function(identifier) {
+  return this.findOne({
+    $or: [
+      { clientId: identifier },
+      { subscriptionId: identifier }
+    ]
+  });
 };
 
 module.exports = mongoose.model('ClientConfig', ClientConfigSchema); 

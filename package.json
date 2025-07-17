@@ -14,8 +14,10 @@
   "author": "LOA",
   "license": "MIT",
   "dependencies": {
+    "@azure-rest/ai-document-intelligence": "1.0.0-alpha.20240209.1",
     "@azure/service-bus": "^7.9.5",
     "@azure/storage-blob": "^12.16.0",
+    "@azure/web-pubsub": "^1.2.0",
     "applicationinsights": "^2.7.3",
     "async": "^2.6.4",
     "axios": "^1.7.7",
@@ -27,6 +29,7 @@
     "express-rate-limit": "^7.5.0",
     "js-tiktoken": "^1.0.12",
     "mongoose": "^8.13.2",
+    "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.10.1",
     "nodemailer-express-handlebars": "^6.1.2",
     "swagger-ui-express": "^5.0.1"

@@ -1,6 +1,7 @@
 node_modules
 dist
 config.js
+configold.js
 *.log
 logs/
 .env

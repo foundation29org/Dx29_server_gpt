@@ -11,7 +11,7 @@ const SupportSchema = new Schema({
   subscribe: { type: Boolean, default: false },
   date: { type: Date, default: Date.now },
   tenantId: String,
-  subscriptionKeyHash: String
+  subscriptionId: String
 });
 
 module.exports = mongoose.model('Support', SupportSchema);
