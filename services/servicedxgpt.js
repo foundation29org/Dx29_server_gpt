@@ -1134,6 +1134,11 @@ async function callInfoDisease(req, res) {
           // Procesar la respuesta JSON y convertir a HTML
           let processedContent = '';
           
+          // Definir sectionTitles fuera del bloque if/else para que esté disponible en ambos casos
+          let sectionTitles = {
+            source: 'Source:'
+          };
+          
           if (genomicRecommendations.hasRecommendations && genomicRecommendations.recommendations) {
             const data = genomicRecommendations.recommendations;
             
@@ -1143,85 +1148,215 @@ async function callInfoDisease(req, res) {
             
             if (noTestsFound) {
               // Caso: No hay pruebas genéticas disponibles
-              processedContent = '<p><strong>CONSULTATION RESULT:</strong></p>';
-              processedContent += '<p><strong>No specific genetic tests were found in the NHS directory for this condition.</strong></p>';
+              let noTestsLabels = {
+                consultationResult: 'CONSULTATION RESULT:',
+                noTestsFound: 'No specific genetic tests were found in the NHS directory for this condition.',
+                reason: 'Reason:',
+                alternativeRecommendations: 'ALTERNATIVE RECOMMENDATIONS:',
+                suggestedNextSteps: 'SUGGESTED NEXT STEPS:',
+                applicationProcess: 'Application process:',
+                specialConsiderations: 'Special considerations:',
+                consultGeneticist: 'Consult with a clinical geneticist for individualized assessment',
+                considerPathways: 'Consider whether the condition might qualify for testing through other pathways',
+                evaluateResearch: 'Evaluate if research or commercial tests are available',
+                reviewCriteria: 'Review if there are special eligibility criteria that might apply'
+              };
               
-              if (data.reason) {
-                processedContent += `<p><strong>Reason:</strong> ${data.reason}</p>`;
+              // Traducir etiquetas si es necesario
+              if (sanitizedData.detectedLang !== 'en') {
+                try {
+                  const labelsToTranslate = Object.values(noTestsLabels).concat([sectionTitles.source]);
+                  const translatedLabels = await Promise.all(
+                    labelsToTranslate.map(label => translateInvertWithRetry(label, sanitizedData.detectedLang))
+                  );
+                  
+                  // Actualizar las etiquetas traducidas
+                  Object.keys(noTestsLabels).forEach((key, index) => {
+                    noTestsLabels[key] = translatedLabels[index];
+                  });
+                  
+                  // Actualizar sectionTitles.source
+                  sectionTitles.source = translatedLabels[translatedLabels.length - 1];
+                  
+                } catch (translationError) {
+                  console.error('Translation error for no-tests labels:', translationError);
+                  insights.error({
+                    message: 'Error traduciendo etiquetas de no-tests',
+                    error: translationError.message,
+                    disease: sanitizedData.disease,
+                    tenantId: tenantId,
+                    subscriptionId: subscriptionId
+                  });
+                }
               }
               
-              processedContent += '<p><strong>ALTERNATIVE RECOMMENDATIONS:</strong></p>';
+              processedContent = `<p><strong>${noTestsLabels.consultationResult}</strong></p>`;
+              processedContent += `<p><strong>${noTestsLabels.noTestsFound}</strong></p>`;
+              
+              if (data.reason) {
+                processedContent += `<p><strong>${noTestsLabels.reason}</strong> ${data.reason}</p>`;
+              }
+              
+              processedContent += `<p><strong>${noTestsLabels.alternativeRecommendations}</strong></p>`;
               if (data.additionalInformation) {
                 processedContent += '<ul>';
-                processedContent += `<li><strong>Application process:</strong> ${data.additionalInformation.applicationProcess}</li>`;
-                processedContent += `<li><strong>Special considerations:</strong> ${data.additionalInformation.specialConsiderations}</li>`;
+                processedContent += `<li><strong>${noTestsLabels.applicationProcess}</strong> ${data.additionalInformation.applicationProcess}</li>`;
+                processedContent += `<li><strong>${noTestsLabels.specialConsiderations}</strong> ${data.additionalInformation.specialConsiderations}</li>`;
                 processedContent += '</ul>';
               }
               
-              processedContent += '<p><strong>SUGGESTED NEXT STEPS:</strong></p>';
+              processedContent += `<p><strong>${noTestsLabels.suggestedNextSteps}</strong></p>`;
               processedContent += '<ul>';
-              processedContent += '<li>Consult with a clinical geneticist for individualized assessment</li>';
-              processedContent += '<li>Consider whether the condition might qualify for testing through other pathways</li>';
-              processedContent += '<li>Evaluate if research or commercial tests are available</li>';
-              processedContent += '<li>Review if there are special eligibility criteria that might apply</li>';
+              processedContent += `<li>${noTestsLabels.consultGeneticist}</li>`;
+              processedContent += `<li>${noTestsLabels.considerPathways}</li>`;
+              processedContent += `<li>${noTestsLabels.evaluateResearch}</li>`;
+              processedContent += `<li>${noTestsLabels.reviewCriteria}</li>`;
               processedContent += '</ul>';
               
             } else {
               // Caso: Se encontraron pruebas genéticas
-              processedContent = '<p><strong>LIST OF RECOMMENDED TESTS:</strong></p>';
+              sectionTitles = {
+                listTitle: 'LIST OF RECOMMENDED TESTS:',
+                eligibilityTitle: 'ELIGIBILITY CRITERIA:',
+                additionalTitle: 'ADDITIONAL INFORMATION:',
+                source: 'Source:'
+              };
+              
+              let fieldLabels = {
+                test: 'test:',
+                testName: 'Test name:',
+                targetGenes: 'Target genes:',
+                testMethod: 'Test method:',
+                category: 'Category:',
+                documentSection: 'Section of the eligibility document:',
+                nhsCriteria: 'NHS specific criteria:',
+                specialties: 'Specialties that can request the test:',
+                applicationProcess: 'Application process:',
+                expectedResponseTimes: 'Expected response times:',
+                specialConsiderations: 'Special considerations:'
+              };
+              
+              // Traducir etiquetas si es necesario
+              if (sanitizedData.detectedLang !== 'en') {
+                try {
+                  const labelsToTranslate = Object.values(fieldLabels).concat(Object.values(sectionTitles));
+                  const translatedLabels = await Promise.all(
+                    labelsToTranslate.map(label => translateInvertWithRetry(label, sanitizedData.detectedLang))
+                  );
+                  
+                  // Actualizar las etiquetas traducidas
+                  const labelKeys = Object.keys(fieldLabels);
+                  const titleKeys = Object.keys(sectionTitles);
+                  
+                  labelKeys.forEach((key, index) => {
+                    fieldLabels[key] = translatedLabels[index];
+                  });
+                  
+                  titleKeys.forEach((key, index) => {
+                    sectionTitles[key] = translatedLabels[labelKeys.length + index];
+                  });
+                  
+                } catch (translationError) {
+                  console.error('Translation error for labels:', translationError);
+                  insights.error({
+                    message: 'Error traduciendo etiquetas genéticas',
+                    error: translationError.message,
+                    disease: sanitizedData.disease,
+                    tenantId: tenantId,
+                    subscriptionId: subscriptionId
+                  });
+                }
+              }
+              
+              processedContent = `<p><strong>${sectionTitles.listTitle}</strong></p>`;
               
               if (data.recommendedTests && data.recommendedTests.length > 0) {
                 processedContent += '<ul>';
                 data.recommendedTests.forEach(test => {
-                  processedContent += `<li><strong>test:</strong> ${test.testCode}</li>`;
-                  processedContent += `<li><strong>Test name:</strong> ${test.testName}</li>`;
-                  processedContent += `<li><strong>Target genes:</strong> ${test.targetGenes}</li>`;
-                  processedContent += `<li><strong>Test method:</strong> ${test.testMethod}</li>`;
-                  processedContent += `<li><strong>Category:</strong> ${test.category}</li>`;
+                  processedContent += `<li><strong>${fieldLabels.test}</strong> ${test.testCode}</li>`;
+                  processedContent += `<li><strong>${fieldLabels.testName}</strong> ${test.testName}</li>`;
+                  processedContent += `<li><strong>${fieldLabels.targetGenes}</strong> ${test.targetGenes}</li>`;
+                  processedContent += `<li><strong>${fieldLabels.testMethod}</strong> ${test.testMethod}</li>`;
+                  processedContent += `<li><strong>${fieldLabels.category}</strong> ${test.category}</li>`;
                 });
                 processedContent += '</ul>';
               }
               
-              processedContent += '<p><strong>ELIGIBILITY CRITERIA:</strong></p>';
+              processedContent += `<p><strong>${sectionTitles.eligibilityTitle}</strong></p>`;
               if (data.eligibilityCriteria) {
                 processedContent += '<ul>';
-                processedContent += `<li><strong>Section of the eligibility document:</strong> ${data.eligibilityCriteria.documentSection}</li>`;
-                processedContent += `<li><strong>NHS specific criteria:</strong> ${data.eligibilityCriteria.nhsCriteria}</li>`;
+                processedContent += `<li><strong>${fieldLabels.documentSection}</strong> ${data.eligibilityCriteria.documentSection}</li>`;
+                processedContent += `<li><strong>${fieldLabels.nhsCriteria}</strong> ${data.eligibilityCriteria.nhsCriteria}</li>`;
                 if (data.eligibilityCriteria.specialties && data.eligibilityCriteria.specialties.length > 0) {
-                  processedContent += `<li><strong>Specialties that can request the test:</strong> ${data.eligibilityCriteria.specialties.join(', ')}</li>`;
+                  processedContent += `<li><strong>${fieldLabels.specialties}</strong> ${data.eligibilityCriteria.specialties.join(', ')}</li>`;
                 }
                 processedContent += '</ul>';
               }
               
-              processedContent += '<p><strong>ADDITIONAL INFORMATION:</strong></p>';
+              processedContent += `<p><strong>${sectionTitles.additionalTitle}</strong></p>`;
               if (data.additionalInformation) {
                 processedContent += '<ul>';
-                processedContent += `<li><strong>Application process:</strong> ${data.additionalInformation.applicationProcess}</li>`;
-                processedContent += `<li><strong>Expected response times:</strong> ${data.additionalInformation.expectedResponseTimes}</li>`;
-                processedContent += `<li><strong>Special considerations:</strong> ${data.additionalInformation.specialConsiderations}</li>`;
+                processedContent += `<li><strong>${fieldLabels.applicationProcess}</strong> ${data.additionalInformation.applicationProcess}</li>`;
+                processedContent += `<li><strong>${fieldLabels.expectedResponseTimes}</strong> ${data.additionalInformation.expectedResponseTimes}</li>`;
+                processedContent += `<li><strong>${fieldLabels.specialConsiderations}</strong> ${data.additionalInformation.specialConsiderations}</li>`;
                 processedContent += '</ul>';
               }
             }
             
-            processedContent += `<p>Source: ${data.source || 'NHS Genomic Test Directory'}</p>`;
-          } else {
-            processedContent = `<p><strong>Error</strong></p><p>${genomicRecommendations.message || 'Unable to generate recommendations at this time. Please consult with a clinical geneticist.'}</p>`;
-          }
-
-          // Traducir si es necesario
-          if (sanitizedData.detectedLang !== 'en') {
-            try {
-              processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
-            } catch (translationError) {
-              console.error('Translation error:', translationError);
-              insights.error({
-                message: 'Error traduciendo recomendaciones genéticas',
-                error: translationError.message,
-                disease: sanitizedData.disease,
-                tenantId: tenantId,
-                subscriptionId: subscriptionId
-              });
+            processedContent += `<p>${sectionTitles.source} ${data.source || 'NHS Genomic Test Directory'}</p>`;
+            processedContent += `<p><img src="assets/img/home/nhs.png" alt="NHS Logo" style="max-width: 200px; height: auto; margin-top: 10px;"></p>`;
+            
+            // Añadir mensaje informativo para todos los usuarios
+            let disclaimerMessage = 'NHS genomic test information is only applicable within the United Kingdom. Please consult with local medical services for equivalent options in your country.';
+            
+            // Traducir si es necesario
+            if (sanitizedData.detectedLang !== 'en') {
+              try {
+                disclaimerMessage = await translateInvertWithRetry(disclaimerMessage, sanitizedData.detectedLang);
+              } catch (translationError) {
+                console.error('Translation error for disclaimer message:', translationError);
+                insights.error({
+                  message: 'Error traduciendo mensaje de disclaimer',
+                  error: translationError.message,
+                  disease: sanitizedData.disease,
+                  tenantId: tenantId,
+                  subscriptionId: subscriptionId
+                });
+              }
             }
+            
+            processedContent += `<p style="margin-top: 15px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #007bff; font-style: italic;">${disclaimerMessage}</p>`;
+          } else {
+            let errorMessage = 'Unable to generate recommendations at this time. Please consult with a clinical geneticist.';
+            
+            // Traducir si es necesario
+            if (sanitizedData.detectedLang !== 'en') {
+              try {
+                errorMessage = await translateInvertWithRetry(errorMessage, sanitizedData.detectedLang);
+              } catch (translationError) {
+                console.error('Translation error for error message:', translationError);
+                insights.error({
+                  message: 'Error traduciendo mensaje de error',
+                  error: translationError.message,
+                  disease: sanitizedData.disease,
+                  tenantId: tenantId,
+                  subscriptionId: subscriptionId
+                });
+              }
+            }
+            
+            let errorTitle = 'Error';
+            
+            // Traducir título si es necesario
+            if (sanitizedData.detectedLang !== 'en') {
+              try {
+                errorTitle = await translateInvertWithRetry(errorTitle, sanitizedData.detectedLang);
+              } catch (translationError) {
+                console.error('Translation error for error title:', translationError);
+              }
+            }
+            
+            processedContent = `<p><strong>${errorTitle}</strong></p><p>${genomicRecommendations.message || errorMessage}</p>`;
           }
 
           return res.status(200).send({
