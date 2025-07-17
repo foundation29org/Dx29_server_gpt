@@ -15,6 +15,7 @@ const queueService = require('./queueService');
 const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const OpinionStats = require('../models/opinionstats');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
+const azureAIGenomicService = require('./azureAIGenomicService');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -967,8 +968,8 @@ function validateQuestionRequest(data) {
 
   if (data.questionType === undefined) {
     errors.push({ field: 'questionType', reason: 'Field is required' });
-  } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 4) {
-    errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 4' });
+  } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 5) {
+    errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 5' });
   }
 
   if (!data.disease) {
@@ -997,10 +998,10 @@ function validateQuestionRequest(data) {
     errors.push({ field: 'detectedLang', reason: 'Must be a 2-character language code' });
   }
 
-  // Validar medicalDescription si questionType es 3 o 4
-  if ([3, 4].includes(data.questionType)) {
+  // Validar medicalDescription si questionType es 3, 4 o 5
+  if ([3, 4, 5].includes(data.questionType)) {
     if (!data.medicalDescription) {
-      errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3 or 4' });
+      errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3, 4 or 5' });
     } else if (typeof data.medicalDescription !== 'string') {
       errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
     } else if (data.medicalDescription.length < 10) {
@@ -1027,7 +1028,7 @@ function validateQuestionRequest(data) {
       }
     }
   }
-  if ([3, 4].includes(data.questionType) && data.medicalDescription) {
+  if ([3, 4, 5].includes(data.questionType) && data.medicalDescription) {
     const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
     for (const { pattern, reason } of suspiciousPatterns) {
       if (pattern.test(normalizedMedicalDescription)) {
@@ -1103,6 +1104,154 @@ async function callInfoDisease(req, res) {
       case 4:
         prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
         break;
+      case 5:
+        // Caso especial para pruebas genéticas del NHS - usar Azure AI Studio
+        try {
+          const genomicRecommendations = await azureAIGenomicService.generateGenomicTestRecommendations(
+            sanitizedData.disease, 
+            sanitizedData.medicalDescription
+          );
+
+          // Guardar información para seguimiento
+          /*if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
+            let infoTrack = {
+              value: sanitizedData.disease,
+              valueEnglish: sanitizedData.disease,
+              myuuid: sanitizedData.myuuid,
+              operation: 'nhs_genomic_tests',
+              lang: sanitizedData.detectedLang || 'en',
+              response: genomicRecommendations,
+              header_language: header_language,
+              timezone: sanitizedData.timezone,
+              model: 'azure_ai_studio',
+              tenantId: tenantId,
+              subscriptionId: subscriptionId,
+              iframeParams: sanitizedData.iframeParams || {}
+            };
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'nhs_genomic');
+          }*/
+
+          // Procesar la respuesta JSON y convertir a HTML
+          let processedContent = '';
+          
+          if (genomicRecommendations.hasRecommendations && genomicRecommendations.recommendations) {
+            const data = genomicRecommendations.recommendations;
+            
+            // Verificar si no se encontraron pruebas
+            const noTestsFound = data.noTestsFound === true || 
+                                (data.recommendedTests && data.recommendedTests.length === 0);
+            
+            if (noTestsFound) {
+              // Caso: No hay pruebas genéticas disponibles
+              processedContent = '<p><strong>CONSULTATION RESULT:</strong></p>';
+              processedContent += '<p><strong>No specific genetic tests were found in the NHS directory for this condition.</strong></p>';
+              
+              if (data.reason) {
+                processedContent += `<p><strong>Reason:</strong> ${data.reason}</p>`;
+              }
+              
+              processedContent += '<p><strong>ALTERNATIVE RECOMMENDATIONS:</strong></p>';
+              if (data.additionalInformation) {
+                processedContent += '<ul>';
+                processedContent += `<li><strong>Application process:</strong> ${data.additionalInformation.applicationProcess}</li>`;
+                processedContent += `<li><strong>Special considerations:</strong> ${data.additionalInformation.specialConsiderations}</li>`;
+                processedContent += '</ul>';
+              }
+              
+              processedContent += '<p><strong>SUGGESTED NEXT STEPS:</strong></p>';
+              processedContent += '<ul>';
+              processedContent += '<li>Consult with a clinical geneticist for individualized assessment</li>';
+              processedContent += '<li>Consider whether the condition might qualify for testing through other pathways</li>';
+              processedContent += '<li>Evaluate if research or commercial tests are available</li>';
+              processedContent += '<li>Review if there are special eligibility criteria that might apply</li>';
+              processedContent += '</ul>';
+              
+            } else {
+              // Caso: Se encontraron pruebas genéticas
+              processedContent = '<p><strong>LIST OF RECOMMENDED TESTS:</strong></p>';
+              
+              if (data.recommendedTests && data.recommendedTests.length > 0) {
+                processedContent += '<ul>';
+                data.recommendedTests.forEach(test => {
+                  processedContent += `<li><strong>test:</strong> ${test.testCode}</li>`;
+                  processedContent += `<li><strong>Test name:</strong> ${test.testName}</li>`;
+                  processedContent += `<li><strong>Target genes:</strong> ${test.targetGenes}</li>`;
+                  processedContent += `<li><strong>Test method:</strong> ${test.testMethod}</li>`;
+                  processedContent += `<li><strong>Category:</strong> ${test.category}</li>`;
+                });
+                processedContent += '</ul>';
+              }
+              
+              processedContent += '<p><strong>ELIGIBILITY CRITERIA:</strong></p>';
+              if (data.eligibilityCriteria) {
+                processedContent += '<ul>';
+                processedContent += `<li><strong>Section of the eligibility document:</strong> ${data.eligibilityCriteria.documentSection}</li>`;
+                processedContent += `<li><strong>NHS specific criteria:</strong> ${data.eligibilityCriteria.nhsCriteria}</li>`;
+                if (data.eligibilityCriteria.specialties && data.eligibilityCriteria.specialties.length > 0) {
+                  processedContent += `<li><strong>Specialties that can request the test:</strong> ${data.eligibilityCriteria.specialties.join(', ')}</li>`;
+                }
+                processedContent += '</ul>';
+              }
+              
+              processedContent += '<p><strong>ADDITIONAL INFORMATION:</strong></p>';
+              if (data.additionalInformation) {
+                processedContent += '<ul>';
+                processedContent += `<li><strong>Application process:</strong> ${data.additionalInformation.applicationProcess}</li>`;
+                processedContent += `<li><strong>Expected response times:</strong> ${data.additionalInformation.expectedResponseTimes}</li>`;
+                processedContent += `<li><strong>Special considerations:</strong> ${data.additionalInformation.specialConsiderations}</li>`;
+                processedContent += '</ul>';
+              }
+            }
+            
+            processedContent += `<p>Source: ${data.source || 'NHS Genomic Test Directory'}</p>`;
+          } else {
+            processedContent = `<p><strong>Error</strong></p><p>${genomicRecommendations.message || 'Unable to generate recommendations at this time. Please consult with a clinical geneticist.'}</p>`;
+          }
+
+          // Traducir si es necesario
+          if (sanitizedData.detectedLang !== 'en') {
+            try {
+              processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
+            } catch (translationError) {
+              console.error('Translation error:', translationError);
+              insights.error({
+                message: 'Error traduciendo recomendaciones genéticas',
+                error: translationError.message,
+                disease: sanitizedData.disease,
+                tenantId: tenantId,
+                subscriptionId: subscriptionId
+              });
+            }
+          }
+
+          return res.status(200).send({
+            result: 'success',
+            data: {
+              type: 'general',
+              content: processedContent
+            }
+          });
+
+        } catch (error) {
+          console.error('Error en Azure AI Genomic service:', error);
+          insights.error({
+            message: 'Error en Azure AI Genomic service',
+            error: error.message,
+            disease: sanitizedData.disease,
+            tenantId: tenantId,
+            subscriptionId: subscriptionId
+          });
+
+          const errorMessage = "Unable to generate recommendations at this time. Please consult with a clinical geneticist.";
+
+          return res.status(200).send({
+            result: 'success',
+            data: {
+              type: 'general',
+              content: `<p><strong>Error</strong></p><p>${errorMessage}</p>`
+            }
+          });
+        }
       default:
         return res.status(400).send({ result: "error", message: "Invalid question type" });
     }

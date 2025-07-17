@@ -104,6 +104,13 @@ docker-compose up app-dev
 docker-compose up app-prod
 ```
 
+Si en ocasiones falla, hacer:
+
+```bash
+docker-compose down
+docker-compose build --no-cache
+```
+
 #### Image Building
 
 ```bash

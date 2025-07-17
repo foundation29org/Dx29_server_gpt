@@ -48,8 +48,8 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
         throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
-    var tempUrl = version === 'v2' ? 
-      `${clientPrefix}datav2/${url}` : 
+    var tempUrl = version === 'v3' ? 
+      `${clientPrefix}datav3/${url}` : 
       `${clientPrefix}data/${url}`;
     
     var result = await createBlob(tempUrl, info, fileNameNcr);
