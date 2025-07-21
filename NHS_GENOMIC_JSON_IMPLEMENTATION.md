@@ -61,7 +61,7 @@ Se ha modificado el servicio de genómica NHS para devolver respuestas en format
 }
 ```
 
-### 2. Servicio DxGPT (`services/servicedxgpt.js`)
+### 2. Servicio DxGPT (`services/helpDiagnose.js`)
 
 **Cambios realizados:**
 - Modificado el caso 5 en `callInfoDisease` para procesar JSON en lugar de HTML

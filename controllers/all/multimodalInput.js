@@ -2,13 +2,13 @@ const multer = require('multer');
 const { default: createDocumentIntelligenceClient, getLongRunningPoller, isUnexpected } = require("@azure-rest/ai-document-intelligence");
 const config = require('../../config');
 const axios = require('axios');
-const serviceDxGPTCtrl = require('../../services/servicedxgpt');
+const summarizeCtrl = require('../../services/summarizeService')
 const blobFiles = require('../../services/blobFiles');
 const insights = require('../../services/insights');
 const blobOpenDx29Ctrl = require('../../services/blobOpenDx29');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
-const { calculatePrice, formatCost } = require('../../services/servicedxgpt');
+const { calculatePrice, formatCost } = require('../../services/costUtils');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -44,7 +44,6 @@ const upload = multer({
     { name: 'image', maxCount: 1 }
 ]);
 
-// Función para obtener cabeceras (igual que en servicedxgpt.js)
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
@@ -711,7 +710,7 @@ const processMultimodalInput = async (req, res) => {
             };
 
             // Llamar directamente al servicio de summarize
-            await serviceDxGPTCtrl.summarize(mockReq, mockRes);
+            await summarizeCtrl.summarize(mockReq, mockRes);
         });
     } catch (error) {
         console.error('Error en processMultimodalInput:', error);

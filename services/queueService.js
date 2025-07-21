@@ -618,8 +618,8 @@ class QueueService {
   async processMessageWithRetry(message, region, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const servicedxgpt = require('./servicedxgpt');
-        const result = await servicedxgpt.processAIRequest(message.body, message.body.requestInfo, message.body.model, region);
+        const helpDiagnose = require('./helpDiagnose');
+        const result = await helpDiagnose.processAIRequest(message.body, message.body.requestInfo, message.body.model, region);
         return result;
       } catch (error) {
         if (!this.isRecoverableError(error) || attempt === maxRetries) {
