@@ -154,3 +154,46 @@ npm run swagger-ui
 This will start a server at http://localhost:3000 dedicated to displaying your API documentation.
 
 This specification is necessary to integrate the API with Azure API Management (APIM) and generate the developer portal.
+
+## Cost Tracking System
+
+El sistema de cost tracking permite calcular y guardar el costo de las operaciones de IA de manera simplificada:
+
+### Operaciones Soportadas
+- `diagnose` - Diagnóstico principal
+- `info_disease` - Información de enfermedades
+- `follow_up_questions` - Preguntas de seguimiento
+- `er_questions` - Preguntas de emergencia
+- `process_follow_up` - Procesamiento de respuestas de seguimiento
+- `summarize` - Resumen de descripciones médicas
+- `multimodal_detect_type` - Detección de tipo de imagen médica
+- `multimodal_process_image` - Procesamiento de imágenes médicas
+
+### Enfoque Simplificado
+- **Solo llamada AI**: Se trackea únicamente la llamada principal a IA
+- **Sin traducciones**: Las traducciones no se trackean ya que no tienen costo directo
+- **Guardado en éxito**: Los costos se guardan solo cuando la operación es exitosa
+
+### Modelos Soportados
+- `gpt4o` - GPT-4 Omni (precio estándar)
+- `o3` - Claude 3.5 Sonnet (precio estándar)
+- `azure_ai_studio` - Azure AI Studio con file search (precios específicos)
+
+### API Endpoints
+
+#### Obtener Estadísticas de Costos
+```
+GET /costs/stats?tenantId={tenantId}&startDate={startDate}&endDate={endDate}
+```
+
+#### Obtener Estadísticas por Etapa
+```
+GET /costs/stage-stats?tenantId={tenantId}&startDate={startDate}&endDate={endDate}
+```
+
+### Pruebas
+Para probar el sistema de cost tracking:
+
+```bash
+node test-cost-tracking-simplified.js
+```

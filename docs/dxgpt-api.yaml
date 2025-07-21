@@ -865,7 +865,17 @@ paths:
         - Output is formatted as HTML with clear sections for matching and non-matching symptoms
         - Useful for explaining diagnostic reasoning
         
-        Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
+        **Type 5: NHS Genomic Test Recommendations**
+        - Requires medicalDescription parameter with the patient's symptoms
+        - Provides recommendations for appropriate NHS genetic tests based on the disease and patient description
+        - Uses Azure AI Studio to search the NHS Genomic Test Directory
+        - Returns structured information including test codes, names, target genes, methods, and eligibility criteria
+        - Includes additional information about application processes and response times
+        - Output is formatted as HTML with organized sections for tests, eligibility, and additional information
+        - Includes a disclaimer that NHS tests are only applicable within the United Kingdom
+        - Useful for UK healthcare professionals to identify appropriate genetic testing pathways
+        
+        Note that questionTypes 3, 4, and 5 require the medicalDescription parameter to be provided.
         
         **Response Format:** 
         - For questionType 3: Returns a structured JSON response with type "differential" and an array of symptom objects
