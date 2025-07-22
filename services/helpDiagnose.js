@@ -181,10 +181,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     if (clinicalScenarioResult !== 'true') {
       insights.error({
         message: 'Clinical scenario check failed',
-        requestData: data,
+        requestData: data.description,
         model: model,
-        response: clinicalScenarioResponse,
+        response: clinicalScenarioResponse.data.choices,
         operation: 'clinical-scenario-check',
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId
       });
       let infoErrorClinicalScenario = {
         body: data,
@@ -644,20 +647,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
             success: false
           });
         }
-
-        // Etapa 2: Expansión
-        if (costTracking.etapa2_expansion.cost > 0) {
-          stages.push({
-            name: 'ai_call',
-            cost: costTracking.etapa2_expansion.cost,
-            tokens: costTracking.etapa2_expansion.tokens,
-            model: model,
-            duration: 0,
-            success: false
-          });
-        }
-
-        // Etapa 3: Anonimización
+        // Etapa 2: Anonimización
         if (costTracking.etapa2_anonimizacion.cost > 0) {
           stages.push({
             name: 'anonymization',
