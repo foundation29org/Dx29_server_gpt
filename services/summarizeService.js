@@ -1,4 +1,4 @@
-const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry } = require('./aiUtils');
+const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData } = require('./aiUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const blobOpenDx29Ctrl = require('./blobOpenDx29');
@@ -155,13 +155,19 @@ async function summarize(req, res) {
 
     // 3. Llamar a AI con failover
     let aiStartTime = Date.now();
-    let endpoint = `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`;
-    const diagnoseResponse = await axios.post(endpoint, requestBody, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': ApiManagementKey,
-      }
-    });
+    //let endpoint = `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`;
+    //const diagnoseResponse = await axios.post(endpoint, requestBody, {
+    //  headers: {
+    //    'Content-Type': 'application/json',
+    //    'Ocp-Apim-Subscription-Key': ApiManagementKey,
+    //  }
+    //});
+    const dataRequest = {
+      tenantId: req.body.tenantId,
+      subscriptionId: req.body.subscriptionId,
+      myuuid: req.body.myuuid
+    };
+    const diagnoseResponse = await callAiWithFailover(requestBody, req.body.timezone, 'summarizegpt4omini', 0, dataRequest);
     let aiEndTime = Date.now();
 
     if (!diagnoseResponse.data.choices[0].message.content) {

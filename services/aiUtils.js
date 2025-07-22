@@ -7,6 +7,37 @@ const insights = require('./insights');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 
+
+function sanitizeAiData(data) {
+  return {
+    ...data,
+    description: sanitizeInput(data.description),
+    diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
+    myuuid: data.myuuid.trim(),
+    lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
+    timezone: data.timezone?.trim() || '', // Manejar caso donde timezone es undefined
+    iframeParams: sanitizeIframeParams(data.iframeParams) // Sanitizar iframeParams
+  };
+}
+
+function sanitizeIframeParams(iframeParams) {
+  if (!iframeParams || typeof iframeParams !== 'object') {
+    return {};
+  }
+
+  const sanitized = {};
+  const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+
+  for (const field of validFields) {
+    if (iframeParams[field] && typeof iframeParams[field] === 'string') {
+      sanitized[field] = sanitizeInput(iframeParams[field]);
+    }
+  }
+
+  return sanitized;
+}
+
+
 function sanitizeInput(input) {
   // Eliminar caracteres especiales y patrones potencialmente peligrosos
   return input
@@ -92,6 +123,66 @@ const endpointsMap = {
     other: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+    ]
+  },
+  gpt4omini: {
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`
+    ],
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+    ]
+  },
+  summarizegpt4omini: {
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`
+    ],
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
+      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
     ]
   }
 };
@@ -198,6 +289,7 @@ async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryC
   }
 
 module.exports = {
+  sanitizeAiData,
   sanitizeInput,
   getEndpointsByTimezone,
   callAiWithFailover,

@@ -12,7 +12,8 @@ const {
   detectLanguageWithRetry,
   translateTextWithRetry,
   translateInvertWithRetry,
-  sanitizeInput
+  sanitizeInput,
+  sanitizeAiData
 } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 
@@ -22,34 +23,6 @@ const { calculatePrice, formatCost } = require('./costUtils');
 
 // Función para sanitizar parámetros del iframe que pueden incluir información adicional
 // para tenants específicos como centro médico, ámbito, especialidad, etc.
-function sanitizeIframeParams(iframeParams) {
-  if (!iframeParams || typeof iframeParams !== 'object') {
-    return {};
-  }
-
-  const sanitized = {};
-  const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
-  
-  for (const field of validFields) {
-    if (iframeParams[field] && typeof iframeParams[field] === 'string') {
-      sanitized[field] = sanitizeInput(iframeParams[field]);
-    }
-  }
-  
-  return sanitized;
-}
-
-function sanitizeAiData(data) {
-  return {
-    ...data,
-    description: sanitizeInput(data.description),
-    diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
-    myuuid: data.myuuid.trim(),
-    lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
-    timezone: data.timezone?.trim() || '', // Manejar caso donde timezone es undefined
-    iframeParams: sanitizeIframeParams(data.iframeParams) // Sanitizar iframeParams
-  };
-}
 
 // Extraer la lógica principal a una función reutilizable
 async function processAIRequest(data, requestInfo = null, model = 'gpt4o', region = null) {
@@ -94,19 +67,20 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o', userId = null, region = null) {
   const pubsubService = userId ? require('./pubsubService') : null;
-  
+
   // Inicializar objeto para rastrear costos de cada etapa
   const costTracking = {
+    etapa0_clinical_check: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_diagnosticos: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
-    etapa2_expansion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
-    etapa3_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     total: { cost: 0, tokens: { input: 0, output: 0, total: 0 } }
   };
-  
+
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
-  
+
   try {
     // 1. Detectar idioma y traducir a inglés si es necesario
+    console.log('data.description', data.description)
     let englishDescription = data.description;
     let detectedLanguage = data.lang;
     let englishDiseasesList = data.diseases_list;
@@ -169,25 +143,128 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       //throw translationError;
     }
 
-    // 2. FASE 1: Obtener solo los nombres de los diagnósticos
-    const namesOnlyPrompt = englishDiseasesList ?
-      PROMPTS.diagnosis.namesOnlyExcludingPrevious
+    // 1.5. Verificar si el input es un escenario clínico antes de continuar
+    const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
+    const clinicalScenarioRequest = {
+      messages: [{ role: "user", content: clinicalScenarioPrompt }],
+      temperature: 0,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+    let dataRequest = {
+      tenantId: data.tenantId,
+      subscriptionId: data.subscriptionId,
+      myuuid: data.myuuid
+    };
+    const clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+    let clinicalScenarioCost = null;
+    let clinicalScenarioResult = '';
+    if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
+      clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
+      clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt-4o-mini') : null;
+      if (clinicalScenarioCost) {
+        costTracking.etapa0_clinical_check = {
+          cost: clinicalScenarioCost.totalCost,
+          tokens: {
+            input: clinicalScenarioCost.inputTokens,
+            output: clinicalScenarioCost.outputTokens,
+            total: clinicalScenarioCost.totalTokens
+          }
+        };
+        costTracking.total.cost += clinicalScenarioCost.totalCost;
+        costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
+        costTracking.total.tokens.output += clinicalScenarioCost.outputTokens;
+        costTracking.total.tokens.total += clinicalScenarioCost.totalTokens;
+      }
+    }
+    if (clinicalScenarioResult !== 'true') {
+      insights.error({
+        message: 'Clinical scenario check failed',
+        requestData: data,
+        model: model,
+        response: clinicalScenarioResponse,
+        operation: 'clinical-scenario-check',
+      });
+      let infoErrorClinicalScenario = {
+        body: data,
+        error: clinicalScenarioResult,
+        type: 'CLINICAL_SCENARIO_CHECK_FAILED',
+        detectedLanguage: detectedLanguage || 'unknown',
+        model: model,
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId
+      };
+      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorClinicalScenario, data.tenantId, data.subscriptionId);
+      try {
+        serviceEmail.sendMailErrorGPTIP(
+          data.lang,
+          data.description,
+          infoErrorClinicalScenario,
+          requestInfo
+        );
+      } catch (emailError) {
+        console.log('Fail sending email');
+        insights.error(emailError);
+      }
+
+      // Guardar costos si corresponde
+      const stages = [];
+      if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
+        stages.push({
+          name: 'clinical_check',
+          cost: costTracking.etapa0_clinical_check.cost,
+          tokens: costTracking.etapa0_clinical_check.tokens,
+          model: 'gpt-4o-mini',
+          duration: 0,
+          success: true
+        });
+      }
+      try {
+        await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
+      } catch (costError) {
+        console.error('❌ Error guardando costos en DB:', costError.message);
+        insights.error({
+          message: 'Error guardando costos en DB',
+          error: costError.message,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+      }
+      return {
+        result: 'success',
+        data: [],
+        anonymization: {
+          hasPersonalInfo: false,
+          anonymizedText: '',
+          anonymizedTextHtml: ''
+        },
+        detectedLang: detectedLanguage,
+        model: model,
+        costTracking: costTracking
+      };
+    }
+
+    // 2. FASE ÚNICA: Obtener diagnósticos completos en una sola llamada
+    
+    const helpDiagnosePrompt = englishDiseasesList ?
+      PROMPTS.diagnosis.withDiseases
         .replace("{{description}}", englishDescription)
         .replace("{{previous_diagnoses}}", englishDiseasesList) :
-      PROMPTS.diagnosis.namesOnly
+      PROMPTS.diagnosis.withoutDiseases
         .replace("{{description}}", englishDescription);
-    console.log('Calling diseases')
+    console.log('Calling IA for full diagnoses')
     let requestBody;
-
     if (model === 'o3') {
-      // Formato específico para o3
       requestBody = {
         model: "o3-dxgpt",
         input: [
           {
             role: "user",
             content: [
-              { type: "input_text", text: namesOnlyPrompt }
+              { type: "input_text", text: helpDiagnosePrompt }
             ]
           }
         ],
@@ -202,8 +279,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         }
       };
     } else {
-      // Formato para gpt4o
-      const messages = [{ role: "user", content: namesOnlyPrompt }];
+      const messages = [{ role: "user", content: helpDiagnosePrompt }];
       requestBody = {
         messages
       };
@@ -215,35 +291,28 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       }
     }
 
-    let dataRequest = {
-      tenantId: data.tenantId,
-      subscriptionId: data.subscriptionId,
-      myuuid: data.myuuid
-    }
-    const namesResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+    const aiResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
     let usage = null;
 
-    // Progreso: primera fase de IA completada
+    // Progreso: IA completada
     if (pubsubService) {
-      await pubsubService.sendProgress(userId, 'ai_details', 'Getting diagnosis details...', 60);
-    }
-    
-    // Procesar la respuesta de nombres según el modelo
-    let namesResponseText;
-    if (model === 'o3') {
-      // Formato de respuesta para o3
-      usage = namesResponse.data.usage;
-      
-      namesResponseText = namesResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
-    } else {
-      // Formato de respuesta para gpt4o
-      usage = namesResponse.data.usage;
-      namesResponseText = namesResponse.data.choices[0].message.content;
+      await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
     }
 
-    console.log('usage', namesResponse.data.usage);
-    
-    // Calcular costos de la Etapa 1: Generar 5 diagnósticos
+    // Procesar la respuesta según el modelo
+    let aiResponseText;
+    if (model === 'o3') {
+      usage = aiResponse.data.usage;
+      aiResponseText = aiResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
+    } else {
+      usage = aiResponse.data.usage;
+      aiResponseText = aiResponse.data.choices[0].message.content;
+    }
+
+    console.log('usage', aiResponse.data.usage);
+    console.log('aiResponseText', aiResponseText);
+
+    // Calcular costos de la Etapa 1: Diagnósticos completos
     if (usage) {
       const etapa1Cost = calculatePrice(usage, model);
       costTracking.etapa1_diagnosticos = {
@@ -258,53 +327,108 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       costTracking.total.tokens.input += etapa1Cost.inputTokens;
       costTracking.total.tokens.output += etapa1Cost.outputTokens;
       costTracking.total.tokens.total += etapa1Cost.totalTokens;
-      
       console.log(`💰 Etapa 1 - Diagnósticos: ${formatCost(etapa1Cost.totalCost)} (${etapa1Cost.totalTokens} tokens)`);
     }
-    console.log('namesResponseText', namesResponseText);
 
-    if (!namesResponseText) {
+    if (!aiResponseText) {
       insights.error({
-        message: "No response from AI for names",
+        message: "No response from AI for diagnoses",
         requestData: data,
         model: model,
-        response: namesResponse,
-        operation: 'diagnosis-names',
+        response: aiResponse,
+        operation: 'diagnosis-full',
         myuuid: data.myuuid,
         tenantId: data.tenantId,
         subscriptionId: data.subscriptionId
       });
-      throw new Error("No response from AI for names");
+      throw new Error("No response from AI for diagnoses");
     }
 
-    // Parsear los nombres de diagnósticos
-    let diagnosisNames;
+    // Parsear la respuesta de diagnósticos completos
+    let parsedResponse = [];
+    let parsedResponseEnglish;
     try {
       // Limpiar la respuesta para asegurar que es un JSON válido
-      const cleanResponse = namesResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
-      diagnosisNames = JSON.parse(cleanResponse);
-
-      if (!Array.isArray(diagnosisNames)) {
+      let cleanResponse = aiResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
+      cleanResponse = cleanResponse.replace(/^```\s*|\s*```$/g, '');
+      parsedResponse = JSON.parse(cleanResponse);
+      parsedResponseEnglish = JSON.parse(cleanResponse);
+      if (!Array.isArray(parsedResponse)) {
         throw new Error('Response is not an array');
       }
-
-      // Validar que todos los elementos son strings
-      for (let i = 0; i < diagnosisNames.length; i++) {
-        if (typeof diagnosisNames[i] !== 'string' || diagnosisNames[i].trim() === '') {
-          throw new Error(`Diagnosis name at index ${i} is not a valid string`);
+      // Validar que todos los elementos tienen los campos requeridos
+      const requiredFields = ['diagnosis', 'description', 'symptoms_in_common', 'symptoms_not_in_common'];
+      for (let i = 0; i < parsedResponse.length; i++) {
+        const item = parsedResponse[i];
+        if (!item || typeof item !== 'object') {
+          throw new Error(`Item at index ${i} is not an object`);
+        }
+        for (const field of requiredFields) {
+          if (!item.hasOwnProperty(field)) {
+            throw new Error(`Missing required field '${field}' in item at index ${i}`);
+          }
+        }
+        if (!Array.isArray(item.symptoms_in_common)) {
+          throw new Error(`'symptoms_in_common' in item at index ${i} is not an array`);
+        }
+        if (!Array.isArray(item.symptoms_not_in_common)) {
+          throw new Error(`'symptoms_not_in_common' in item at index ${i} is not an array`);
+        }
+        if (typeof item.diagnosis !== 'string' || item.diagnosis.trim() === '') {
+          throw new Error(`'diagnosis' in item at index ${i} is not a valid string`);
+        }
+        if (typeof item.description !== 'string' || item.description.trim() === '') {
+          throw new Error(`'description' in item at index ${i} is not a valid string`);
         }
       }
     } catch (parseError) {
       insights.error({
-        message: "Failed to parse diagnosis names",
+        message: "Failed to parse diagnosis output",
         error: parseError.message,
-        rawResponse: namesResponseText,
-        phase: 'names-parsing',
+        rawResponse: aiResponseText,
+        phase: 'parsing',
         model: model,
         requestData: data
       });
-      // throw parseError;
-      diagnosisNames = [];
+      parsedResponse = [];
+      if (requestInfo) {
+        let infoError = {
+          myuuid: data.myuuid,
+          operation: 'diagnosis-full',
+          lang: data.lang,
+          description: data.description,
+          error: parseError,
+          model: model,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId,
+          iframeParams: data.iframeParams || {}
+        };
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionId);
+        try {
+          await serviceEmail.sendMailErrorGPTIP(
+            data.lang,
+            data.description,
+            infoError,
+            requestInfo
+          );
+        } catch (emailError) {
+          console.log('Fail sending email');
+          insights.error(emailError);
+        }
+      }
+      //throw parseError;
+      return {
+        result: 'success',
+        data: [],
+        anonymization: {
+          hasPersonalInfo: false,
+          anonymizedText: '',
+          anonymizedTextHtml: ''
+        },
+        detectedLang: detectedLanguage,
+        model: model,
+        costTracking: costTracking
+      };
     }
 
     //vars for anonymization
@@ -313,279 +437,35 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       anonymizedText: '',
       htmlText: ''
     };
-
     let anonymizedDescription = '';
     let anonymizedDescriptionEnglish = '';
     let hasPersonalInfo = false;
-    let parsedResponse = [];
-    let parsedResponseEnglish;
 
-    if (diagnosisNames.length > 0) {
-      console.log('Calling details')
-      // 3. FASE 2: Obtener detalles para todos los diagnósticos en una sola llamada
-      // Crear un prompt que maneje múltiples diagnósticos usando detailsForDiagnosis como base
-      const detailsPrompt = PROMPTS.diagnosis.detailsForMultipleDiagnoses
-        .replace("{{description}}", englishDescription)
-        .replace("{{diagnoses}}", diagnosisNames.join(', '));
-
-      // Para la Fase 2, usar solo gpt4o para detailsForMultipleDiagnoses
-      const messages = [{ role: "user", content: detailsPrompt }];
-      const detailsRequestBody = {
-        messages,
-        temperature: 0,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-      };
-
-      const diagnoseResponse = await callAiWithFailover(detailsRequestBody, data.timezone, 'gpt4o', 0, dataRequest);
-      console.log('usage details Calling details', diagnoseResponse.data);
-
-      // Progreso: detalles obtenidos, comenzando anonimización
-      if (pubsubService) {
-        await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
-      }
-      
-      // Calcular costos de la Etapa 2: Expandir cada diagnóstico
-      const etapa2Usage = diagnoseResponse.data.usage;
-      if (etapa2Usage) {
-        const etapa2Cost = calculatePrice(etapa2Usage, 'gpt4o'); // Siempre gpt4o para detalles
-        costTracking.etapa2_expansion = {
-          cost: etapa2Cost.totalCost,
+    if (parsedResponse.length > 0) {
+      anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid);
+      anonymizedDescription = anonymizedResult.anonymizedText;
+      anonymizedDescriptionEnglish = anonymizedDescription;
+      hasPersonalInfo = anonymizedResult.hasPersonalInfo;
+      if (anonymizedResult.usage) {
+        const etapa3Cost = calculatePrice(anonymizedResult.usage, 'gpt4o');
+        costTracking.etapa2_anonimizacion = {
+          cost: etapa3Cost.totalCost,
           tokens: {
-            input: etapa2Cost.inputTokens,
-            output: etapa2Cost.outputTokens,
-            total: etapa2Cost.totalTokens
+            input: etapa3Cost.inputTokens,
+            output: etapa3Cost.outputTokens,
+            total: etapa3Cost.totalTokens
           }
         };
-        costTracking.total.cost += etapa2Cost.totalCost;
-        costTracking.total.tokens.input += etapa2Cost.inputTokens;
-        costTracking.total.tokens.output += etapa2Cost.outputTokens;
-        costTracking.total.tokens.total += etapa2Cost.totalTokens;
-        
-        console.log(`💰 Etapa 2 - Expansión: ${formatCost(etapa2Cost.totalCost)} (${etapa2Cost.totalTokens} tokens)`);
+        costTracking.total.cost += etapa3Cost.totalCost;
+        costTracking.total.tokens.input += etapa3Cost.inputTokens;
+        costTracking.total.tokens.output += etapa3Cost.outputTokens;
+        costTracking.total.tokens.total += etapa3Cost.totalTokens;
+        console.log(`💰 Etapa 2 - Anonimización: ${formatCost(etapa3Cost.totalCost)} (${etapa3Cost.totalTokens} tokens)`);
       }
-      
-      // Procesar la respuesta según el modelo (siempre gpt4o para detalles)
-      let aiResponse = diagnoseResponse.data.choices[0].message.content;
-
-      if (!aiResponse) {
-        insights.error({
-          message: "No response from AI for details",
-          requestData: data,
-          model: model,
-          response: diagnoseResponse,
-          operation: 'diagnosis-details',
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
-        });
-        throw new Error("No response from AI for details");
-      }
-
-
-      // 4. Procesar la respuesta de detalles
-      try {
-        // Limpiar la respuesta para asegurar que es un JSON válido
-        let jsonContent = aiResponse.trim();
-
-        // Remover backticks y marcadores de código si existen
-        jsonContent = jsonContent.replace(/^```json\s*|\s*```$/g, '');
-        jsonContent = jsonContent.replace(/^```\s*|\s*```$/g, '');
-
-        // Intentar parsear directamente
-        try {
-          parsedResponse = JSON.parse(jsonContent);
-          parsedResponseEnglish = JSON.parse(jsonContent);
-        } catch (directParseError) {
-          // Si falla, intentar con el formato XML como fallback
-          const match = aiResponse.match(/<diagnosis_output>([\s\S]*?)<\/diagnosis_output>/);
-          if (match && match[1]) {
-            jsonContent = match[1].trim();
-            parsedResponse = JSON.parse(jsonContent);
-            parsedResponseEnglish = JSON.parse(jsonContent);
-          } else {
-            throw directParseError;
-          }
-        }
-
-        // Validar que es una lista con los parámetros esperados
-        if (!Array.isArray(parsedResponse)) {
-          const error = new Error("Response is not an array");
-          error.rawResponse = aiResponse;
-          error.parsedResponse = parsedResponse;
-          throw error;
-        }
-
-        // Validar cada elemento de la lista
-        const requiredFields = ['diagnosis', 'description', 'symptoms_in_common', 'symptoms_not_in_common'];
-        for (let i = 0; i < parsedResponse.length; i++) {
-          const item = parsedResponse[i];
-          if (!item || typeof item !== 'object') {
-            const error = new Error(`Item at index ${i} is not an object`);
-            error.rawResponse = aiResponse;
-            error.item = item;
-            throw error;
-          }
-
-          for (const field of requiredFields) {
-            if (!item.hasOwnProperty(field)) {
-              const error = new Error(`Missing required field '${field}' in item at index ${i}`);
-              error.rawResponse = aiResponse;
-              error.item = item;
-              error.missingField = field;
-              throw error;
-            }
-          }
-
-          // Validar que symptoms_in_common y symptoms_not_in_common son arrays
-          if (!Array.isArray(item.symptoms_in_common)) {
-            const error = new Error(`'symptoms_in_common' in item at index ${i} is not an array`);
-            error.rawResponse = aiResponse;
-            error.item = item;
-            throw error;
-          }
-
-          if (!Array.isArray(item.symptoms_not_in_common)) {
-            const error = new Error(`'symptoms_not_in_common' in item at index ${i} is not an array`);
-            error.rawResponse = aiResponse;
-            error.item = item;
-            throw error;
-          }
-
-          // Validar que diagnosis y description son strings
-          if (typeof item.diagnosis !== 'string' || item.diagnosis.trim() === '') {
-            const error = new Error(`'diagnosis' in item at index ${i} is not a valid string`);
-            error.rawResponse = aiResponse;
-            error.item = item;
-            throw error;
-          }
-
-          if (typeof item.description !== 'string' || item.description.trim() === '') {
-            const error = new Error(`'description' in item at index ${i} is not a valid string`);
-            error.rawResponse = aiResponse;
-            error.item = item;
-            throw error;
-          }
-        }
-
-      } catch (parseError) {
-        insights.error({
-          message: "Failed to parse or validate diagnosis output",
-          error: parseError.message,
-          stack: parseError.stack,
-          rawResponse: parseError.rawResponse,
-          description: data.description,
-          matchedContent: parseError.matchedContent,
-          jsonError: parseError.jsonError,
-          parsedResponse: parseError.parsedResponse,
-          item: parseError.item,
-          missingField: parseError.missingField,
-          phase: 'parsing',
-          model: model,
-          requestData: data
-        });
-        if (requestInfo) {
-          let infoError = {
-            myuuid: data.myuuid,
-            operation: 'find disease',
-            lang: data.lang,
-            description: data.description,
-            error: parseError.message,
-            rawResponse: parseError.rawResponse,
-            matchedContent: parseError.matchedContent,
-            jsonError: parseError.jsonError,
-            parsedResponse: parseError.parsedResponse,
-            item: parseError.item,
-            missingField: parseError.missingField,
-            model: model,
-            tenantId: data.tenantId,
-            subscriptionId: data.subscriptionId,
-            iframeParams: data.iframeParams || {}
-          };
-          await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionId);
-          try {
-            await serviceEmail.sendMailErrorGPTIP(
-              data.lang,
-              data.description,
-              infoError,
-              requestInfo
-            );
-          } catch (emailError) {
-            console.log('Fail sending email');
-            insights.error(emailError);
-          }
-        }
-        throw parseError;
-      }
-
-      // 5. Anonimizar el texto
-      console.log('parsedResponse', parsedResponse);
-      console.log('parsedResponse.length 1: ', parsedResponse.length);
-      if (parsedResponse.length > 0) {
-        anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid);
-        anonymizedDescription = anonymizedResult.anonymizedText;
-        anonymizedDescriptionEnglish = anonymizedDescription;
-        hasPersonalInfo = anonymizedResult.hasPersonalInfo;
-        
-        // Calcular costos de la Etapa 3: Anonimización
-        if (anonymizedResult.usage) {
-          const etapa3Cost = calculatePrice(anonymizedResult.usage, 'gpt4o'); // Siempre gpt4o para anonimización
-          costTracking.etapa3_anonimizacion = {
-            cost: etapa3Cost.totalCost,
-            tokens: {
-              input: etapa3Cost.inputTokens,
-              output: etapa3Cost.outputTokens,
-              total: etapa3Cost.totalTokens
-            }
-          };
-          costTracking.total.cost += etapa3Cost.totalCost;
-          costTracking.total.tokens.input += etapa3Cost.inputTokens;
-          costTracking.total.tokens.output += etapa3Cost.outputTokens;
-          costTracking.total.tokens.total += etapa3Cost.totalTokens;
-          
-          console.log(`💰 Etapa 3 - Anonimización: ${formatCost(etapa3Cost.totalCost)} (${etapa3Cost.totalTokens} tokens)`);
-        }
-
-        if (detectedLanguage !== 'en') {
-          try {
-            anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
-            anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
-          } catch (translationError) {
-            console.error('Error en la traducción inversa:', translationError.message);
-            insights.error({
-              message: translationError.message,
-              stack: translationError.stack,
-              code: translationError.code,
-              phase: 'translation',
-              detectedLanguage: detectedLanguage,
-              requestData: data,
-              model: model
-            });
-            throw translationError;
-          }
-        }
-      }
-
-      // 6. Traducir la respuesta si es necesario
       if (detectedLanguage !== 'en') {
         try {
-          parsedResponse = await Promise.all(
-            parsedResponse.map(async diagnosis => ({
-              diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-              description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
-              symptoms_in_common: await Promise.all(
-                diagnosis.symptoms_in_common.map(symptom =>
-                  translateInvertWithRetry(symptom, detectedLanguage)
-                )
-              ),
-              symptoms_not_in_common: await Promise.all(
-                diagnosis.symptoms_not_in_common.map(symptom =>
-                  translateInvertWithRetry(symptom, detectedLanguage)
-                )
-              )
-            }))
-          );
+          anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
+          anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
         } catch (translationError) {
           console.error('Error en la traducción inversa:', translationError.message);
           insights.error({
@@ -600,52 +480,52 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           throw translationError;
         }
       }
+    }
 
-      // 7. Guardar información de seguimiento si es una llamada directa
-      if (requestInfo) {
-        let infoTrack = {
-          value: anonymizedDescription,
-          valueEnglish: anonymizedDescriptionEnglish,
-          myuuid: data.myuuid,
-          operation: 'find disease',
-          lang: data.lang,
-          response: parsedResponse,
-          responseEnglish: parsedResponseEnglish,
-          topRelatedConditions: data.diseases_list,
-          topRelatedConditionsEnglish: englishDiseasesList,
-          header_language: requestInfo.header_language,
-          timezone: data.timezone,
-          model: model,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId,
-          usage: usage,
-          costTracking: costTracking,
-          iframeParams: data.iframeParams || {}
-        };
-        if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
-          console.log('Saving to blob');
-          console.log('parsedResponse.length 2: ', parsedResponse.length);
-          if (parsedResponse.length == 0) {
-            await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
-          } else {
-            if (model == 'gpt4o') {
-              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-            } else if (model == 'o3') {
-              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
-            }
-          }
-
-        }
+    // Traducir la respuesta si es necesario
+    if (detectedLanguage !== 'en' && parsedResponse.length > 0) {
+      try {
+        parsedResponse = await Promise.all(
+          parsedResponse.map(async diagnosis => ({
+            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
+            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
+            symptoms_in_common: await Promise.all(
+              diagnosis.symptoms_in_common.map(symptom =>
+                translateInvertWithRetry(symptom, detectedLanguage)
+              )
+            ),
+            symptoms_not_in_common: await Promise.all(
+              diagnosis.symptoms_not_in_common.map(symptom =>
+                translateInvertWithRetry(symptom, detectedLanguage)
+              )
+            )
+          }))
+        );
+      } catch (translationError) {
+        console.error('Error en la traducción inversa:', translationError.message);
+        insights.error({
+          message: translationError.message,
+          stack: translationError.stack,
+          code: translationError.code,
+          phase: 'translation',
+          detectedLanguage: detectedLanguage,
+          requestData: data,
+          model: model
+        });
+        throw translationError;
       }
-    } else {
-      let infoTrackNoDiagnosis = {
-        value: data.description,
-        valueEnglish: data.description,
+    }
+
+    // Guardar información de seguimiento si es una llamada directa
+    if (requestInfo) {
+      let infoTrack = {
+        value: anonymizedDescription,
+        valueEnglish: anonymizedDescriptionEnglish,
         myuuid: data.myuuid,
         operation: 'find disease',
         lang: data.lang,
-        response: namesResponseText,
-        responseEnglish: namesResponseText,
+        response: parsedResponse,
+        responseEnglish: parsedResponseEnglish,
         topRelatedConditions: data.diseases_list,
         topRelatedConditionsEnglish: englishDiseasesList,
         header_language: requestInfo.header_language,
@@ -653,71 +533,66 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         model: model,
         tenantId: data.tenantId,
         subscriptionId: data.subscriptionId,
+        usage: usage,
+        costTracking: costTracking,
         iframeParams: data.iframeParams || {}
       };
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrackNoDiagnosis, data.tenantId, data.subscriptionId);
-      try {
-        await serviceEmail.sendMailErrorGPTIP(
-          data.lang,
-          data.description,
-          infoTrackNoDiagnosis,
-          requestInfo
-        );
-      } catch (emailError) {
-        console.log('Fail sending email');
-        insights.error(emailError);
+      if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
+        console.log('Saving to blob');
+        if (parsedResponse.length == 0) {
+          await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
+        } else {
+          if (model == 'gpt4o') {
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
+          } else if (model == 'o3') {
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
+          }
+        }
       }
     }
 
-
     // Mostrar resumen final de costos
     console.log(`\n💰 RESUMEN DE COSTOS:`);
+    if (costTracking.etapa0_clinical_check.cost > 0) {
+      console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+    }
     console.log(`   Etapa 1 - Diagnósticos: ${formatCost(costTracking.etapa1_diagnosticos.cost)}`);
-    console.log(`   Etapa 2 - Expansión: ${formatCost(costTracking.etapa2_expansion.cost)}`);
-    console.log(`   Etapa 3 - Anonimización: ${formatCost(costTracking.etapa3_anonimizacion.cost)}`);
+    console.log(`   Etapa 2 - Anonimización: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
     console.log(`   ──────────────────────────`);
     console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
-    
+
     // Convertir costTracking a array de etapas para guardar en DB
     const stages = [];
-    
-    // Etapa 1: Diagnósticos
+    if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
+      stages.push({
+        name: 'clinical_check',
+        cost: costTracking.etapa0_clinical_check.cost,
+        tokens: costTracking.etapa0_clinical_check.tokens,
+        model: 'gpt-4o-mini',
+        duration: 0,
+        success: true
+      });
+    }
     if (costTracking.etapa1_diagnosticos.cost > 0) {
       stages.push({
         name: 'ai_call',
         cost: costTracking.etapa1_diagnosticos.cost,
         tokens: costTracking.etapa1_diagnosticos.tokens,
         model: model,
-        duration: 0, // No tenemos duración específica para esta etapa
+        duration: 0,
         success: true
       });
     }
-    
-    // Etapa 2: Expansión
-    if (costTracking.etapa2_expansion.cost > 0) {
-      stages.push({
-        name: 'ai_call',
-        cost: costTracking.etapa2_expansion.cost,
-        tokens: costTracking.etapa2_expansion.tokens,
-        model: model,
-        duration: 0, // No tenemos duración específica para esta etapa
-        success: true
-      });
-    }
-    
-    // Etapa 3: Anonimización
-    if (costTracking.etapa3_anonimizacion.cost > 0) {
+    if (costTracking.etapa2_anonimizacion.cost > 0) {
       stages.push({
         name: 'anonymization',
-        cost: costTracking.etapa3_anonimizacion.cost,
-        tokens: costTracking.etapa3_anonimizacion.tokens,
+        cost: costTracking.etapa2_anonimizacion.cost,
+        tokens: costTracking.etapa2_anonimizacion.tokens,
         model: model,
-        duration: 0, // No tenemos duración específica para esta etapa
+        duration: 0,
         success: true
       });
     }
-    
-    // Guardar costos en la base de datos
     try {
       await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
       console.log('✅ Costos guardados en la base de datos');
@@ -730,20 +605,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         tenantId: data.tenantId,
         subscriptionId: data.subscriptionId
       });
-      // No fallar la operación principal por un error en el guardado de costos
     }
-    
-    // Progreso final
     if (pubsubService) {
       await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
     }
-
-    // 8. Retornar el resultado
     let diseasesList = [];
     if (parsedResponse.length > 0) {
       diseasesList = parsedResponse;
     }
-
     const result = {
       result: 'success',
       data: diseasesList,
@@ -763,7 +632,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       try {
         // Convertir costTracking a array de etapas para guardar en DB
         const stages = [];
-        
+
         // Etapa 1: Diagnósticos
         if (costTracking.etapa1_diagnosticos.cost > 0) {
           stages.push({
@@ -775,7 +644,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
             success: false
           });
         }
-        
+
         // Etapa 2: Expansión
         if (costTracking.etapa2_expansion.cost > 0) {
           stages.push({
@@ -787,19 +656,19 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
             success: false
           });
         }
-        
+
         // Etapa 3: Anonimización
-        if (costTracking.etapa3_anonimizacion.cost > 0) {
+        if (costTracking.etapa2_anonimizacion.cost > 0) {
           stages.push({
             name: 'anonymization',
-            cost: costTracking.etapa3_anonimizacion.cost,
-            tokens: costTracking.etapa3_anonimizacion.tokens,
+            cost: costTracking.etapa2_anonimizacion.cost,
+            tokens: costTracking.etapa2_anonimizacion.tokens,
             model: model,
             duration: 0,
             success: false
           });
         }
-        
+
         await CostTrackingService.saveDiagnoseCost(data, stages, 'error', {
           message: error.message,
           code: error.code || 'UNKNOWN_ERROR',
@@ -875,7 +744,7 @@ function validateDiagnoseRequest(data) {
     } else {
       // Validar campos específicos de iframeParams
       const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
-      
+
       for (const field in data.iframeParams) {
         if (!validFields.includes(field)) {
           errors.push({ field: `iframeParams.${field}`, reason: 'Invalid field name' });
@@ -1087,5 +956,6 @@ async function diagnose(req, res) {
 
 module.exports = {
   diagnose,
-  processAIRequest
+  processAIRequest,
+  processAIRequestInternal
 };
