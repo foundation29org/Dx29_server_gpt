@@ -1,41 +1,50 @@
 const PROMPTS = {
     diagnosis: {
-        namesOnly: `You are an expert clinician. Based on the patient description below, list the 5 most likely diseases or syndromes, ordered from most to least likely.
+        clinicalScenarioCheck: `You are a clinical triage assistant. Analyze the following input and determine if it describes a clinical scenario (i.e., includes patient-specific features such as symptoms, onset, progression, or evolution), not just a list of medical terms or disease names.
 
-        • Carefully analyze the patient’s description and consider all plausible conditions that fit the presentation, including common, uncommon, and ultra-rare disorders if relevant.  
-        • Do not exclude treatable metabolic/nutritional or structural causes if they match the case.  
-        • Important: Return only a valid JSON array of strings with the disease names—no additional text, explanations, or bullet points. Example: ["Disease A","Disease B","Disease C","Disease D","Disease E"]
+        IF the input contains a clinical scenario, return true.
+        ELSE, return false.
 
-        IF input includes a clinical scenario (i.e., patient-specific features like symptoms, onset, progression) — not just medical terms — THEN run diagnostic analysis; ELSE return []
+        Return ONLY the word true or false. Do not add any explanation or extra text.
 
-        PATIENT DESCRIPTION
+        INPUT:
         {{description}}`,
-        namesOnlyExcludingPrevious: `You are an expert clinician. Based on the following patient description, list the 5 additional diseases or syndromes most likely (that are NOT already in the provided list), ordered from most to least likely.
-
-        • Carefully analyze the patient's description and consider all plausible conditions that fit the presentation, including common, uncommon, and ultra-rare disorders if relevant.  
-        • Do not exclude treatable metabolic/nutritional or structural causes if they match the case.  
-        • Important: Return only a valid JSON array of strings with the disease names—no additional text, explanations, or bullet points. Example: ["Disease A","Disease B","Disease C","Disease D","Disease E"]
-
-        IF input includes a clinical scenario (i.e., patient-specific features like symptoms, onset, progression) — not just medical terms — THEN run diagnostic analysis; ELSE return []
-
-        PATIENT DESCRIPTION
+        withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate N possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
+        Output format:
+        Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
+        Output only valid JSON (no extra text, no XML, no formatting wrappers).
+        Example:
+        [
+        {{
+        "diagnosis": "Disease A",
+        "description": "Short explanation.",
+        "symptoms_in_common": ["sx1", "sx2"],
+        "symptoms_not_in_common": ["sx3", "sx4"]
+        }},
+        ...
+        ]
+        PATIENT DESCRIPTION:
+        {{description}}`,
+        withDiseases: `You are a diagnostic assistant. Given the patient case below, generate N more possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
+        Output format:
+        Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
+        Output only valid JSON (no extra text, no XML, no formatting wrappers).
+        Example:
+        [
+        {{
+        "diagnosis": "Disease A",
+        "description": "Short explanation.",
+        "symptoms_in_common": ["sx1", "sx2"],
+        "symptoms_not_in_common": ["sx3", "sx4"]
+        }},
+        ...
+        ]
+        PATIENT DESCRIPTION:
         {{description}}
 
         ALREADY SUGGESTED DIAGNOSES (EXCLUDE THESE)
-        {{previous_diagnoses}}`,
-        detailsForMultipleDiagnoses: `You are an expert clinician. For each of the following diseases and the patient description, return a JSON array with objects containing:
-        - "diagnosis": disease name
-        - "description": one-sentence summary of the disease
-        - "symptoms_in_common": array of patient symptoms that match the disease
-        - "symptoms_not_in_common": array of patient symptoms the patient has that are atypical for the disease
-
-        PATIENT DESCRIPTION
-        {{description}}
-
-        DIAGNOSES TO ANALYZE
-        {{diagnoses}}
-
-        Return only the JSON array with objects, one for each diagnosis. Use double quotes for all keys and strings.`
+        {{previous_diagnoses}}
+        `,
     },
     version: '1.0.1'
 };

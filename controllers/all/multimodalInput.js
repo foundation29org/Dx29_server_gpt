@@ -2,11 +2,13 @@ const multer = require('multer');
 const { default: createDocumentIntelligenceClient, getLongRunningPoller, isUnexpected } = require("@azure-rest/ai-document-intelligence");
 const config = require('../../config');
 const axios = require('axios');
-const serviceDxGPTCtrl = require('../../services/servicedxgpt');
+const summarizeCtrl = require('../../services/summarizeService')
 const blobFiles = require('../../services/blobFiles');
 const insights = require('../../services/insights');
 const blobOpenDx29Ctrl = require('../../services/blobOpenDx29');
 const serviceEmail = require('../../services/email');
+const CostTrackingService = require('../../services/costTrackingService');
+const { calculatePrice, formatCost } = require('../../services/costUtils');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -42,7 +44,6 @@ const upload = multer({
     { name: 'image', maxCount: 1 }
 ]);
 
-// Función para obtener cabeceras (igual que en servicedxgpt.js)
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
@@ -152,7 +153,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
  *   radiograph | ct | mri | ultrasound | ecg | clinical_photo | text_document | other
  * Devuelve siempre el string en minúsculas.
  */
-const detectTypeDoc = async (base64Image) => {
+const detectTypeDoc = async (base64Image, costTrackingData = null) => {
   
     // Prompt MUY conciso: queremos ahorrar tokens y forzar una respuesta única.
     const promptClassifier = `
@@ -195,7 +196,35 @@ const detectTypeDoc = async (base64Image) => {
         }
       };
 
+      let aiStartTime = Date.now();
       const { data } = await callO3ImagesWithFailover(requestBody);
+      let aiEndTime = Date.now();
+
+      // Cost tracking para detectTypeDoc
+      if (costTrackingData) {
+        try {
+          const usage = data.usage;
+          const costData = calculatePrice(usage, 'o3');
+          console.log(`💰 detectTypeDoc - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+
+          const aiStage = {
+            name: 'ai_call',
+            cost: costData.totalCost,
+            tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
+            model: 'o3',
+            duration: aiEndTime - aiStartTime,
+            success: true
+          };
+          await CostTrackingService.saveSimpleOperationCost(
+            costTrackingData,
+            'multimodal_detect_type',
+            aiStage,
+            'success'
+          );
+        } catch (costError) {
+          console.error('Error guardando cost tracking para detectTypeDoc:', costError);
+        }
+      }
   
       // Azure devuelve un array "output" con elementos type === "message"
       const raw = data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim().toLowerCase();
@@ -214,7 +243,7 @@ const detectTypeDoc = async (base64Image) => {
 
 
 
-const processImage = async (base64Image, promptImage, effort) => {
+const processImage = async (base64Image, promptImage, effort, costTrackingData = null) => {
     try {
         const requestBody = {
             model: "o3-images",
@@ -253,7 +282,35 @@ const processImage = async (base64Image, promptImage, effort) => {
             }
         };
 
+        let aiStartTime = Date.now();
         const response = await callO3ImagesWithFailover(requestBody);
+        let aiEndTime = Date.now();
+
+        // Cost tracking para processImage
+        if (costTrackingData) {
+          try {
+            const usage = response.data.usage;
+            const costData = calculatePrice(usage, 'o3');
+            console.log(`💰 processImage - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+
+            const aiStage = {
+              name: 'ai_call',
+              cost: costData.totalCost,
+              tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
+              model: 'o3',
+              duration: aiEndTime - aiStartTime,
+              success: true
+            };
+            await CostTrackingService.saveSimpleOperationCost(
+              costTrackingData,
+              'multimodal_process_image',
+              aiStage,
+              'success'
+            );
+          } catch (costError) {
+            console.error('Error guardando cost tracking para processImage:', costError);
+          }
+        }
 
         console.log(response.data);
         
@@ -354,6 +411,17 @@ const processMultimodalInput = async (req, res) => {
                 }
             }
 
+            // Variables para cost tracking
+            const costTrackingData = {
+                myuuid: req.body.myuuid || 'default-uuid',
+                tenantId: tenantId,
+                subscriptionId: subscriptionId,
+                lang: req.body.lang || 'es',
+                timezone: req.body.timezone || 'UTC',
+                description: `${req.body.text ? req.body.text.substring(0, 100) + '...' : 'Multimodal input'} - Process multimodal`,
+                iframeParams: req.body.iframeParams || {}
+            };
+
             // Procesar imagen si existe
             if (req.files && req.files.image) {
                 try {
@@ -369,7 +437,7 @@ const processMultimodalInput = async (req, res) => {
                     console.log('Imagen subida a Azure Blob:', blobUrl);
                     const base64Image = fileBuffer.toString("base64");
                     // Detectar el tipo de imagen
-                    const typeImage = await detectTypeDoc(base64Image);
+                    const typeImage = await detectTypeDoc(base64Image, costTrackingData);
                     console.log('Tipo de imagen:', typeImage);
                     switch (typeImage) {
                         case "radiograph":
@@ -397,7 +465,7 @@ const processMultimodalInput = async (req, res) => {
                             if (results.textInput && results.textInput.trim() !== '') {
                                 promptRadiology += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
-                            const imageAnalysisRadiology = await processImage(base64Image, promptRadiology, "high");
+                            const imageAnalysisRadiology = await processImage(base64Image, promptRadiology, "high", costTrackingData);
                             results.imageAnalysis = imageAnalysisRadiology;
                             break;
                         case "ct":
@@ -426,7 +494,7 @@ const processMultimodalInput = async (req, res) => {
                             if (results.textInput && results.textInput.trim() !== '') {
                                 promptCT += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
-                            const imageAnalysisCT = await processImage(base64Image, promptCT, "high");
+                            const imageAnalysisCT = await processImage(base64Image, promptCT, "high", costTrackingData);
                             results.imageAnalysis = imageAnalysisCT;
                             break;
                         case "mri":
@@ -455,7 +523,7 @@ const processMultimodalInput = async (req, res) => {
                             if (results.textInput && results.textInput.trim() !== '') {
                                 promptMRI += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
-                            const imageAnalysisMRI = await processImage(base64Image, promptMRI, "high");
+                            const imageAnalysisMRI = await processImage(base64Image, promptMRI, "high", costTrackingData);
                             results.imageAnalysis = imageAnalysisMRI;
                             break;
                         case "ultrasound":
@@ -482,7 +550,7 @@ const processMultimodalInput = async (req, res) => {
                             if (results.textInput && results.textInput.trim() !== '') {
                                 promptUltrasound += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
-                            const imageAnalysisUltrasound = await processImage(base64Image, promptUltrasound, "high");
+                            const imageAnalysisUltrasound = await processImage(base64Image, promptUltrasound, "high", costTrackingData);
                             results.imageAnalysis = imageAnalysisUltrasound;
                             break;
                         case "ecg":
@@ -511,7 +579,7 @@ const processMultimodalInput = async (req, res) => {
                             if (results.textInput && results.textInput.trim() !== '') {
                                 promptECG += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
-                          const imageAnalysisECG = await processImage(base64Image, promptECG, "high");
+                          const imageAnalysisECG = await processImage(base64Image, promptECG, "high", costTrackingData);
                           results.imageAnalysis = imageAnalysisECG;
                           break;
                         case "clinical_photo":
@@ -539,7 +607,7 @@ const processMultimodalInput = async (req, res) => {
                             if (results.textInput && results.textInput.trim() !== '') {
                                 promptClinicalPhoto += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
-                          const imageAnalysisClinicalPhoto = await processImage(base64Image, promptClinicalPhoto, "high");
+                          const imageAnalysisClinicalPhoto = await processImage(base64Image, promptClinicalPhoto, "high", costTrackingData);
                           results.imageAnalysis = imageAnalysisClinicalPhoto;
                           break;
                         case "face_photo":
@@ -548,7 +616,7 @@ const processMultimodalInput = async (req, res) => {
                                 promptFace += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
                             }
                             promptFace = promptFace.trim();
-                            const imageAnalysisFace = await processImage(base64Image, promptFace, "high");
+                            const imageAnalysisFace = await processImage(base64Image, promptFace, "high", costTrackingData);
                             results.imageAnalysis = imageAnalysisFace;
                             break;
                         case "text_document":
@@ -571,7 +639,7 @@ const processMultimodalInput = async (req, res) => {
                             - Keep *Raw Text* exactly as seen; keep *Document Summary* ≤ 25 lines.  
                             - If a usual field (e.g. medications, tests) is absent, state "None reported."  
                             `.trim();
-                          const imageAnalysisTextDocument = await processImage(base64Image, promptTextDocument, "high");
+                          const imageAnalysisTextDocument = await processImage(base64Image, promptTextDocument, "high", costTrackingData);
                           results.imageAnalysis = imageAnalysisTextDocument;
                           break;
                         default:
@@ -579,7 +647,7 @@ const processMultimodalInput = async (req, res) => {
                             You are a visual assistant. Briefly describe the main elements in the image (≤80 words) using plain language.
                             Do NOT guess diagnoses, personal identities, or sensitive data.
                             `.trim();
-                            const imageAnalysisGeneric = await processImage(base64Image, promptGeneric, "high");
+                            const imageAnalysisGeneric = await processImage(base64Image, promptGeneric, "high", costTrackingData);
                             results.imageAnalysis = imageAnalysisGeneric;
                             break;
                       }
@@ -642,7 +710,7 @@ const processMultimodalInput = async (req, res) => {
             };
 
             // Llamar directamente al servicio de summarize
-            await serviceDxGPTCtrl.summarize(mockReq, mockRes);
+            await summarizeCtrl.summarize(mockReq, mockRes);
         });
     } catch (error) {
         console.error('Error en processMultimodalInput:', error);
