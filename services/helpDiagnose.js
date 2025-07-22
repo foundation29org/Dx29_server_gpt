@@ -623,7 +623,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       },
       detectedLang: detectedLanguage,
       model: model,
-      costTracking: costTracking
+      //costTracking: costTracking
     };
     return result;
   } catch (error) {
