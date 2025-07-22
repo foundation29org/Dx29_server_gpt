@@ -16,26 +16,6 @@ components:
       name: Ocp-Apim-Subscription-Key
       description: API Management subscription key for authenticating requests
   schemas:
-    Language:
-      type: object
-      properties:
-        code:
-          type: string
-          example: en
-        name:
-          type: string
-          example: English
-    SupportRequest:
-      type: object
-      properties:
-        email:
-          type: string
-          format: email
-        message:
-          type: string
-      required:
-        - email
-        - message
     DiagnoseRequest:
       type: object
       properties:
@@ -74,9 +54,13 @@ components:
           example: "Migraine, Tension headache, Cluster headache"
         model:
           type: string
-          description: Model to use for diagnosis. Defaults to gpt4o.
-          enum: ["gpt4o", "o1"]
+          description: |
+            Model to use for diagnosis. 
+            - "gpt4o" (default): Fast processing with good accuracy, returns HTTP response
+            - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates  
+          enum: ["gpt4o", "o3"]
           default: "gpt4o"
+
       required:
         - description
         - myuuid
@@ -87,7 +71,7 @@ components:
         result:
           type: string
           description: Status of the request
-          enum: [success, error, translation error, unsupported_language, queued]
+          enum: [success, error, translation error, unsupported_language, queued, processing]
           example: "success"
         data:
           type: object
@@ -513,195 +497,74 @@ components:
           type: string
           description: Detected language of the provided text
           example: "en"
-        message:
-          type: string
-          description: Error message (only when result is error or unsupported_language)
-          example: "An error occurred during translation"
-    QueueStatusResponse:
+    AnalyzeRequest:
       type: object
       properties:
-        status:
+        text:
           type: string
-          description: Current status of the request
-          enum:
-            - pending
-            - processing
-            - completed
-            - failed
-          example: "processing"
-        position:
-          type: integer
-          description: Current position in the queue (only for pending status)
-          example: 3
-        estimatedTime:
-          type: integer
-          description: Estimated time in seconds until completion
-          example: 300
-        region:
+          description: Text input for analysis (optional if document or image is provided)
+          maxLength: 8000
+          example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
+        lang:
           type: string
-          description: Region processing the request
-          example: "WestUS"
-        utilizationPercentage:
-          type: number
-          format: float
-          description: Current utilization percentage of the region
-          example: 85.5
-    SystemStatusResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          description: Overall system status
-          enum:
-            - online
-            - degraded
-            - offline
-          example: "online"
-        services:
-          type: object
-          description: Status of individual services
-          additionalProperties:
-            type: string
-            enum:
-              - online
-              - degraded
-              - offline
-          example:
-            translation: "online"
-            ai: "online"
-            queue: "online"
-        queues:
-          type: object
-          description: Status of regional queues
-          additionalProperties:
-            type: object
-            properties:
-              status:
-                type: string
-                enum: ["healthy", "unhealthy"]
-                example: "healthy"
-              activeMessages:
-                type: integer
-                description: Number of messages currently being processed
-                example: 5
-              queuedMessages:
-                type: integer
-                description: Number of messages waiting in queue
-                example: 10
-              error:
-                type: string
-                description: Error message if status is unhealthy
-                example: "Connection timeout"
-    OpinionRequest:
-      type: object
-      properties:
-        value:
-          type: string
-          description: Medical text being rated
-          maxLength: 10000
+          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected.
+          minLength: 2
+          maxLength: 2
+          example: "en"
         myuuid:
           type: string
           description: Unique identifier for the user
           pattern: "^[0-9a-fA-F-]{36}$"
           example: "550e8400-e29b-41d4-a716-446655440000"
-        vote:
+        timezone:
           type: string
-          description: User's rating of the diagnosis
-          enum: [up, down]
-        lang:
+          description: |
+            User's timezone. Used to determine which regional endpoint will process the request.
+            - If timezone contains "america" → North America region
+            - If timezone contains "europe" → Europe region
+            - If timezone contains "asia" → Asia region
+            - If timezone contains "africa" → Africa region
+            - If timezone contains "australia" or "pacific" → Oceania region
+            - Otherwise → Default region
+          example: "America/New_York"
+        document:
           type: string
-          description: Two-letter language code (optional, only used for error reporting)
-          minLength: 2
-          maxLength: 2
-          example: "en"
-        isNewModel:
-          type: boolean
-          description: Whether the feedback is for the new model
-        topRelatedConditions:
-          type: array
-          description: List of conditions related to the diagnosis
-          items:
-            type: object
-            properties:
-              name:
-                type: string
-                maxLength: 200
+          format: binary
+          description: Document file to analyze (PDF, Word, Excel, TXT). Optional if text or image is provided.
+        image:
+          type: string
+          format: binary
+          description: Image file to analyze (JPG, PNG, TIFF, BMP, WEBP). Optional if text or document is provided.
       required:
-        - value
         - myuuid
-        - vote
-        - isNewModel
-    OpinionResponse:
+        - timezone
+    AnalyzeResponse:
       type: object
       properties:
-        send:
-          type: boolean
-          description: Indicates if the opinion was successfully recorded
-          example: true
-    GeneralFeedbackRequest:
-      type: object
-      properties:
-        value:
+        summary:
+          type: string
+          description: Combined summary of all inputs
+          example: "40-year-old male with 3-week history of right-sided throbbing headaches, photophobia, and occasional nausea. Document analysis reveals previous migraine diagnosis. Image analysis shows normal brain CT scan."
+        details:
           type: object
-          description: Feedback data object
+          description: Detailed analysis of each input type
           properties:
-            pregunta1:
-              type: number
-              description: Rating for question 1 (0-5)
-              minimum: 0
-              maximum: 5
-              example: 4
-            pregunta2:
-              type: number
-              description: Rating for question 2 (0-5)
-              minimum: 0
-              maximum: 5
-              example: 5
-            userType:
+            textInput:
               type: string
-              description: Type of user
-              maxLength: 100
-              example: "patient"
-            moreFunct:
+              description: Original text input provided
+              example: "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
+            documentAnalysis:
               type: string
-              description: Requested functionality
-              maxLength: 1000
-              example: "I would like to see more information about treatments"
-            freeText:
+              description: Extracted text from document analysis
+              example: "Medical record shows previous diagnosis of migraine with aura..."
+            imageAnalysis:
               type: string
-              description: Additional feedback (optional)
-              maxLength: 2000
-              example: "Great application, very helpful for my needs"
-            email:
-              type: string
-              description: User email for follow-up (optional)
-              format: email
-              example: "user@example.com"
-          required:
-            - pregunta1
-            - pregunta2
-            - userType
-            - moreFunct
-        myuuid:
+              description: Analysis of medical image
+              example: "Imaging Identification: CT scan, axial plane, non-contrast phase. Tomographic Findings: Normal brain parenchyma, no mass lesions or hemorrhage identified."
+        detectedLang:
           type: string
-          description: Unique identifier for the user
-          pattern: "^[0-9a-fA-F-]{36}$"
-          example: "550e8400-e29b-41d4-a716-446655440000"
-        lang:
-          type: string
-          description: Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the updated description will be returned in this language.
-          minLength: 2
-          maxLength: 2
+          description: Detected language of the combined input
           example: "en"
-      required:
-        - value
-        - myuuid
-    GeneralFeedbackResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          example: success
   responses:
     UnauthorizedError:
       description: Invalid or missing subscription key
@@ -724,65 +587,56 @@ components:
                 type: string
                 example: Too many requests, please try again later
 paths:
-  /internal/langs:
-    get:
-      summary: Get list of supported languages
-      description: Returns a list of all available languages
-      tags:
-        - Languages
-      security:
-        - ApimSubscription: []
-      responses:
-        "200":
-          description: List of available languages
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Language"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-  /internal/homesupport:
-    post:
-      summary: Submit support message from users
-      description: Submit a support message from users
-      tags:
-        - Support
-      security:
-        - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SupportRequest"
-      responses:
-        "200":
-          description: Message sent successfully
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
   /diagnose:
     post:
       summary: Analyze medical description for possible disease diagnoses
       description: |
         Analyzes a patient's medical description and provides a list of possible disease diagnoses. This unified endpoint allows choosing between different models through the optional "model" parameter.
         
-        Available models:
-        - "gpt4o" (default): Faster processing with good accuracy
-        - "o1": More comprehensive analysis with longer processing time
+        **Available Models:**
+        
+        **Standard Models (HTTP Response):**
+        - "gpt4o" (default): Fast processing with good accuracy, returns results directly via HTTP
+        
+        **Advanced Models (WebSocket + HTTP):**
+        - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates
+        
+        **Workflow for Advanced Models:**
+        For model o3, you must follow this workflow:
+        1. Call `/pubsub/negotiate` to establish a WebSocket connection
+        2. Open the WebSocket connection using the provided URL
+        3. Make the diagnosis request via HTTP (this endpoint) with the advanced model
+        4. Receive progress updates and final results via WebSocket
+        5. Close the WebSocket connection when complete
+        
+        **WebSocket Message Types for Advanced Models:**
+        ```json
+        // Progress update
+        {
+          "type": "progress",
+          "stage": "translation",
+          "message": "Translating description...",
+          "percentage": 10
+        }
+        
+        // Final result
+        {
+          "type": "complete",
+          "result": {
+            "result": "success",
+            "data": [...],
+            "anonymization": {...},
+            "detectedLang": "en",
+            "model": "o3"
+          }
+        }
+        
+        // Error
+        {
+          "type": "error",
+          "error": "Processing error message"
+        }
+        ```
         
         For best results:
         - Provide relevant patient details such as age, gender, main symptoms, and when they started
@@ -820,14 +674,6 @@ paths:
         - Diagnosis
       security:
         - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -840,7 +686,7 @@ paths:
                     model:
                       type: string
                       description: Model to use for diagnosis
-                      enum: ["gpt4o", "o1"]
+                      enum: ["gpt4o", "o3"]
                       default: "gpt4o"
                       example: "gpt4o"
       responses:
@@ -876,6 +722,14 @@ paths:
                             type: number
                             format: float
                             example: 85.5
+                  - type: object
+                    properties:
+                      result:
+                        type: string
+                        example: "processing"
+                      message:
+                        type: string
+                        example: "Sent via WebSocket"
         "400":
           description: Invalid request
           content:
@@ -889,6 +743,82 @@ paths:
                   message:
                     type: string
                     example: "Invalid request format or content"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /pubsub/negotiate:
+    post:
+      summary: Negotiate WebSocket connection for advanced models
+      description: |
+        Establishes a WebSocket connection for receiving real-time progress updates from advanced AI models (o3).
+        
+        This endpoint is required before making diagnosis requests with advanced models. It returns a temporary WebSocket URL
+        that will be used to receive progress updates, final results, and error messages.
+        
+        **Workflow for Advanced Models:**
+        1. Call this endpoint to get a WebSocket URL
+        2. Open the WebSocket connection using the provided URL
+        3. Make the diagnosis request via HTTP (not WebSocket) with an advanced model
+        4. Receive progress updates and final results via WebSocket
+        5. Close the WebSocket connection when complete
+        
+        **WebSocket Message Types:**
+        - `progress`: Real-time progress updates with percentage and status
+        - `complete`: Final diagnosis result with full analysis
+        - `error`: Error message if processing fails
+        
+        **Note:** This endpoint is only required for advanced models (o3). 
+        Standard models (gpt4o) return results directly via HTTP.
+      tags:
+        - WebSocket
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                  description: User identifier (myuuid) for the WebSocket connection
+                  pattern: "^[0-9a-fA-F-]{36}$"
+                  example: "550e8400-e29b-41d4-a716-446655440000"
+              required:
+                - userId
+      responses:
+        "200":
+          description: WebSocket connection established
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    description: Temporary WebSocket URL for receiving updates
+                    example: "wss://your-api-gateway.com/ws?token=abc123"
+                  connectionId:
+                    type: string
+                    description: Unique connection identifier
+                    example: "conn_12345"
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    description: When the WebSocket URL expires
+                    example: "2024-01-15T11:30:00Z"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Invalid userId format"
         "401":
           $ref: "#/components/responses/UnauthorizedError"
         "429":
@@ -935,7 +865,17 @@ paths:
         - Output is formatted as HTML with clear sections for matching and non-matching symptoms
         - Useful for explaining diagnostic reasoning
         
-        Note that questionTypes 3 and 4 require the medicalDescription parameter to be provided.
+        **Type 5: NHS Genomic Test Recommendations**
+        - Requires medicalDescription parameter with the patient's symptoms
+        - Provides recommendations for appropriate NHS genetic tests based on the disease and patient description
+        - Uses Azure AI Studio to search the NHS Genomic Test Directory
+        - Returns structured information including test codes, names, target genes, methods, and eligibility criteria
+        - Includes additional information about application processes and response times
+        - Output is formatted as HTML with organized sections for tests, eligibility, and additional information
+        - Includes a disclaimer that NHS tests are only applicable within the United Kingdom
+        - Useful for UK healthcare professionals to identify appropriate genetic testing pathways
+        
+        Note that questionTypes 3, 4, and 5 require the medicalDescription parameter to be provided.
         
         **Response Format:** 
         - For questionType 3: Returns a structured JSON response with type "differential" and an array of symptom objects
@@ -946,14 +886,6 @@ paths:
         - MedicalInfo
       security:
         - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1025,14 +957,6 @@ paths:
         - Questions
       security:
         - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1095,14 +1019,6 @@ paths:
         - Questions
       security:
         - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1161,14 +1077,6 @@ paths:
         - Patient
       security:
         - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1225,14 +1133,6 @@ paths:
         - Content
       security:
         - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
       requestBody:
         required: true
         content:
@@ -1263,141 +1163,98 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /internal/status/{ticketId}:
+  /medical/analyze:
     post:
-      summary: Check status of queued diagnose request
-      description: Get the status of a request in the processing queue
+      summary: Analyze multimodal medical input (text, documents, and images)
+      description: |
+        Analyzes multiple types of medical input simultaneously and provides a comprehensive summary.
+        
+        This endpoint accepts three types of input:
+        
+        **Text Input**: Direct medical description from the patient or healthcare provider
+        **Document Input**: Medical documents (PDF, Word, Excel, TXT) that are processed using Azure Document Intelligence
+        **Image Input**: Medical images that are automatically classified and analyzed based on their type:
+        
+        - **Radiographs**: X-ray images analyzed for anatomical structures and radiographic findings
+        - **CT Scans**: Computed tomography images analyzed for tomographic features
+        - **MRI**: Magnetic resonance images analyzed for MR findings and sequences
+        - **Ultrasound**: Sonographic images analyzed for sonographic findings
+        - **ECG**: Electrocardiogram traces analyzed for waveform features
+        - **Clinical Photos**: Photographs of body parts analyzed for visible features
+        - **Text Documents**: Scanned medical documents transcribed and summarized
+        - **Other**: Generic image analysis for non-medical images
+        
+        **Processing Workflow**:
+        1. All inputs are processed in parallel
+        2. Documents are uploaded to Azure Blob Storage and processed with Azure Document Intelligence
+        3. Images are automatically classified and analyzed with specialized prompts for each type
+        4. All results are combined into a single comprehensive summary
+        5. The summary maintains medical relevance while being concise and clear
+        
+        **Supported File Types**:
+        - Documents: PDF, DOC, DOCX, XLS, XLSX, TXT (max 20MB)
+        - Images: JPG, PNG, TIFF, BMP, WEBP (max 20MB)
+        
+        **Response Format**: The response includes:
+        - A combined summary of all inputs
+        - Detailed breakdown of each input type's analysis
+        - Detected language of the combined content
+        
+        This endpoint is particularly useful for comprehensive medical case analysis where multiple sources of information need to be integrated.
       tags:
-        - Queue
+        - Multimodal
       security:
         - ApimSubscription: []
-      parameters:
-        - name: ticketId
-          in: path
-          required: true
-          schema:
-            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
       responses:
         "200":
-          description: Queue status
+          description: Multimodal analysis completed successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueStatusResponse"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-  /internal/getSystemStatus:
-    get:
-      summary: Get overall system status and health
-      description: Retrieve the current status of the system and its components
-      tags:
-        - System
-      security:
-        - ApimSubscription: []
-      responses:
-        "200":
-          description: System status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SystemStatusResponse"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-  /internal/health:
-    get:
-      summary: Simple health check endpoint
-      description: Simple health check endpoint to verify the API is running
-      tags:
-        - System
-      security:
-        - ApimSubscription: []
-      responses:
-        "200":
-          description: System healthy
+                $ref: "#/components/schemas/AnalyzeResponse"
+        "400":
+          description: Invalid request format or missing required inputs
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  status:
+                  error:
                     type: string
-                    example: ok
+                    example: "Se requiere al menos uno de los siguientes campos: text, document, o image"
         "401":
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /internal/opinion:
-    post:
-      summary: Send user feedback on diagnosis accuracy
-      description: |
-        Submit user feedback about diagnosis results. Used to collect user ratings (upvote/downvote) on the accuracy of the diagnosis.
-        The lang parameter is optional and is only used for error reporting.
-      tags:
-        - Feedback
-      security:
-        - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OpinionRequest"
-      responses:
-        "200":
-          description: Opinion sent
+        "500":
+          description: Internal server error during processing
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OpinionResponse"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-  /internal/generalfeedback:
-    post:
-      summary: Submit general application feedback
-      description: |
-        Submit general feedback about the application. The feedback includes ratings, user type, requested functionality, and optional comments. 
-        The lang parameter is optional and is only used for error reporting.
-      tags:
-        - Feedback
-      security:
-        - ApimSubscription: []
-      parameters:
-        - name: X-Tenant-Id
-          in: header
-          required: false
-          schema:
-            type: string
-          description: >
-            Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GeneralFeedbackRequest"
-      responses:
-        "200":
-          description: Feedback sent
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GeneralFeedbackResponse"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-tags: []
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Error procesando la entrada multimodal"
+
+tags:
+  - name: Diagnosis
+    description: Medical diagnosis and analysis endpoints
+  - name: MedicalInfo
+    description: Disease information and educational content
+  - name: Questions
+    description: Question generation for patient assessment
+  - name: Patient
+    description: Patient data processing and updates
+  - name: Content
+    description: Content processing and summarization
+  - name: Multimodal
+    description: Multimodal analysis (text, documents, images)
+  - name: WebSocket
+    description: WebSocket connections for real-time updates

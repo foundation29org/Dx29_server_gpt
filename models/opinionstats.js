@@ -11,7 +11,7 @@ const OpinionStatsSchema = new Schema({
   isNewModel: Boolean,
   version: String,
   tenantId: String,
-  subscriptionKeyHash: String,
+  subscriptionId: String,
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -8,7 +8,6 @@ const serviceEmail = require('../../services/email')
 const insights = require('../../services/insights')
 const axios = require('axios');
 const config = require('../../config')
-const { hashSubscriptionKey } = require('../../services/servicedxgpt');
 
 function getHeader(req, name) {
 	return req.headers[name.toLowerCase()];
@@ -76,9 +75,9 @@ function isValidSupportData(data) {
 
   async function sendMsgLogoutSupport(req, res) {
 	// Obtener headers
-	const subscriptionKey = getHeader(req, 'Ocp-Apim-Subscription-Key');
+	const subscriptionId = getHeader(req, 'x-subscription-id');
 	const tenantId = getHeader(req, 'X-Tenant-Id');
-	const subscriptionKeyHash = hashSubscriptionKey(subscriptionKey);
+	
 	try {
 	  // Validar los datos de entrada
 	  if (!isValidSupportData(req.body)) {
@@ -99,11 +98,11 @@ function isValidSupportData(data) {
 		description: `Name: ${sanitizedData.userName}, Email: ${sanitizedData.email}, Description: ${sanitizedData.description}`,
 		date: new Date(Date.now()).toString(),
 		tenantId: tenantId,
-		subscriptionKeyHash: subscriptionKeyHash
+		subscriptionId: subscriptionId
 	  });
   
 	  // Enviar al flujo (sin esperar respuesta)
-	  sendFlow(support, sanitizedData.lang, tenantId, subscriptionKeyHash);
+	  sendFlow(support, sanitizedData.lang, tenantId, subscriptionId);
   
 	  // Guardar en base de datos (sin esperar respuesta)
 	  support.save()
@@ -133,7 +132,7 @@ function isValidSupportData(data) {
 			error: e.message,
 			type: e.code || 'SUPPORT_ERROR',
 			tenantId: tenantId,
-			subscriptionKeyHash: subscriptionKeyHash
+			subscriptionId: subscriptionId
 		}
 		insights.error(infoError);
 		return res.status(500).send({ message: 'Internal server error' });
@@ -141,7 +140,7 @@ function isValidSupportData(data) {
   }
 
 
-async function sendFlow(support, lang, tenantId, subscriptionKeyHash){
+async function sendFlow(support, lang, tenantId, subscriptionId){
 	let requestBody = {
 		subject: support.subject,
 		subscribe: support.subscribe.toString(),
@@ -150,7 +149,7 @@ async function sendFlow(support, lang, tenantId, subscriptionKeyHash){
 		date: support.date,
 		lang: lang,
 		tenantId: tenantId,
-		subscriptionKeyHash: subscriptionKeyHash
+		subscriptionId: subscriptionId
 	}
 	const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
     ? 'https://prod-186.westeurope.logic.azure.com:443/workflows/9dae9a0707e5452abbc7173b05277df6/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=sobGleGrapNnnf5SIgVtX6PmC7Bhzn5oTKPv9MluGwM'
@@ -171,7 +170,7 @@ async function sendFlow(support, lang, tenantId, subscriptionKeyHash){
 			error: error.message,
 			type: error.code || 'SUPPORT_ERROR',
 			tenantId: tenantId,
-			subscriptionKeyHash: subscriptionKeyHash
+			subscriptionId: subscriptionId
 		}
 		insights.error(infoError);
     }

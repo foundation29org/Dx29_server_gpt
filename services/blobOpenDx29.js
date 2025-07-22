@@ -42,14 +42,14 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
-    } else if (body.subscriptionKeyHash) {
-        clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
+    } else if (body.subscriptionId) {
+        clientPrefix = `marketplace/${body.subscriptionId}/`;
     } else {
-        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
+        throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
-    var tempUrl = version === 'v2' ? 
-      `${clientPrefix}datav2/${url}` : 
+    var tempUrl = version === 'v3' ? 
+      `${clientPrefix}datav3/${url}` : 
       `${clientPrefix}data/${url}`;
     
     var result = await createBlob(tempUrl, info, fileNameNcr);
@@ -74,10 +74,10 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
-    } else if (body.subscriptionKeyHash) {
-        clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
+    } else if (body.subscriptionId) {
+        clientPrefix = `marketplace/${body.subscriptionId}/`;
     } else {
-        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
+        throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = `${clientPrefix}vote/${url}`;
@@ -85,7 +85,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     var result = await createBlob(tempUrl, info, fileNameNcr);
   }
 
-  async function createBlobErrorsDx29(body, tenantId, subscriptionKeyHash) {
+  async function createBlobErrorsDx29(body, tenantId, subscriptionId) {
     var info = JSON.stringify(body);
     var now = new Date();
     var y = now.getFullYear();
@@ -104,10 +104,10 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     let clientPrefix;
     if (tenantId) {
         clientPrefix = `tenants/${tenantId}/`;
-    } else if (subscriptionKeyHash) {
-        clientPrefix = `marketplace/${subscriptionKeyHash}/`;
+    } else if (subscriptionId) {
+        clientPrefix = `marketplace/${subscriptionId}/`;
     } else {
-        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
+        throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = `${clientPrefix}errors/${url}`;
@@ -134,10 +134,10 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     let clientPrefix;
     if (body.tenantId) {
         clientPrefix = `tenants/${body.tenantId}/`;
-    } else if (body.subscriptionKeyHash) {
-        clientPrefix = `marketplace/${body.subscriptionKeyHash}/`;
+    } else if (body.subscriptionId) {
+        clientPrefix = `marketplace/${body.subscriptionId}/`;
     } else {
-        throw new Error('No tenantId ni subscriptionKeyHash: integración incorrecta, revisar frontend/backend');
+        throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
     var tempUrl = `${clientPrefix}questions/${operation}/${url}`;

@@ -1,90 +1,52 @@
 const PROMPTS = {
     diagnosis: {
-        withoutDiseases: `Behave like a hypothetical doctor tasked with providing N hypothesis diagnosis for a patient based on their description. Your goal is to generate a list of N potential diseases, each with a short description, and indicate which symptoms the patient has in common with the proposed disease and which symptoms the patient does not have in common.
+        clinicalScenarioCheck: `You are a clinical triage assistant. Analyze the following input and determine if it describes a clinical scenario (i.e., includes patient-specific features such as symptoms, onset, progression, or evolution), not just a list of medical terms or disease names.
 
-        Carefully analyze the patient description and consider various potential diseases that could match the symptoms described. For each potential disease:
-        1. Provide a brief description of the disease
-        2. List the symptoms that the patient has in common with the disease
-        3. List the symptoms that the patient has that are not in common with the disease
-        
-        Present your findings in a JSON format within XML tags. The JSON should contain the following keys for each of the N potential disease:
-        - "diagnosis": The name of the potential disease
-        - "description": A brief description of the disease
-        - "symptoms_in_common": An array of symptoms the patient has that match the disease
-        - "symptoms_not_in_common": An array of symptoms the patient has that are not in common with the disease
-        
-        Here's an example of how your output should be structured:
-        
-        <diagnosis_output>
+        IF the input contains a clinical scenario, return true.
+        ELSE, return false.
+
+        Return ONLY the word true or false. Do not add any explanation or extra text.
+
+        INPUT:
+        {{description}}`,
+        withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate N possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
+        Output format:
+        Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
+        Output only valid JSON (no extra text, no XML, no formatting wrappers).
+        Example:
         [
-        {
-            "diagnosis": "some disease 1",
-            "description": "some description",
-            "symptoms_in_common": ["symptom1", "symptom2", "symptomN"],
-            "symptoms_not_in_common": ["symptom1", "symptom2", "symptomN"]
-        },
+        {{
+        "diagnosis": "Disease A",
+        "description": "Short explanation.",
+        "symptoms_in_common": ["sx1", "sx2"],
+        "symptoms_not_in_common": ["sx3", "sx4"]
+        }},
         ...
-        {
-            "diagnosis": "some disease n",
-            "description": "some description",
-            "symptoms_in_common": ["symptom1", "symptom2", "symptomN"],
-            "symptoms_not_in_common": ["symptom1", "symptom2", "symptomN"]
-        }
         ]
-        </diagnosis_output>
-        
-        Present your final output within <diagnosis_output> tags as shown in the example above.
-        
-        Here is the patient description:
-        <patient_description>
-        {{description}}
-        </patient_description>`,
-        withDiseases: `Behave like a hypothetical doctor tasked with providing M more hypothesis diagnosis for a patient based on their description and a list of N potential diseases. Your goal is to generate a list of M new potential diseases, each with a short description, and indicate which symptoms the patient has in common with the proposed disease and which symptoms the patient does not have in common.
-
-        Carefully analyze the patient description and consider various potential diseases that could match the symptoms described. For each potential disease:
-        1. Provide a brief description of the disease
-        2. List the symptoms that the patient has in common with the disease
-        3. List the symptoms that the patient has that are not in common with the disease
-        
-        Present your findings in a JSON format within XML tags. The JSON should contain the following keys for each of the N potential disease:
-        - "diagnosis": The name of the potential disease
-        - "description": A brief description of the disease
-        - "symptoms_in_common": An array of symptoms the patient has that match the disease
-        - "symptoms_not_in_common": An array of symptoms the patient has that are not in common with the disease
-        
-        Here's an example of how your output should be structured:
-        
-        <diagnosis_output>
+        PATIENT DESCRIPTION:
+        {{description}}`,
+        withDiseases: `You are a diagnostic assistant. Given the patient case below, generate N more possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
+        Output format:
+        Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
+        Output only valid JSON (no extra text, no XML, no formatting wrappers).
+        Example:
         [
-        {
-            "diagnosis": "some disease N+1",
-            "description": "some description",
-            "symptoms_in_common": ["symptom1", "symptom2", "symptomN"],
-            "symptoms_not_in_common": ["symptom1", "symptom2", "symptomN"]
-        },
+        {{
+        "diagnosis": "Disease A",
+        "description": "Short explanation.",
+        "symptoms_in_common": ["sx1", "sx2"],
+        "symptoms_not_in_common": ["sx3", "sx4"]
+        }},
         ...
-        {
-            "diagnosis": "some disease N+M",
-            "description": "some description",
-            "symptoms_in_common": ["symptom1", "symptom2", "symptomN"],
-            "symptoms_not_in_common": ["symptom1", "symptom2", "symptomN"]
-        }
         ]
-        </diagnosis_output>
-        
-        Present your final output within <diagnosis_output> tags as shown in the example above.
-        
-        Here is the patient description:
-        <patient_description>
+        PATIENT DESCRIPTION:
         {{description}}
-        </patient_description>
 
-        The list of already suggested diseases is:
-        <diseases_list>
-        {{diseases_list}}
-        </diseases_list>`
+        ALREADY SUGGESTED DIAGNOSES (EXCLUDE THESE)
+        {{previous_diagnoses}}
+        `,
     },
-    version: '1.0.0'
+    version: '1.0.1'
 };
 
 module.exports = PROMPTS;
