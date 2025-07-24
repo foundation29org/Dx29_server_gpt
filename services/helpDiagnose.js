@@ -568,8 +568,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     // Guardar información de seguimiento si es una llamada directa
     if (requestInfo) {
       let infoTrack = {
-        value: anonymizedDescription,
-        valueEnglish: anonymizedDescriptionEnglish,
+        value: anonymizedDescription || data.description || '',
+        valueEnglish: anonymizedDescriptionEnglish || englishDescription || '',
         myuuid: data.myuuid,
         operation: 'find disease',
         lang: data.lang,
