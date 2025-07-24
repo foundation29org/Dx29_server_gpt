@@ -144,6 +144,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     }
 
     // 1.5. Verificar si el input es un escenario clínico antes de continuar
+    console.log('englishDescription', englishDescription)
     const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
     const clinicalScenarioRequest = {
       messages: [{ role: "user", content: clinicalScenarioPrompt }],
@@ -157,27 +158,72 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       subscriptionId: data.subscriptionId,
       myuuid: data.myuuid
     };
-    const clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
-    let clinicalScenarioCost = null;
+    let clinicalScenarioResponse = null;
     let clinicalScenarioResult = '';
-    if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
-      clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
-      clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt-4o-mini') : null;
-      if (clinicalScenarioCost) {
-        costTracking.etapa0_clinical_check = {
-          cost: clinicalScenarioCost.totalCost,
-          tokens: {
-            input: clinicalScenarioCost.inputTokens,
-            output: clinicalScenarioCost.outputTokens,
-            total: clinicalScenarioCost.totalTokens
-          }
+    let clinicalScenarioCost = null;
+    try {
+      clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+      if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
+        clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
+        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt-4o-mini') : null;
+        if (clinicalScenarioCost) {
+          costTracking.etapa0_clinical_check = {
+            cost: clinicalScenarioCost.totalCost,
+            tokens: {
+              input: clinicalScenarioCost.inputTokens,
+              output: clinicalScenarioCost.outputTokens,
+              total: clinicalScenarioCost.totalTokens
+            }
+          };
+          costTracking.total.cost += clinicalScenarioCost.totalCost;
+          costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
+          costTracking.total.tokens.output += clinicalScenarioCost.outputTokens;
+          costTracking.total.tokens.total += clinicalScenarioCost.totalTokens;
+        }
+      }
+    } catch (error) {
+      // Si es un error 400 o ERR_BAD_REQUEST, asumir que es un escenario clínico válido y continuar
+      if ((error.code && error.code === 'ERR_BAD_REQUEST') || (error.response && error.response.status === 400)) {
+        console.error('Clinical scenario check skipped due to ERR_BAD_REQUEST:', error.message);
+        insights.error({
+          message: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
+          error: error.message,
+          requestData: data.description,
+          model: model,
+          operation: 'clinical-scenario-check',
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+
+        let infoErrorClinicalScenario = {
+          body: data,
+          error: error.message,
+          type: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
+          detectedLanguage: detectedLanguage || 'unknown',
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
         };
-        costTracking.total.cost += clinicalScenarioCost.totalCost;
-        costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
-        costTracking.total.tokens.output += clinicalScenarioCost.outputTokens;
-        costTracking.total.tokens.total += clinicalScenarioCost.totalTokens;
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorClinicalScenario, data.tenantId, data.subscriptionId);
+        try {
+          serviceEmail.sendMailErrorGPTIP(
+            data.lang,
+            data.description,
+            infoErrorClinicalScenario,
+            requestInfo
+          );
+        } catch (emailError) {
+          console.log('Fail sending email');
+          insights.error(emailError);
+        }
+        clinicalScenarioResult = 'true';
+      } else {
+        throw error;
       }
     }
+
     if (clinicalScenarioResult !== 'true') {
       insights.error({
         message: 'Clinical scenario check failed',

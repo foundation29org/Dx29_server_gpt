@@ -24,11 +24,18 @@ function sendMailSupport (email, lang, supportStored){
       TRANSPORTER_OPTIONS.auth.user
     ];
 
+    let subject = 'Mensaje para soporte de DxGPT';
+    if(supportStored.tenantId){
+      subject += ' (' + supportStored.tenantId + ')';
+    }
+    if(supportStored.subscriptionId){
+      subject += ' (' + supportStored.subscriptionId + ')';
+    }
     var mailOptions = {
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DxGPT',
+      subject: subject,
       template: 'mail_support/_es',
       context: {
         email : email,
@@ -97,11 +104,26 @@ function sendMailErrorGPTIP (lang, req, response, requestInfo){
       TRANSPORTER_OPTIONS.auth.user
     ];
 
+    let subject = 'Mensaje para soporte de DxGPT - Error GPT';
+    if(requestInfo){
+      if(requestInfo.headers){
+        if(requestInfo.headers['x-tenant-id']){
+          let xSubscriptionId = requestInfo.headers['x-subscription-id'] || '';
+          let xTenantId = requestInfo.headers['x-tenant-id'] || '';
+          if (xTenantId) {
+            subject = `Mensaje para soporte de DxGPT - Error GPT (${xTenantId})`;
+          }
+          if (xSubscriptionId) {
+            subject += ' - ' + xSubscriptionId;
+          }
+        }
+      }
+    }
     var mailOptions = {
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DxGPT - Error GPT',
+      subject: subject,
       template: 'mail_error_gpt_ip/_es',
       context: {
         lang : lang,
@@ -134,11 +156,18 @@ function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionId){
       TRANSPORTER_OPTIONS.auth.user
     ];
 
+    let subject = 'Mensaje para soporte de DxGPT - Feedback General';
+    if(tenantId){
+      subject += ' (' + tenantId + ')';
+    }
+    if(subscriptionId){
+      subject += ' (' + subscriptionId + ')';
+    }
     var mailOptions = {
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
       bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DxGPT - Feedback General',
+      subject: subject,
       template: 'mail_general_feedback/_es',
       context: {
         myuuid: myuuid,
