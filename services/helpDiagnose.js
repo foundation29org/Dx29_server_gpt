@@ -779,7 +779,7 @@ function validateDiagnoseRequest(data) {
       errors.push({ field: 'iframeParams', reason: 'Must be an object' });
     } else {
       // Validar campos específicos de iframeParams
-      const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+      const validFields = ['centro', 'ambito', 'especialidad', 'turno', 'servicio', 'id_paciente'];
 
       for (const field in data.iframeParams) {
         if (!validFields.includes(field)) {

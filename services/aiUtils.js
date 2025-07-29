@@ -26,7 +26,7 @@ function sanitizeIframeParams(iframeParams) {
   }
 
   const sanitized = {};
-  const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+  const validFields = ['centro', 'ambito', 'especialidad', 'turno', 'servicio', 'id_paciente'];
 
   for (const field of validFields) {
     if (iframeParams[field] && typeof iframeParams[field] === 'string') {
