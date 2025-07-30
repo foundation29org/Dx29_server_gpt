@@ -1,11 +1,35 @@
 const PROMPTS = {
     diagnosis: {
-        clinicalScenarioCheck: `You are a clinical triage assistant. Analyze the following input and determine if it describes a clinical scenario or contains relevant clinical information about a patient (such as symptoms, psychological or emotional complaints, laboratory results, imaging findings, medical diagnoses, or any medical observations).
+        clinicalScenarioCheckold: `You are a clinical triage assistant. Analyze the following input and determine if it describes a clinical scenario or contains relevant clinical information about a patient (such as symptoms, psychological or emotional complaints, laboratory results, imaging findings, medical diagnoses, or any medical observations).
 
         IF the input contains any clinical scenario, psychological or emotional complaint, laboratory result, imaging report, relevant patient-specific medical information, a list of medical diagnoses, or even a single symptom or medical complaint (including subjective symptoms, informal complaints, or non-technical descriptions), return true.
         ELSE, return false.
 
         Return ONLY the word true or false. Do not add any explanation or extra text.
+
+        INPUT:
+        {{description}}`,
+        clinicalScenarioCheck: `You are a clinical triage assistant. Analyze the following input and determine if it describes a CLINICAL CASE for diagnostic evaluation.
+
+        CLINICAL CASE FOR DIAGNOSIS: IF the input contains a clinical scenario with patient information (symptoms, signs, test results, medical history, etc.) that is being presented for diagnostic evaluation. The user is describing a patient case to understand what conditions might be present.
+
+        NOT FOR DIAGNOSIS: IF the input contains clinical information but the user is asking about treatment, management, therapeutic recommendations, medication guidance, or management strategies (even with patient context).
+
+        Return ONLY the word true or false. Do not add any explanation or extra text.
+
+        INPUT:
+        {{description}}`,
+        medicalQuestionCheck: `You are a medical content classifier. Analyze the following input and determine if it contains a medical question or medical-related content.
+
+        MEDICAL QUESTION: IF the input contains any medical-related question, inquiry about health, disease, treatment, medication, medical procedures, medical knowledge, or any healthcare-related topic. This includes questions about treatment algorithms, therapeutic recommendations, medication guidance, or management strategies, even if they include specific patient context.
+
+        NON-MEDICAL: Everything else that is not related to medicine, health, or healthcare.
+
+        Return ONLY one of these two words:
+        - "medical" if it's a medical question or medical-related content
+        - "non-medical" if it's not related to medicine or healthcare
+
+        Do not add any explanation or extra text.
 
         INPUT:
         {{description}}`,

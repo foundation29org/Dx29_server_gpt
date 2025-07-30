@@ -59,7 +59,8 @@ const CostTrackingSchema = new Schema({
         'anonymization',        // Anonimización
         'reverse_translation',  // Traducción inversa
         'database_save',         // Guardado en BD
-        'clinical_check' // Verificación de escenario clínico
+        'clinical_check', // Verificación de escenario clínico
+        'general_medical_response' // Verificación de escenario clínico
       ]
     },
     cost: {

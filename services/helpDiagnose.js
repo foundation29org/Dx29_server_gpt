@@ -7,6 +7,7 @@ const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
+const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const {
   callAiWithFailover,
   detectLanguageWithRetry,
@@ -66,6 +67,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
 
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o', userId = null, region = null) {
+  const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
   const pubsubService = userId ? require('./pubsubService') : null;
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -75,6 +77,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     total: { cost: 0, tokens: { input: 0, output: 0, total: 0 } }
   };
+
+  // Definir tenants especiales que requieren verificación de tipo de consulta
+  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local'];
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -224,9 +229,269 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       }
     }
 
-    if (clinicalScenarioResult !== 'true') {
+    // Determinar el tipo de consulta basado en el resultado del clinical scenario check
+    let queryType = 'other';
+    if (clinicalScenarioResult === 'true') {
+      queryType = 'diagnostic';
+    } else {
+      // Si no es diagnóstico y es un tenant especial, verificar si es una pregunta médica
+      if (specialTenants.includes(data.tenantId)) {
+        console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
+        
+        const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
+        const medicalQuestionRequest = {
+          messages: [{ role: "user", content: medicalQuestionPrompt }],
+          temperature: 0,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+        };
+        
+        try {
+          const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+          if (medicalQuestionResponse.data.choices && medicalQuestionResponse.data.choices[0].message.content) {
+            const medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
+            
+            if (medicalQuestionResult === 'medical') {
+              queryType = 'general';
+            } else {
+              queryType = 'other';
+            }
+            
+            console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
+          }
+        } catch (medicalError) {
+          console.error('Error in medical question check:', medicalError);
+          // En caso de error, asumir que no es médico
+          queryType = 'other';
+        }
+      } else {
+        queryType = 'other';
+      }
+    }
+
+    console.log('Query type detected:', queryType);
+
+    // Si es una consulta general para tenants especiales, generar respuesta educativa
+    if (specialTenants.includes(data.tenantId) && queryType === 'general') {
+                  console.log('General medical question detected for special tenant, generating educational response');
+
+                  // Llamar al modelo para contestar la pregunta médica general
+                  const generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using HTML formatting.
+
+                  Guidelines:
+                  - Provide accurate, evidence-based information
+                  - Use clear, understandable language
+                  - Include relevant medical context when appropriate
+                  - Focus on educational value
+                  - Keep the response concise but comprehensive
+                  - Format the response using HTML tags for better readability:
+                    * Use <h3> for main sections
+                    * Use <h4> for subsections
+                    * Use <ul> and <li> for bullet points
+                    * Use <ol> and <li> for numbered lists
+                    * Use <p> for paragraphs
+                    * Use <strong> for emphasis on important terms
+                    * Use <br> for line breaks when needed
+                  
+                  Medical Question: ${data.description}
+                  
+                  Answer in the same language as the question using proper HTML formatting.`;
+
+                  try {
+                    // Preparar requestBody para o3 modelo
+                    const o3RequestBody = {
+                      model: "o3-images",
+                      input: [
+                        {
+                          role: "user",
+                          content: [
+                            { type: "input_text", text: generalMedicalPrompt }
+                          ]
+                        }
+                      ],
+                      tools: [],
+                      text: {
+                        format: {
+                          type: "text"
+                        }
+                      },
+                      reasoning: {
+                        effort: "high"
+                      }
+                    };
+
+                    const generalMedicalResponse = await callAiWithFailover(o3RequestBody, data.timezone, 'o3images', 0, dataRequest);
+
+                    // Procesar respuesta del modelo o3
+                    let medicalAnswer = generalMedicalResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim() || '';
+                    
+                    // Limpiar marcadores de código markdown si están presentes
+                    if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
+                        medicalAnswer = medicalAnswer.slice(7, -3).trim(); // Remover ```html al inicio y ``` al final
+                    } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
+                        medicalAnswer = medicalAnswer.slice(3, -3).trim(); // Remover ``` genérico al inicio y final
+                    }
+
+                    // Generar disclaimer y recursos
+                    //let disclaimerText = 'This information is for educational purposes only and should not replace professional medical advice. Please consult with a healthcare provider for personalized medical guidance.';
+                    //let resourcesText = 'For more information, consider consulting: medical textbooks, peer-reviewed journals, or professional medical associations.';
+                    let disclaimerText = 'Esta herramienta está diseñada principalmente para ayudar en el diagnóstico. Esta respuesta a una consulta médica general es solo para fines educativos y debe ser evaluada críticamente por el usuario. No debe sustituir el consejo médico profesional.';
+                    let resourcesText = 'Para obtener más información, considere consultar: libros de texto médicos, revistas arbitradas o asociaciones médicas profesionales. Recuerde que no está optimizado para consultas sobre tratamiento o manejo clínico.';
+                    // Traducir si es necesario
+                    if (detectedLanguage !== 'es') {
+                      try {
+                        disclaimerText = await translateInvertWithRetry(disclaimerText, detectedLanguage);
+                        resourcesText = await translateInvertWithRetry(resourcesText, detectedLanguage);
+                      } catch (translationError) {
+                        console.error('Error translating disclaimer/resources:', translationError);
+                        insights.error({
+                          message: 'Error translating disclaimer/resources',
+                          error: translationError.message,
+                          detectedLanguage: detectedLanguage,
+                          myuuid: data.myuuid,
+                          tenantId: data.tenantId,
+                          subscriptionId: data.subscriptionId
+                        });
+                      }
+                    }
+
+                    const result = {
+                      result: 'success',
+                      data: [], // Sin diagnósticos para consultas generales
+                      medicalAnswer: medicalAnswer, // Respuesta educativa generada
+                      anonymization: {
+                        hasPersonalInfo: false,
+                        anonymizedText: '',
+                        anonymizedTextHtml: ''
+                      },
+                      detectedLang: detectedLanguage,
+                      model: model,
+                      queryType: queryType,
+                      disclaimer: {
+                        text: disclaimerText,
+                        type: 'educational_disclaimer'
+                      },
+                      resources: {
+                        text: resourcesText,
+                        type: 'bibliography_recommendations'
+                      },
+                      question: data.description
+                    };
+
+                    // Guardar costos del clinical check y la respuesta médica
+                    const stages = [];
+                    if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
+                      stages.push({
+                        name: 'clinical_check',
+                        cost: costTracking.etapa0_clinical_check.cost,
+                        tokens: costTracking.etapa0_clinical_check.tokens,
+                        model: 'gpt-4o-mini',
+                        duration: 0,
+                        success: true
+                      });
+                    }
+                    
+                    // Agregar costos de la respuesta médica general
+                    if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
+                      const usage = generalMedicalResponse.data.usage;
+                      const etapa1Cost = calculatePrice(usage, 'o3');
+                      stages.push({
+                        name: 'general_medical_response',
+                        cost: etapa1Cost.totalCost,
+                        tokens: etapa1Cost.totalTokens,
+                        model: 'o3',
+                        duration: 0,
+                        success: true
+                      });
+                    }
+
+                    try {
+                      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', {
+                        message: 'General medical question response',
+                        queryType: queryType
+                      });
+                      console.log('✅ Costos de consulta médica general guardados en la base de datos');
+                    } catch (costError) {
+                      console.error('❌ Error guardando costos de consulta médica general:', costError.message);
+                    }
+
+                    // Guardar sesión de diagnóstico en la base de datos
+                    try {
+                      const questionData = {
+                        myuuid: data.myuuid,
+                        tenantId: data.tenantId,
+                        subscriptionId: data.subscriptionId,
+                        iframeParams: data.iframeParams || {},
+                        question: {
+                          originalText: data.description,
+                          detectedLanguage: detectedLanguage,
+                          translatedText: englishDescription
+                        },
+                        answer: {
+                          medicalAnswer : medicalAnswer,
+                          queryType: queryType,
+                          model: 'o3images'
+                        },
+                        timezone: data.timezone,
+                        lang: data.lang || 'en',
+                        processingTime: Date.now() - startTime,
+                        status: 'success'
+                      };
+
+                      await DiagnoseSessionService.saveQuestion(questionData);
+                      console.log('✅ Sesión de diagnóstico guardada exitosamente');
+                    } catch (sessionError) {
+                      console.error('❌ Error guardando sesión de diagnóstico:', sessionError.message);
+                      insights.error({
+                        message: 'Error guardando sesión de diagnóstico',
+                        error: sessionError.message,
+                        myuuid: data.myuuid,
+                        tenantId: data.tenantId,
+                        subscriptionId: data.subscriptionId
+                      });
+                      // No lanzamos el error para no afectar la respuesta al usuario
+                    }
+
+                    return result;
+                  } catch (generalMedicalError) {
+                    console.error('Error generating general medical response:', generalMedicalError);
+                    insights.error({
+                      message: 'Error generating general medical response',
+                      error: generalMedicalError.message,
+                      myuuid: data.myuuid,
+                      tenantId: data.tenantId,
+                      subscriptionId: data.subscriptionId
+                    });
+                    const questionData = {
+                      myuuid: data.myuuid,
+                      tenantId: data.tenantId,
+                      subscriptionId: data.subscriptionId,
+                      iframeParams: data.iframeParams || {},
+                      question: {
+                        originalText: data.description,
+                        detectedLanguage: detectedLanguage,
+                        translatedText: englishDescription
+                      },
+                      answer: {
+                        medicalAnswer : '',
+                        queryType: queryType,
+                        model: 'o3images'
+                      },
+                      timezone: data.timezone,
+                      lang: data.lang || 'en',
+                      processingTime: Date.now() - startTime,
+                      status: 'error'
+                    };
+                    await DiagnoseSessionService.saveQuestion(questionData);
+                    throw generalMedicalError;
+                  }
+    }
+
+    // Si no es una consulta diagnóstica, devolver respuesta vacía
+    if (queryType !== 'diagnostic') {
       insights.error({
-        message: 'Clinical scenario check failed',
+        message: 'Non-diagnostic query detected',
         requestData: data.description,
         model: model,
         response: clinicalScenarioResponse.data.choices,
@@ -238,7 +503,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       let infoErrorClinicalScenario = {
         body: data,
         error: clinicalScenarioResult,
-        type: 'CLINICAL_SCENARIO_CHECK_FAILED',
+        type: 'NON_DIAGNOSTIC_QUERY',
         detectedLanguage: detectedLanguage || 'unknown',
         model: model,
         myuuid: data.myuuid,
@@ -292,6 +557,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         },
         detectedLang: detectedLanguage,
         model: model,
+        queryType: queryType,
         costTracking: costTracking
       };
     }
@@ -672,6 +938,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       },
       detectedLang: detectedLanguage,
       model: model,
+      queryType: queryType, // Agregar el tipo de consulta detectado
       //costTracking: costTracking
     };
     return result;
