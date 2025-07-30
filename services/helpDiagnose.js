@@ -317,7 +317,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         }
                       },
                       reasoning: {
-                        effort: "high"
+                        effort: "low"//high
                       }
                     };
 
@@ -335,18 +335,15 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
 
                     // Generar disclaimer y recursos
                     //let disclaimerText = 'This information is for educational purposes only and should not replace professional medical advice. Please consult with a healthcare provider for personalized medical guidance.';
-                    //let resourcesText = 'For more information, consider consulting: medical textbooks, peer-reviewed journals, or professional medical associations.';
-                    let disclaimerText = 'Esta herramienta está diseñada principalmente para ayudar en el diagnóstico. Esta respuesta a una consulta médica general es solo para fines educativos y debe ser evaluada críticamente por el usuario. No debe sustituir el consejo médico profesional.';
-                    let resourcesText = 'Para obtener más información, considere consultar: libros de texto médicos, revistas arbitradas o asociaciones médicas profesionales. Recuerde que no está optimizado para consultas sobre tratamiento o manejo clínico.';
+                    let disclaimerText = 'Esta herramienta está diseñada principalmente para ayudar en el diagnóstico. Las respuestas a consultas médicas generales son solo con fines educativos y deben ser evaluadas críticamente. No sustituyen el consejo médico profesional.';
                     // Traducir si es necesario
                     if (detectedLanguage !== 'es') {
                       try {
                         disclaimerText = await translateInvertWithRetry(disclaimerText, detectedLanguage);
-                        resourcesText = await translateInvertWithRetry(resourcesText, detectedLanguage);
                       } catch (translationError) {
-                        console.error('Error translating disclaimer/resources:', translationError);
+                        console.error('Error translating disclaimer:', translationError);
                         insights.error({
-                          message: 'Error translating disclaimer/resources',
+                          message: 'Error translating disclaimer',
                           error: translationError.message,
                           detectedLanguage: detectedLanguage,
                           myuuid: data.myuuid,
@@ -371,10 +368,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       disclaimer: {
                         text: disclaimerText,
                         type: 'educational_disclaimer'
-                      },
-                      resources: {
-                        text: resourcesText,
-                        type: 'bibliography_recommendations'
                       },
                       question: data.description
                     };
