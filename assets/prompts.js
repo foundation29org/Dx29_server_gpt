@@ -58,9 +58,9 @@ const PROMPTS = {
             {{description}}`,
         medicalQuestionCheck: `You are a medical content classifier. Analyze the following input and determine if it contains a medical question or medical-related content.
 
-        MEDICAL QUESTION: IF the input contains any medical-related question, inquiry about health, disease, treatment, medication, medical procedures, medical knowledge, or any healthcare-related topic. This includes questions about treatment algorithms, therapeutic recommendations, medication guidance, or management strategies, even if they include specific patient context.
+        MEDICAL QUESTION: IF the input contains any medical-related question, inquiry about health, disease, treatment, medication, medical procedures, medical knowledge, or any healthcare-related topic that can be answered with general medical knowledge.
 
-        NON-MEDICAL: Everything else that is not related to medicine, health, or healthcare.
+        NON-MEDICAL: IF the input requests analysis, summary, or evaluation of specific patient data without providing that data (e.g., "resumen de esta paciente", "analiza los síntomas de este paciente" without patient information).
 
         Return ONLY one of these two words:
         - "medical" if it's a medical question or medical-related content

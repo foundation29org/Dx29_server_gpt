@@ -11,12 +11,10 @@ const DiagnoseSessionSchema = new Schema({
   },
   tenantId: {
     type: String,
-    required: true,
     index: true
   },
   subscriptionId: {
     type: String,
-    required: false,
     index: true
   },
   iframeParams: {
@@ -77,7 +75,7 @@ const DiagnoseSessionSchema = new Schema({
   status: {
     type: String,
     required: true,
-    enum: ['success', 'error'],
+    enum: ['success', 'error', 'unknown'],
     default: 'success'
   },
   timestamp: {

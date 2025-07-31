@@ -479,6 +479,28 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                     await DiagnoseSessionService.saveQuestion(questionData);
                     throw generalMedicalError;
                   }
+    }else{
+      const questionData = {
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId,
+        iframeParams: data.iframeParams || {},
+        question: {
+          originalText: data.description,
+          detectedLanguage: detectedLanguage,
+          translatedText: englishDescription
+        },
+        answer: {
+          medicalAnswer : '',
+          queryType: queryType,
+          model: model
+        },
+        timezone: data.timezone,
+        lang: data.lang || 'en',
+        processingTime: Date.now() - startTime,
+        status: 'unknown'
+      };
+      DiagnoseSessionService.saveQuestion(questionData);
     }
 
     // Si no es una consulta diagnóstica, devolver respuesta vacía

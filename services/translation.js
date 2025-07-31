@@ -39,7 +39,8 @@ async function detectLanguage(text, lang, endpoint) {
     if (!detectionResult.isTranslationSupported) {
       const error = new Error(`Detected language '${detectionResult.language}' is not supported for translation (confidence: ${detectionResult.score})`);
       error.code = 'UNSUPPORTED_LANGUAGE';
-      throw error;
+      return 'en';
+      //throw error;
     }
 
     const confidenceThreshold = 0.9;
