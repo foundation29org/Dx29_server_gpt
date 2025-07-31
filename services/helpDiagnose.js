@@ -8,6 +8,7 @@ const queueService = require('./queueService');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
+const pubsubService = require('./pubsubService');
 const {
   callAiWithFailover,
   detectLanguageWithRetry,
@@ -28,15 +29,14 @@ const { calculatePrice, formatCost } = require('./costUtils');
 // Extraer la lógica principal a una función reutilizable
 async function processAIRequest(data, requestInfo = null, model = 'gpt4o', region = null) {
   // Si es un modelo largo, usar WebPubSub con progreso
-  const isLongModel = (model === 'o3');
+  //const isLongModel = (model === 'o3');
+  const isLongModel = true;
   const userId = data.myuuid;
 
   if (isLongModel) {
     console.log(`Processing long model ${model} for user ${userId} via WebPubSub`);
 
     try {
-      const pubsubService = require('./pubsubService');
-
       // Enviar progreso inicial
       await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 10);
 
@@ -52,7 +52,6 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
     } catch (error) {
       // Enviar error via WebPubSub
       try {
-        const pubsubService = require('./pubsubService');
         await pubsubService.sendError(userId, error, 'PROCESSING_ERROR');
       } catch (pubsubError) {
         console.error('Error sending WebPubSub error notification:', pubsubError);
@@ -68,7 +67,6 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o', userId = null, region = null) {
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
-  const pubsubService = userId ? require('./pubsubService') : null;
 
   // Inicializar objeto para rastrear costos de cada etapa
   const costTracking = {
@@ -100,7 +98,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       }
 
       // Progreso: traducción completada
-      if (pubsubService) {
+      if (userId) {
         await pubsubService.sendProgress(userId, 'ai_processing', 'Analyzing symptoms with AI...', 30);
       }
     } catch (translationError) {
@@ -274,6 +272,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
 
     // Si es una consulta general para tenants especiales, generar respuesta educativa
     if (specialTenants.includes(data.tenantId) && queryType === 'general') {
+
+                  await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
                   console.log('General medical question detected for special tenant, generating educational response');
 
                   // Llamar al modelo para contestar la pregunta médica general
@@ -333,26 +333,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         medicalAnswer = medicalAnswer.slice(3, -3).trim(); // Remover ``` genérico al inicio y final
                     }
 
-                    // Generar disclaimer y recursos
-                    //let disclaimerText = 'This information is for educational purposes only and should not replace professional medical advice. Please consult with a healthcare provider for personalized medical guidance.';
-                    let disclaimerText = 'Esta herramienta está diseñada principalmente para ayudar en el diagnóstico. Las respuestas a consultas médicas generales son solo con fines educativos y deben ser evaluadas críticamente. No sustituyen el consejo médico profesional.';
-                    // Traducir si es necesario
-                    if (detectedLanguage !== 'es') {
-                      try {
-                        disclaimerText = await translateInvertWithRetry(disclaimerText, detectedLanguage);
-                      } catch (translationError) {
-                        console.error('Error translating disclaimer:', translationError);
-                        insights.error({
-                          message: 'Error translating disclaimer',
-                          error: translationError.message,
-                          detectedLanguage: detectedLanguage,
-                          myuuid: data.myuuid,
-                          tenantId: data.tenantId,
-                          subscriptionId: data.subscriptionId
-                        });
-                      }
-                    }
-
                     const result = {
                       result: 'success',
                       data: [], // Sin diagnósticos para consultas generales
@@ -365,10 +345,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       detectedLang: detectedLanguage,
                       model: model,
                       queryType: queryType,
-                      disclaimer: {
-                        text: disclaimerText,
-                        type: 'educational_disclaimer'
-                      },
                       question: data.description
                     };
 
@@ -445,8 +421,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       });
                       // No lanzamos el error para no afectar la respuesta al usuario
                     }
-
-                    return result;
+                    // Enviar progreso inicial
+                    await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 10);
+                    // Enviar resultado final via WebPubSub
+                    await pubsubService.sendResult(userId, result);
+                    console.log('✅ Resultado final enviado via WebPubSub');
+                    return { result: 'success', message: 'Sent via WebPubSub' };
+                    //return result;
                   } catch (generalMedicalError) {
                     console.error('Error generating general medical response:', generalMedicalError);
                     insights.error({
@@ -625,9 +606,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let usage = null;
 
     // Progreso: IA completada
-    if (pubsubService) {
-      await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
-    }
+          if (userId) {
+        await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
+      }
 
     // Procesar la respuesta según el modelo
     let aiResponseText;
@@ -936,9 +917,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         subscriptionId: data.subscriptionId
       });
     }
-    if (pubsubService) {
-      await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
-    }
+          if (userId) {
+        await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
+      }
     let diseasesList = [];
     if (parsedResponse.length > 0) {
       diseasesList = parsedResponse;
