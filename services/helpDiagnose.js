@@ -7,6 +7,8 @@ const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
 const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
+const DiagnoseSessionService = require('../services/diagnoseSessionService');
+const pubsubService = require('./pubsubService');
 const {
   callAiWithFailover,
   detectLanguageWithRetry,
@@ -27,15 +29,14 @@ const { calculatePrice, formatCost } = require('./costUtils');
 // Extraer la lógica principal a una función reutilizable
 async function processAIRequest(data, requestInfo = null, model = 'gpt4o', region = null) {
   // Si es un modelo largo, usar WebPubSub con progreso
-  const isLongModel = (model === 'o3');
+  //const isLongModel = (model === 'o3');
+  const isLongModel = true;
   const userId = data.myuuid;
 
   if (isLongModel) {
     console.log(`Processing long model ${model} for user ${userId} via WebPubSub`);
 
     try {
-      const pubsubService = require('./pubsubService');
-
       // Enviar progreso inicial
       await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 10);
 
@@ -51,7 +52,6 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
     } catch (error) {
       // Enviar error via WebPubSub
       try {
-        const pubsubService = require('./pubsubService');
         await pubsubService.sendError(userId, error, 'PROCESSING_ERROR');
       } catch (pubsubError) {
         console.error('Error sending WebPubSub error notification:', pubsubError);
@@ -66,7 +66,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
 
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o', userId = null, region = null) {
-  const pubsubService = userId ? require('./pubsubService') : null;
+  const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
   const costTracking = {
@@ -75,6 +75,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     total: { cost: 0, tokens: { input: 0, output: 0, total: 0 } }
   };
+
+  // Definir tenants especiales que requieren verificación de tipo de consulta
+  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local'];
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -95,7 +98,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       }
 
       // Progreso: traducción completada
-      if (pubsubService) {
+      if (userId) {
         await pubsubService.sendProgress(userId, 'ai_processing', 'Analyzing symptoms with AI...', 30);
       }
     } catch (translationError) {
@@ -144,6 +147,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     }
 
     // 1.5. Verificar si el input es un escenario clínico antes de continuar
+    console.log('englishDescription', englishDescription)
     const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
     const clinicalScenarioRequest = {
       messages: [{ role: "user", content: clinicalScenarioPrompt }],
@@ -157,39 +161,345 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       subscriptionId: data.subscriptionId,
       myuuid: data.myuuid
     };
-    const clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
-    let clinicalScenarioCost = null;
+    let clinicalScenarioResponse = null;
     let clinicalScenarioResult = '';
-    if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
-      clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
-      clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt-4o-mini') : null;
-      if (clinicalScenarioCost) {
-        costTracking.etapa0_clinical_check = {
-          cost: clinicalScenarioCost.totalCost,
-          tokens: {
-            input: clinicalScenarioCost.inputTokens,
-            output: clinicalScenarioCost.outputTokens,
-            total: clinicalScenarioCost.totalTokens
-          }
+    let clinicalScenarioCost = null;
+    try {
+      clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+      if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
+        clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
+        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt-4o-mini') : null;
+        if (clinicalScenarioCost) {
+          costTracking.etapa0_clinical_check = {
+            cost: clinicalScenarioCost.totalCost,
+            tokens: {
+              input: clinicalScenarioCost.inputTokens,
+              output: clinicalScenarioCost.outputTokens,
+              total: clinicalScenarioCost.totalTokens
+            }
+          };
+          costTracking.total.cost += clinicalScenarioCost.totalCost;
+          costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
+          costTracking.total.tokens.output += clinicalScenarioCost.outputTokens;
+          costTracking.total.tokens.total += clinicalScenarioCost.totalTokens;
+        }
+      }
+    } catch (error) {
+      // Si es un error 400 o ERR_BAD_REQUEST, asumir que es un escenario clínico válido y continuar
+      if ((error.code && error.code === 'ERR_BAD_REQUEST') || (error.response && error.response.status === 400)) {
+        console.error('Clinical scenario check skipped due to ERR_BAD_REQUEST:', error.message);
+        insights.error({
+          message: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
+          error: error.message,
+          requestData: data.description,
+          model: model,
+          operation: 'clinical-scenario-check',
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+
+        let infoErrorClinicalScenario = {
+          body: data,
+          error: error.message,
+          type: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
+          detectedLanguage: detectedLanguage || 'unknown',
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
         };
-        costTracking.total.cost += clinicalScenarioCost.totalCost;
-        costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
-        costTracking.total.tokens.output += clinicalScenarioCost.outputTokens;
-        costTracking.total.tokens.total += clinicalScenarioCost.totalTokens;
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorClinicalScenario, data.tenantId, data.subscriptionId);
+        try {
+          serviceEmail.sendMailErrorGPTIP(
+            data.lang,
+            data.description,
+            infoErrorClinicalScenario,
+            requestInfo
+          );
+        } catch (emailError) {
+          console.log('Fail sending email');
+          insights.error(emailError);
+        }
+        clinicalScenarioResult = 'true';
+      } else {
+        throw error;
       }
     }
-    if (clinicalScenarioResult !== 'true') {
+
+    // Determinar el tipo de consulta basado en el resultado del clinical scenario check
+    let queryType = 'other';
+    if (clinicalScenarioResult === 'true') {
+      queryType = 'diagnostic';
+    } else {
+      // Si no es diagnóstico y es un tenant especial, verificar si es una pregunta médica
+      if (specialTenants.includes(data.tenantId)) {
+        console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
+        
+        const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
+        const medicalQuestionRequest = {
+          messages: [{ role: "user", content: medicalQuestionPrompt }],
+          temperature: 0,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+        };
+        
+        try {
+          const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+          if (medicalQuestionResponse.data.choices && medicalQuestionResponse.data.choices[0].message.content) {
+            const medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
+            
+            if (medicalQuestionResult === 'medical') {
+              queryType = 'general';
+            } else {
+              queryType = 'other';
+            }
+            
+            console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
+          }
+        } catch (medicalError) {
+          console.error('Error in medical question check:', medicalError);
+          // En caso de error, asumir que no es médico
+          queryType = 'other';
+        }
+      } else {
+        queryType = 'other';
+      }
+    }
+
+    console.log('Query type detected:', queryType);
+
+    // Si es una consulta general para tenants especiales, generar respuesta educativa
+    if (specialTenants.includes(data.tenantId) && queryType === 'general') {
+
+                  await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
+                  console.log('General medical question detected for special tenant, generating educational response');
+
+                  // Llamar al modelo para contestar la pregunta médica general
+                  const generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using HTML formatting.
+
+                  Guidelines:
+                  - Provide accurate, evidence-based information
+                  - Use clear, understandable language
+                  - Include relevant medical context when appropriate
+                  - Focus on educational value
+                  - Keep the response concise but comprehensive
+                  - Format the response using HTML tags for better readability:
+                    * Use <h3> for main sections
+                    * Use <h4> for subsections
+                    * Use <ul> and <li> for bullet points
+                    * Use <ol> and <li> for numbered lists
+                    * Use <p> for paragraphs
+                    * Use <strong> for emphasis on important terms
+                    * Use <br> for line breaks when needed
+                  
+                  Medical Question: ${data.description}
+                  
+                  Answer in the same language as the question using proper HTML formatting.`;
+
+                  try {
+                    // Preparar requestBody para o3 modelo
+                    const o3RequestBody = {
+                      model: "o3-images",
+                      input: [
+                        {
+                          role: "user",
+                          content: [
+                            { type: "input_text", text: generalMedicalPrompt }
+                          ]
+                        }
+                      ],
+                      tools: [],
+                      text: {
+                        format: {
+                          type: "text"
+                        }
+                      },
+                      reasoning: {
+                        effort: "low"//high
+                      }
+                    };
+
+                    const generalMedicalResponse = await callAiWithFailover(o3RequestBody, data.timezone, 'o3images', 0, dataRequest);
+
+                    // Procesar respuesta del modelo o3
+                    let medicalAnswer = generalMedicalResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim() || '';
+                    
+                    // Limpiar marcadores de código markdown si están presentes
+                    if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
+                        medicalAnswer = medicalAnswer.slice(7, -3).trim(); // Remover ```html al inicio y ``` al final
+                    } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
+                        medicalAnswer = medicalAnswer.slice(3, -3).trim(); // Remover ``` genérico al inicio y final
+                    }
+
+                    const result = {
+                      result: 'success',
+                      data: [], // Sin diagnósticos para consultas generales
+                      medicalAnswer: medicalAnswer, // Respuesta educativa generada
+                      anonymization: {
+                        hasPersonalInfo: false,
+                        anonymizedText: '',
+                        anonymizedTextHtml: ''
+                      },
+                      detectedLang: detectedLanguage,
+                      model: model,
+                      queryType: queryType,
+                      question: data.description
+                    };
+
+                    // Guardar costos del clinical check y la respuesta médica
+                    const stages = [];
+                    if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
+                      stages.push({
+                        name: 'clinical_check',
+                        cost: costTracking.etapa0_clinical_check.cost,
+                        tokens: costTracking.etapa0_clinical_check.tokens,
+                        model: 'gpt-4o-mini',
+                        duration: 0,
+                        success: true
+                      });
+                    }
+                    
+                    // Agregar costos de la respuesta médica general
+                    if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
+                      const usage = generalMedicalResponse.data.usage;
+                      const etapa1Cost = calculatePrice(usage, 'o3');
+                      stages.push({
+                        name: 'general_medical_response',
+                        cost: etapa1Cost.totalCost,
+                        tokens: etapa1Cost.totalTokens,
+                        model: 'o3',
+                        duration: 0,
+                        success: true
+                      });
+                    }
+
+                    try {
+                      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', {
+                        message: 'General medical question response',
+                        queryType: queryType
+                      });
+                      console.log('✅ Costos de consulta médica general guardados en la base de datos');
+                    } catch (costError) {
+                      console.error('❌ Error guardando costos de consulta médica general:', costError.message);
+                    }
+
+                    // Guardar sesión de diagnóstico en la base de datos
+                    try {
+                      const questionData = {
+                        myuuid: data.myuuid,
+                        tenantId: data.tenantId,
+                        subscriptionId: data.subscriptionId,
+                        iframeParams: data.iframeParams || {},
+                        question: {
+                          originalText: data.description,
+                          detectedLanguage: detectedLanguage,
+                          translatedText: englishDescription
+                        },
+                        answer: {
+                          medicalAnswer : medicalAnswer,
+                          queryType: queryType,
+                          model: 'o3images'
+                        },
+                        timezone: data.timezone,
+                        lang: data.lang || 'en',
+                        processingTime: Date.now() - startTime,
+                        status: 'success'
+                      };
+
+                      await DiagnoseSessionService.saveQuestion(questionData);
+                      console.log('✅ Sesión de diagnóstico guardada exitosamente');
+                    } catch (sessionError) {
+                      console.error('❌ Error guardando sesión de diagnóstico:', sessionError.message);
+                      insights.error({
+                        message: 'Error guardando sesión de diagnóstico',
+                        error: sessionError.message,
+                        myuuid: data.myuuid,
+                        tenantId: data.tenantId,
+                        subscriptionId: data.subscriptionId
+                      });
+                      // No lanzamos el error para no afectar la respuesta al usuario
+                    }
+                    // Enviar progreso inicial
+                    await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 10);
+                    // Enviar resultado final via WebPubSub
+                    await pubsubService.sendResult(userId, result);
+                    console.log('✅ Resultado final enviado via WebPubSub');
+                    return { result: 'success', message: 'Sent via WebPubSub' };
+                    //return result;
+                  } catch (generalMedicalError) {
+                    console.error('Error generating general medical response:', generalMedicalError);
+                    insights.error({
+                      message: 'Error generating general medical response',
+                      error: generalMedicalError.message,
+                      myuuid: data.myuuid,
+                      tenantId: data.tenantId,
+                      subscriptionId: data.subscriptionId
+                    });
+                    const questionData = {
+                      myuuid: data.myuuid,
+                      tenantId: data.tenantId,
+                      subscriptionId: data.subscriptionId,
+                      iframeParams: data.iframeParams || {},
+                      question: {
+                        originalText: data.description,
+                        detectedLanguage: detectedLanguage,
+                        translatedText: englishDescription
+                      },
+                      answer: {
+                        medicalAnswer : '',
+                        queryType: queryType,
+                        model: 'o3images'
+                      },
+                      timezone: data.timezone,
+                      lang: data.lang || 'en',
+                      processingTime: Date.now() - startTime,
+                      status: 'error'
+                    };
+                    await DiagnoseSessionService.saveQuestion(questionData);
+                    throw generalMedicalError;
+                  }
+    }else{
+      const questionData = {
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId,
+        iframeParams: data.iframeParams || {},
+        question: {
+          originalText: data.description,
+          detectedLanguage: detectedLanguage,
+          translatedText: englishDescription
+        },
+        answer: {
+          medicalAnswer : '',
+          queryType: queryType,
+          model: model
+        },
+        timezone: data.timezone,
+        lang: data.lang || 'en',
+        processingTime: Date.now() - startTime,
+        status: 'unknown'
+      };
+      DiagnoseSessionService.saveQuestion(questionData);
+    }
+
+    // Si no es una consulta diagnóstica, devolver respuesta vacía
+    if (queryType !== 'diagnostic') {
       insights.error({
-        message: 'Clinical scenario check failed',
-        requestData: data,
+        message: 'Non-diagnostic query detected',
+        requestData: data.description,
         model: model,
-        response: clinicalScenarioResponse,
+        response: clinicalScenarioResponse.data.choices,
         operation: 'clinical-scenario-check',
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId
       });
       let infoErrorClinicalScenario = {
         body: data,
         error: clinicalScenarioResult,
-        type: 'CLINICAL_SCENARIO_CHECK_FAILED',
+        type: 'NON_DIAGNOSTIC_QUERY',
         detectedLanguage: detectedLanguage || 'unknown',
         model: model,
         myuuid: data.myuuid,
@@ -243,6 +553,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         },
         detectedLang: detectedLanguage,
         model: model,
+        queryType: queryType,
         costTracking: costTracking
       };
     }
@@ -295,9 +606,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let usage = null;
 
     // Progreso: IA completada
-    if (pubsubService) {
-      await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
-    }
+          if (userId) {
+        await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
+      }
 
     // Procesar la respuesta según el modelo
     let aiResponseText;
@@ -519,8 +830,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     // Guardar información de seguimiento si es una llamada directa
     if (requestInfo) {
       let infoTrack = {
-        value: anonymizedDescription,
-        valueEnglish: anonymizedDescriptionEnglish,
+        value: anonymizedDescription || data.description || '',
+        valueEnglish: anonymizedDescriptionEnglish || englishDescription || '',
         myuuid: data.myuuid,
         operation: 'find disease',
         lang: data.lang,
@@ -606,9 +917,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         subscriptionId: data.subscriptionId
       });
     }
-    if (pubsubService) {
-      await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
-    }
+          if (userId) {
+        await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
+      }
     let diseasesList = [];
     if (parsedResponse.length > 0) {
       diseasesList = parsedResponse;
@@ -623,6 +934,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       },
       detectedLang: detectedLanguage,
       model: model,
+      queryType: queryType, // Agregar el tipo de consulta detectado
       //costTracking: costTracking
     };
     return result;
@@ -644,20 +956,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
             success: false
           });
         }
-
-        // Etapa 2: Expansión
-        if (costTracking.etapa2_expansion.cost > 0) {
-          stages.push({
-            name: 'ai_call',
-            cost: costTracking.etapa2_expansion.cost,
-            tokens: costTracking.etapa2_expansion.tokens,
-            model: model,
-            duration: 0,
-            success: false
-          });
-        }
-
-        // Etapa 3: Anonimización
+        // Etapa 2: Anonimización
         if (costTracking.etapa2_anonimizacion.cost > 0) {
           stages.push({
             name: 'anonymization',
@@ -743,7 +1042,7 @@ function validateDiagnoseRequest(data) {
       errors.push({ field: 'iframeParams', reason: 'Must be an object' });
     } else {
       // Validar campos específicos de iframeParams
-      const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+      const validFields = ['centro', 'ambito', 'especialidad', 'turno', 'servicio', 'id_paciente'];
 
       for (const field in data.iframeParams) {
         if (!validFields.includes(field)) {

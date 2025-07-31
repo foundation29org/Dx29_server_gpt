@@ -26,7 +26,7 @@ function sanitizeIframeParams(iframeParams) {
   }
 
   const sanitized = {};
-  const validFields = ['centro', 'ambito', 'especialidad', 'medicalText', 'turno', 'servicio', 'id_paciente'];
+  const validFields = ['centro', 'ambito', 'especialidad', 'turno', 'servicio', 'id_paciente'];
 
   for (const field of validFields) {
     if (iframeParams[field] && typeof iframeParams[field] === 'string') {
@@ -123,6 +123,36 @@ const endpointsMap = {
     other: [
       `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+    ]
+  },
+  o3images: {
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
+    ],
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`  // Suiza como backup
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`  // Suiza como backup
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`, // EastUS2
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`  // Suiza como backup
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
+      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
     ]
   },
   gpt4omini: {

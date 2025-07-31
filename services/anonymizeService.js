@@ -4,6 +4,8 @@ const insights = require('./insights');
 const axios = require('axios');
 const { encodingForModel } = require("js-tiktoken");
 
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 function calculateMaxTokensAnon(jsonText) {
   const enc = encodingForModel("gpt-4o");
   const patientDescriptionTokens = enc.encode(jsonText).length;
