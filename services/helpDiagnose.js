@@ -299,32 +299,20 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                   Answer in the same language as the question using proper HTML formatting.`;
 
                   try {
-                    // Preparar requestBody para o3 modelo
-                    const o3RequestBody = {
-                      model: "o3-images",
-                      input: [
-                        {
-                          role: "user",
-                          content: [
-                            { type: "input_text", text: generalMedicalPrompt }
-                          ]
-                        }
-                      ],
-                      tools: [],
-                      text: {
-                        format: {
-                          type: "text"
-                        }
-                      },
-                      reasoning: {
-                        effort: "low"//high
-                      }
-                    };
+                                        
+                    let requestBody = {
+                        messages: [{ role: "user", content: generalMedicalPrompt }],
+                        temperature: 0,
+                        top_p: 1,
+                        frequency_penalty: 0,
+                        presence_penalty: 0
+                      };
+                    
 
-                    const generalMedicalResponse = await callAiWithFailover(o3RequestBody, data.timezone, 'o3images', 0, dataRequest);
+                    const generalMedicalResponse = await callAiWithFailover(requestBody, data.timezone, 'gpt4o', 0, dataRequest);
 
-                    // Procesar respuesta del modelo o3
-                    let medicalAnswer = generalMedicalResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim() || '';
+                    // Procesar respuesta según el modelo
+                    let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
                     
                     // Limpiar marcadores de código markdown si están presentes
                     if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
@@ -369,7 +357,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         name: 'general_medical_response',
                         cost: etapa1Cost.totalCost,
                         tokens: etapa1Cost.totalTokens,
-                        model: 'o3',
+                        model: 'gpt4o',
                         duration: 0,
                         success: true
                       });
@@ -400,7 +388,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         answer: {
                           medicalAnswer : medicalAnswer,
                           queryType: queryType,
-                          model: 'o3images'
+                          model: 'gpt4o'
                         },
                         timezone: data.timezone,
                         lang: data.lang || 'en',
@@ -450,7 +438,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       answer: {
                         medicalAnswer : '',
                         queryType: queryType,
-                        model: 'o3images'
+                        model: 'gpt4o'
                       },
                       timezone: data.timezone,
                       lang: data.lang || 'en',
