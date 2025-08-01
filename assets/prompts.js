@@ -19,7 +19,8 @@ const PROMPTS = {
             • refers to an identifiable patient (real or self) – even briefly ("itching on penis", "pail finger nails"),  
             • contains laboratory findings, test results, or clinical data that need interpretation, or
             • the intent is to know **what condition(s) could be causing it** (differential diagnosis or "what is this?"), or
-            • presents abnormal clinical findings (even if asymptomatic) that require medical evaluation.
+            • presents abnormal clinical findings (even if asymptomatic) that require medical evaluation, or
+            • describes symptoms or clinical manifestations that need diagnostic evaluation.
 
             Return **false** when the message …
             • asks mainly about treatment, management, drugs, follow-up, or prognosis for a known condition,  
