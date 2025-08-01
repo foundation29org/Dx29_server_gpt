@@ -20,19 +20,24 @@ const PROMPTS = {
             • contains laboratory findings, test results, or clinical data that need interpretation, or
             • the intent is to know **what condition(s) could be causing it** (differential diagnosis or "what is this?"), or
             • presents abnormal clinical findings (even if asymptomatic) that require medical evaluation, or
-            • describes symptoms or clinical manifestations that need diagnostic evaluation.
+            • describes symptoms or clinical manifestations that need diagnostic evaluation, or
+            • contains a list of diagnoses/conditions that appear to be describing a specific patient case, or
+            • mentions multiple conditions that suggest a complex patient scenario requiring diagnostic analysis
 
             Return **false** when the message …
             • asks mainly about treatment, management, drugs, follow-up, or prognosis for a known condition,  
             • is a general theoretical question, a definition, or just the name of a disease/test ("Síndrome del cabello anágeno corto"),  
             • concerns lab techniques, guidelines, or population data without describing a concrete patient,  
             • is administrative / non-clinical, or
-            • asks specific questions about why a particular finding is elevated/abnormal (e.g., "Why is ferritin so high?")
+            • asks specific questions about why a particular finding is elevated/abnormal (e.g., "Why is ferritin so high?"), or
+            • is clearly a general medical question without patient context
 
             **PRIORITY RULES**:
             • If the message asks about treatment/management for a known condition, return **false** regardless of patient context
             • If the message contains patient data but the primary intent is treatment advice, return **false**
             • When in doubt about diagnostic vs. treatment intent, return **true** only if the focus is on understanding the underlying condition
+            • If the message contains multiple diagnoses/conditions that could represent a patient case, return **true**
+            • If the message appears to be describing a patient's condition profile, return **true**
 
             **Examples**
 
