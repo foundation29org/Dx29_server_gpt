@@ -474,7 +474,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
 
     // Si no es una consulta diagnóstica, devolver respuesta vacía
     if (queryType !== 'diagnostic') {
-      insights.error({
+      insights.trackEvent('NonDiagnosticQueryDetected', {
         message: 'Non-diagnostic query detected',
         requestData: data.description,
         model: model,
@@ -495,7 +495,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         subscriptionId: data.subscriptionId
       };
       await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorClinicalScenario, data.tenantId, data.subscriptionId);
-      try {
+      /*try {
         serviceEmail.sendMailErrorGPTIP(
           data.lang,
           data.description,
@@ -505,7 +505,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       } catch (emailError) {
         console.log('Fail sending email');
         insights.error(emailError);
-      }
+      }*/
 
       // Guardar costos si corresponde
       const stages = [];
