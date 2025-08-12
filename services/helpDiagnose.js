@@ -1158,6 +1158,17 @@ async function diagnose(req, res) {
     // 2. Si es modelo largo, responde rápido y procesa en background
     const isLongModel = (model === 'o3');
     const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
+    
+    // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos
+    if (sanitizedData.response_mode === 'direct') {
+      try {
+        const result = await processAIRequestInternal(sanitizedData, requestInfo, model, null, region);
+        return res.status(200).send(result);
+      } catch (error) {
+        throw error;
+      }
+    }
+    
     if (isLongModel) {
       res.status(200).send({ result: 'processing' });
       processAIRequest(sanitizedData, requestInfo, model, region)
