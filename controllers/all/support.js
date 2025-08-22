@@ -98,7 +98,9 @@ function isValidSupportData(data) {
 		description: `Name: ${sanitizedData.userName}, Email: ${sanitizedData.email}, Description: ${sanitizedData.description}`,
 		date: new Date(Date.now()).toString(),
 		tenantId: tenantId,
-		subscriptionId: subscriptionId
+		subscriptionId: subscriptionId,
+		myuuid: sanitizedData.myuuid,
+		lang: sanitizedData.lang
 	  });
   
 	  // Enviar al flujo (sin esperar respuesta)
