@@ -37,8 +37,8 @@ function validateOpinionData(data) {
   }
 
   if (data.lang !== undefined) {
-    if (typeof data.lang !== 'string' || data.lang.length !== 2) {
-      errors.push({ field: 'lang', reason: 'Must be a 2-character language code' });
+    if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
+      errors.push({ field: 'lang', reason: 'Must be a valid language code (2-8 characters)' });
     }
   }
 

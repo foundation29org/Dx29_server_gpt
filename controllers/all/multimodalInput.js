@@ -39,10 +39,7 @@ const upload = multer({
             cb(new Error(`Tipo de archivo no soportado. Tipos permitidos: PDF, Word, Excel, TXT, JPG, PNG, TIFF, BMP, WEBP`));
         }
     }
-}).fields([
-    { name: 'document', maxCount: 1 },
-    { name: 'image', maxCount: 1 }
-]);
+});
 
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
@@ -346,7 +343,13 @@ const processMultimodalInput = async (req, res) => {
     };
 
     try {
-        upload(req, res, async function(err) {
+        // Configurar los campos específicos para Multer 2.x
+        const uploadFields = upload.fields([
+            { name: 'document', maxCount: 1 },
+            { name: 'image', maxCount: 1 }
+        ]);
+
+        uploadFields(req, res, async function(err) {
             if (err) {
                 insights.error({
                     message: "Error en multer",

@@ -20,6 +20,26 @@ function error(message) {
   
 }
 
+function trackEvent(eventName, properties = {}) {
+  if(config.client_server == 'http://localhost:4200'){
+    console.log('AppInsights custom event:')
+    console.log('Event:', eventName)
+    console.log('Properties:', properties)
+  }else{
+    if (appInsights.defaultClient) {
+      appInsights.defaultClient.trackEvent({
+        name: eventName,
+        properties: properties
+      });
+    } else {
+      console.log('AppInsights client not available, logging event locally:')
+      console.log('Event:', eventName)
+      console.log('Properties:', properties)
+    }
+  }
+}
+
 module.exports = {
-    error
+    error,
+    trackEvent
 }

@@ -14,7 +14,6 @@ const CostTrackingSchema = new Schema({
   // Información del tenant
   tenantId: {
     type: String,
-    required: true,
     index: true
   },
   subscriptionId: {

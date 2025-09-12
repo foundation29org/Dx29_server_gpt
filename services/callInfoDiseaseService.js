@@ -54,8 +54,8 @@ function validateQuestionRequest(data) {
       errors.push({ field: 'disease', reason: 'Must be a string' });
     } else if (data.disease.length < 2) {
       errors.push({ field: 'disease', reason: 'Must be at least 2 characters' });
-    } else if (data.disease.length > 100) {
-      errors.push({ field: 'disease', reason: 'Must not exceed 100 characters' });
+    } else if (data.disease.length > 200) {
+      errors.push({ field: 'disease', reason: 'Must not exceed 200 characters' });
     }
   
     if (!data.myuuid) {
@@ -70,8 +70,8 @@ function validateQuestionRequest(data) {
       errors.push({ field: 'timezone', reason: 'Must be a string' });
     }
   
-    if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length !== 2)) {
-      errors.push({ field: 'detectedLang', reason: 'Must be a 2-character language code' });
+    if (data.detectedLang !== undefined && (typeof data.detectedLang !== 'string' || data.detectedLang.length < 2 || data.detectedLang.length > 8)) {
+      errors.push({ field: 'detectedLang', reason: 'Must be a valid language code (2-8 characters)' });
     }
   
     // Validar medicalDescription si questionType es 3, 4 o 5

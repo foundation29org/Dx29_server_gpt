@@ -37,7 +37,7 @@ function isValidSupportData(data) {
 	if (typeof data.subscribe !== 'boolean') return false;
   
 	// Validar lang
-	if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+	if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) return false;
   
 	// Verificar patrones sospechosos
 	const suspiciousPatterns = [
@@ -98,7 +98,9 @@ function isValidSupportData(data) {
 		description: `Name: ${sanitizedData.userName}, Email: ${sanitizedData.email}, Description: ${sanitizedData.description}`,
 		date: new Date(Date.now()).toString(),
 		tenantId: tenantId,
-		subscriptionId: subscriptionId
+		subscriptionId: subscriptionId,
+		myuuid: sanitizedData.myuuid,
+		lang: sanitizedData.lang
 	  });
   
 	  // Enviar al flujo (sin esperar respuesta)
