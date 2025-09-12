@@ -37,7 +37,7 @@ function isValidSupportData(data) {
 	if (typeof data.subscribe !== 'boolean') return false;
   
 	// Validar lang
-	if (typeof data.lang !== 'string' || data.lang.length !== 2) return false;
+	if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) return false;
   
 	// Verificar patrones sospechosos
 	const suspiciousPatterns = [
