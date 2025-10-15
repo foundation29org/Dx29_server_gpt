@@ -9,7 +9,6 @@ const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
-const config = require('../config');
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   callAiWithFailover,
