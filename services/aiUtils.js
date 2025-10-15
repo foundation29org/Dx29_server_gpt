@@ -155,6 +155,36 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
     ]
   },
+  gpt5nano: {
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ],
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ]
+  },
   gpt4omini: {
     europe: [
       `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,

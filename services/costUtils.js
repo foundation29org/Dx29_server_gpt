@@ -14,6 +14,15 @@ const PRICING = {
   'gpt-4o-mini': {
     input: 0.0005,      // $0.50 per 1M tokens (Azure AI Studio con file search)
     output: 0.0015      // $1.50 per 1M tokens (Azure AI Studio con file search)
+  },
+  sonar: {
+    input: 0.001,     // $1 per 1M tokens
+    output: 0.001,    // $1 per 1M tokens
+    request: 0.012    // $0.012 per request
+  },
+  gpt5nano: {
+    input: 0.00005,    // $0.05 per 1M tokens
+    output: 0.0004,    // $0.40 per 1M tokens
   }
 };
 
@@ -26,6 +35,10 @@ function calculatePrice(usage, model = 'gpt4o') {
   const pricing = PRICING[model] || PRICING.gpt4o;
   const inputCost = (promptTokens / 1000) * pricing.input;
   const outputCost = (completionTokens / 1000) * pricing.output;
+  
+  // Agregar request fee para Sonar
+  const requestFee = pricing.request || 0;
+  const totalCost = inputCost + outputCost + requestFee;
 
   return {
     inputTokens: promptTokens,
@@ -33,7 +46,8 @@ function calculatePrice(usage, model = 'gpt4o') {
     totalTokens: totalTokens,
     inputCost: parseFloat(inputCost.toFixed(6)),
     outputCost: parseFloat(outputCost.toFixed(6)),
-    totalCost: parseFloat((inputCost + outputCost).toFixed(6)),
+    requestFee: parseFloat(requestFee.toFixed(6)),
+    totalCost: parseFloat(totalCost.toFixed(6)),
     model: model
   };
 }

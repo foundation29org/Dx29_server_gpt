@@ -9,6 +9,8 @@ const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
+const config = require('../config');
+const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   callAiWithFailover,
   detectLanguageWithRetry,
@@ -18,6 +20,155 @@ const {
   sanitizeAiData
 } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
+
+// Función para llamar a Sonar (Perplexity API)
+async function callSonarAPI(prompt, timezone) {
+  const axios = require('axios');
+  
+  const perplexityPrompt = `${prompt}
+
+  IMPORTANT: Use your web search capabilities to find current, accurate medical information.
+  
+  Search for recent medical information, studies, and official sources to provide the most up-to-date and accurate response.
+
+  Prioritice medical guidelines references.
+  
+  Include a "References" section with real, working links that you found through web search.`;
+
+
+
+  const perplexityResponse = await axios.post('https://api.perplexity.ai/chat/completions', {
+    model: "sonar",
+    messages: [{ role: "user", content: perplexityPrompt }],
+    search_mode: "academic",
+    web_search_options: {search_context_size: "low"}
+  }, {
+    headers: {
+      'Authorization': `Bearer ${PerplexityApiKey}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  return perplexityResponse;
+}
+
+// Función para llamar a modelos GPT
+async function callGPT4oAPI(prompt, timezone, dataRequest, model = 'gpt4o') {
+  const requestBody = {
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0,
+    top_p: 1,
+    frequency_penalty: 0,
+    presence_penalty: 0
+  };
+
+  if (model === 'gpt5nano') {
+    requestBody.max_completion_tokens = 13107;
+    /*requestBody.web = {
+      search: {
+        enable: true
+      }
+    };*/
+    requestBody.model = 'gpt-5-nano';
+  }
+
+  return await callAiWithFailover(requestBody, timezone, model, 0, dataRequest);
+}
+
+// Función para procesar respuesta de Sonar
+function processSonarResponse(perplexityResponse) {
+  // Simular la estructura de respuesta de OpenAI para compatibilidad
+  const generalMedicalResponse = {
+    data: {
+      choices: [{
+        message: {
+          content: perplexityResponse.data.choices[0].message.content
+        }
+      }], 
+      usage: perplexityResponse.data.usage
+    }
+  };
+
+  let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
+  
+  // Limpiar marcadores de código markdown si están presentes
+  if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
+    medicalAnswer = medicalAnswer.slice(7, -3).trim();
+  } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
+    medicalAnswer = medicalAnswer.slice(3, -3).trim();
+  }
+
+  return {
+    medicalAnswer,
+    sonarData: perplexityResponse.data.citations && perplexityResponse.data.citations.length > 0 ? {
+      citations: perplexityResponse.data.citations,
+      searchResults: perplexityResponse.data.search_results,
+      hasCitations: true
+    } : null
+  };
+}
+
+// Función para procesar respuesta de GPT-4o
+function processGPT4oResponse(generalMedicalResponse) {
+  let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
+  
+  // Limpiar marcadores de código markdown si están presentes
+  if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
+    medicalAnswer = medicalAnswer.slice(7, -3).trim();
+  } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
+    medicalAnswer = medicalAnswer.slice(3, -3).trim();
+  }
+
+  return {
+    medicalAnswer,
+    sonarData: null // GPT-4o no tiene citas web
+  };
+}
+
+// Función unificada para manejar todos los modelos
+async function getMedicalResponse(prompt, timezone, dataRequest, modelType = 'gpt4o') {
+  let response, model;
+  
+  switch (modelType) {
+    case 'sonar':
+      response = await callSonarAPI(prompt, timezone);
+      model = 'sonar';
+      break;
+    case 'gpt4omini':
+      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt4omini');
+      model = 'gpt4omini';
+      break;
+    case 'gpt5nano':
+      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt5nano');
+      model = 'gpt5nano';
+      break;
+    case 'gpt4o':
+    default:
+      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt4o');
+      model = 'gpt4o';
+      break;
+  }
+  
+  return { response, model };
+}
+
+// Función unificada para procesar cualquier respuesta
+function processMedicalResponse(response, model) {
+  let medicalAnswer, sonarData;
+  
+  if (model === 'sonar') {
+    const processedResponse = processSonarResponse(response);
+    medicalAnswer = processedResponse.medicalAnswer;
+    sonarData = processedResponse.sonarData;
+  } else {
+    // Para GPT-4o, gpt-5-nano y otros modelos GPT
+    const processedResponse = processGPT4oResponse(response);
+    medicalAnswer = processedResponse.medicalAnswer;
+    sonarData = processedResponse.sonarData;
+  }
+  
+  return { medicalAnswer, sonarData };
+}
 
 
 
@@ -277,7 +428,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                   console.log('General medical question detected for special tenant, generating educational response');
 
                   // Llamar al modelo para contestar la pregunta médica general
-                  const generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using HTML formatting.
+                  const generalMedicalPrompt0 = `You are a medical educator. Answer the following medical question in a clear, educational manner using HTML formatting.
 
                   Guidelines:
                   - Provide accurate, evidence-based information
@@ -297,34 +448,40 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                   Medical Question: ${data.description}
                   
                   Answer in the same language as the question using proper HTML formatting.`;
+                  let generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using markdown formatting.
 
+                  Guidelines:
+                  - Provide accurate, evidence-based information
+                  - Use clear, understandable language
+                  - Include relevant medical context when appropriate
+                  - Focus on educational value
+                  - Keep the response concise but comprehensive
+                  
+                  Medical Question: ${data.description}
+                  
+                  Answer in the same language as the question using proper markdown formatting.`;
+
+                 
                   try {
-                                        
-                    let requestBody = {
-                        messages: [{ role: "user", content: generalMedicalPrompt }],
-                        temperature: 0,
-                        top_p: 1,
-                        frequency_penalty: 0,
-                        presence_penalty: 0
-                      };
+                    // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano')
+                    const modelType = 'sonar'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano'
+  
+                    // Obtener respuesta del modelo seleccionado
+                    const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
+                      generalMedicalPrompt, 
+                      data.timezone, 
+                      dataRequest, 
+                      modelType
+                    );
                     
-
-                    const generalMedicalResponse = await callAiWithFailover(requestBody, data.timezone, 'gpt4o', 0, dataRequest);
-
-                    // Procesar respuesta según el modelo
-                    let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
-                    
-                    // Limpiar marcadores de código markdown si están presentes
-                    if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
-                        medicalAnswer = medicalAnswer.slice(7, -3).trim(); // Remover ```html al inicio y ``` al final
-                    } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
-                        medicalAnswer = medicalAnswer.slice(3, -3).trim(); // Remover ``` genérico al inicio y final
-                    }
+                    // Procesar respuesta
+                    const { medicalAnswer, sonarData } = processMedicalResponse(generalMedicalResponse, selectedModel);
 
                     const result = {
                       result: 'success',
                       data: [], // Sin diagnósticos para consultas generales
                       medicalAnswer: medicalAnswer, // Respuesta educativa generada
+                      sonarData: sonarData, // Información de citas (solo disponible con Sonar)
                       anonymization: {
                         hasPersonalInfo: false,
                         anonymizedText: '',
@@ -352,12 +509,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                     // Agregar costos de la respuesta médica general
                     if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
                       const usage = generalMedicalResponse.data.usage;
-                      const etapa1Cost = calculatePrice(usage, 'o3');
+                      const etapa1Cost = calculatePrice(usage, selectedModel);
                       stages.push({
                         name: 'general_medical_response',
                         cost: etapa1Cost.totalCost,
                         tokens: etapa1Cost.totalTokens,
-                        model: 'gpt4o',
+                        model: selectedModel,
                         duration: 0,
                         success: true
                       });
