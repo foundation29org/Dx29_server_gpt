@@ -155,6 +155,66 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
     ]
   },
+  gpt5nano: {
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ],
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+    ]
+  },
+  gpt5mini: {
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ],
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ]
+  },
   gpt4omini: {
     europe: [
       `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
@@ -227,7 +287,11 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
     if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
     return 'other';
   })();
-  const suffix = mode === 'anonymized' ? 'anonymized' : 'call';
+  let suffix = mode === 'anonymized' ? 'anonymized' : 'call';
+  console.log('model', model);
+  if(model=='gpt5nano' && mode == 'anonymized'){
+    suffix = 'call';
+  }
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
   return endpoints.map(endpoint => endpoint.replace('/call/', `/${suffix}/`));
 }

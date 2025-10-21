@@ -32,7 +32,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio'],
+    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini'],
     index: true
   },
   
@@ -73,7 +73,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service']
+      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini']
     },
     duration: {
       type: Number,  // Duración en milisegundos
