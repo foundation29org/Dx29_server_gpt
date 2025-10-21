@@ -23,7 +23,11 @@ const PRICING = {
   gpt5nano: {
     input: 0.00005,    // $0.05 per 1M tokens
     output: 0.0004,    // $0.40 per 1M tokens
-  }
+  },
+  gpt5mini: {
+    input: 0.00025,    // $0.25 per 1M tokens
+    output: 0.0020,    // $2.00 per 1M tokens
+  },
 };
 
 function calculatePrice(usage, model = 'gpt4o') {

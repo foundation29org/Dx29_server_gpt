@@ -53,22 +53,40 @@ async function callSonarAPI(prompt, timezone) {
 
 // Función para llamar a modelos GPT
 async function callGPT4oAPI(prompt, timezone, dataRequest, model = 'gpt4o') {
-  const requestBody = {
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
-  };
+  
+
+  const temporalPrompt = `${prompt}
+
+    IMPORTANT: Use your web search capabilities to find current, accurate medical information.
+    
+    Search for recent medical information, studies, and official sources to provide the most up-to-date and accurate response.
+  
+    Prioritice medical guidelines references.
+    
+    Include a References section with real, working links that you found through web search.`;
+
+    let requestBody = {
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0
+    };
 
   if (model === 'gpt5nano') {
-    requestBody.max_completion_tokens = 13107;
-    /*requestBody.web = {
-      search: {
-        enable: true
-      }
-    };*/
-    requestBody.model = 'gpt-5-nano';
+
+     requestBody = {
+        model: "gpt-5-nano",
+        messages: [{ role: "user", content: temporalPrompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+  } else if (model === 'gpt5mini') {
+
+    requestBody = {
+      model: "gpt-5-mini",
+      messages: [{ role: "user", content: temporalPrompt }],
+      reasoning_effort: "low" //minimal, low, medium, high
+    };
   }
 
   return await callAiWithFailover(requestBody, timezone, model, 0, dataRequest);
@@ -140,6 +158,10 @@ async function getMedicalResponse(prompt, timezone, dataRequest, modelType = 'gp
     case 'gpt5nano':
       response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt5nano');
       model = 'gpt5nano';
+      break;
+    case 'gpt5mini':
+      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt5mini');
+      model = 'gpt5mini';
       break;
     case 'gpt4o':
     default:
@@ -227,7 +249,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
   };
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
-  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local'];
+  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local'];
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -463,7 +485,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                  
                   try {
                     // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano')
-                    const modelType = 'sonar'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano'
+                    const modelType = 'gpt4o'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini'
   
                     // Obtener respuesta del modelo seleccionado
                     const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
@@ -732,6 +754,18 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         reasoning: {
           effort: "high"
         }
+      };
+    } else if (model === 'gpt5nano') {
+      requestBody = {
+        model: "gpt-5-nano",
+        messages: [{ role: "user", content: helpDiagnosePrompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if (model === 'gpt5mini') {
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: helpDiagnosePrompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
       };
     } else {
       const messages = [{ role: "user", content: helpDiagnosePrompt }];
@@ -1312,7 +1346,7 @@ async function diagnose(req, res) {
     }
 
     // 2. Si es modelo largo, responde rápido y procesa en background
-    const isLongModel = (model === 'o3');
+    const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini');
     const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
     
     // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos

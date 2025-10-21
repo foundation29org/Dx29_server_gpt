@@ -28,6 +28,8 @@ const REGION_MAPPING = {
 const MODEL_PROCESSING_TIMES = {
   gpt4o: 15,    // 15 segundos 
   o3: 60,       // 1 minuto
+  gpt5nano: 15, // 15 segundos
+  gpt5mini: 25, // 15 segundos
 };
 
 // Función helper para obtener el tiempo de procesamiento de un modelo
@@ -44,7 +46,7 @@ function getRegionFromTimezoneAndModel(timezone, model) {
   }
 
   // Lógica especial para o3
-  if (model === 'o3') {
+  if (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini') {
     if (
       tz?.includes('america') ||
       tz?.includes('asia')

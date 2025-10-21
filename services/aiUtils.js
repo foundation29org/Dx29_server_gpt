@@ -185,6 +185,36 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
     ]
   },
+  gpt5mini: {
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ],
+    europe: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ],
+    northamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+    ],
+    southamerica: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+    ],
+    africa: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ],
+    oceania: [
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+    ],
+    other: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+    ]
+  },
   gpt4omini: {
     europe: [
       `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
