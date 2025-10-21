@@ -340,7 +340,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
       if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
         clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
-        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt-4o-mini') : null;
+        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt4omini') : null;
         if (clinicalScenarioCost) {
           costTracking.etapa0_clinical_check = {
             cost: clinicalScenarioCost.totalCost,
@@ -521,7 +521,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         name: 'clinical_check',
                         cost: costTracking.etapa0_clinical_check.cost,
                         tokens: costTracking.etapa0_clinical_check.tokens,
-                        model: 'gpt-4o-mini',
+                        model: 'gpt4omini',
                         duration: 0,
                         success: true
                       });
@@ -692,7 +692,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           name: 'clinical_check',
           cost: costTracking.etapa0_clinical_check.cost,
           tokens: costTracking.etapa0_clinical_check.tokens,
-          model: 'gpt-4o-mini',
+          model: 'gpt4omini',
           duration: 0,
           success: true
         });
@@ -931,12 +931,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let hasPersonalInfo = false;
 
     if (parsedResponse.length > 0) {
-      anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid);
+      let modelAnonymization = 'gpt4o';//'gpt5nano'//'gpt4o'//'gpt4omini'
+      anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
       anonymizedDescription = anonymizedResult.anonymizedText;
       anonymizedDescriptionEnglish = anonymizedDescription;
       hasPersonalInfo = anonymizedResult.hasPersonalInfo;
       if (anonymizedResult.usage) {
-        const etapa3Cost = calculatePrice(anonymizedResult.usage, 'gpt4o');
+        const etapa3Cost = calculatePrice(anonymizedResult.usage, modelAnonymization);
         costTracking.etapa2_anonimizacion = {
           cost: etapa3Cost.totalCost,
           tokens: {
@@ -1057,7 +1058,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         name: 'clinical_check',
         cost: costTracking.etapa0_clinical_check.cost,
         tokens: costTracking.etapa0_clinical_check.tokens,
-        model: 'gpt-4o-mini',
+        model: 'gpt4omini',
         duration: 0,
         success: true
       });

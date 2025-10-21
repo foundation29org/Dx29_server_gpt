@@ -287,7 +287,11 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
     if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
     return 'other';
   })();
-  const suffix = mode === 'anonymized' ? 'anonymized' : 'call';
+  let suffix = mode === 'anonymized' ? 'anonymized' : 'call';
+  console.log('model', model);
+  if(model!='gpt4o' && mode == 'anonymized'){
+    suffix = 'call';
+  }
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
   return endpoints.map(endpoint => endpoint.replace('/call/', `/${suffix}/`));
 }

@@ -15,6 +15,10 @@ const PRICING = {
     input: 0.0005,      // $0.50 per 1M tokens (Azure AI Studio con file search)
     output: 0.0015      // $1.50 per 1M tokens (Azure AI Studio con file search)
   },
+  gpt4omini: {
+    input: 0.0005,      // $0.50 per 1M tokens (Azure AI Studio con file search)
+    output: 0.0015      // $1.50 per 1M tokens (Azure AI Studio con file search)
+  },
   sonar: {
     input: 0.001,     // $1 per 1M tokens
     output: 0.001,    // $1 per 1M tokens
@@ -72,8 +76,8 @@ function calculateTokens(text, model = 'gpt4o') {
     const totalTokens = inputTokens + outputTokens;
     
     // Calcular costos usando precios de Azure AI Studio (asistente con archivos adjuntos)
-    const inputCost = (inputTokens / 1000) * PRICING['gpt-4o-mini'].input;
-    const outputCost = (outputTokens / 1000) * PRICING['gpt-4o-mini'].output;
+    const inputCost = (inputTokens / 1000) * PRICING['gpt4omini'].input;
+    const outputCost = (outputTokens / 1000) * PRICING['gpt4omini'].output;
     const totalCost = inputCost + outputCost;
     
     return {
