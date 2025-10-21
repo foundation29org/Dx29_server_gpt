@@ -289,7 +289,7 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
   })();
   let suffix = mode === 'anonymized' ? 'anonymized' : 'call';
   console.log('model', model);
-  if(model!='gpt4o' && mode == 'anonymized'){
+  if(model=='gpt5nano' && mode == 'anonymized'){
     suffix = 'call';
   }
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;

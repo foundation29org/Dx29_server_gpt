@@ -482,11 +482,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                   
                   Answer in the same language as the question using proper markdown formatting.`;
 
-                 
+                 // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano')
+                 const modelType = 'gpt4o'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini'
                   try {
-                    // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano')
-                    const modelType = 'gpt4o'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini'
-  
                     // Obtener respuesta del modelo seleccionado
                     const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
                       generalMedicalPrompt, 
@@ -566,7 +564,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         answer: {
                           medicalAnswer : medicalAnswer,
                           queryType: queryType,
-                          model: 'gpt4o'
+                          model: modelType
                         },
                         timezone: data.timezone,
                         lang: data.lang || 'en',
@@ -616,7 +614,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       answer: {
                         medicalAnswer : '',
                         queryType: queryType,
-                        model: 'gpt4o'
+                        model: modelType
                       },
                       timezone: data.timezone,
                       lang: data.lang || 'en',
@@ -1032,7 +1030,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         if (parsedResponse.length == 0) {
           await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
         } else {
-          if (model == 'gpt4o') {
+          if (model == 'gpt4o' || model == 'gpt5nano') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
           } else if (model == 'o3') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
