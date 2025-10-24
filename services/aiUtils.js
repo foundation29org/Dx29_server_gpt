@@ -245,34 +245,34 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
     ]
   },
-  summarizegpt4omini: {
+  gpt5: {
+    asia: [
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
+    ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`
-    ],
-    asia: [
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/summarize/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
     ]
   }
 };
@@ -289,7 +289,7 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
   })();
   let suffix = mode === 'anonymized' ? 'anonymized' : 'call';
   console.log('model', model);
-  if(model=='gpt5nano' && mode == 'anonymized'){
+  if((model=='gpt5nano' || model=='gpt5mini') && mode == 'anonymized'){
     suffix = 'call';
   }
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;

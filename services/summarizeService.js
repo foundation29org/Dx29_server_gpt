@@ -136,15 +136,47 @@ async function summarize(req, res) {
     }
 
     // 2. Construir el prompt para el resumen
-    const prompt = `
-    Summarize the following patient's medical description, keeping only relevant clinical information such as symptoms, evolution time, important medical history, and physical signs. Do not include irrelevant details or repeat phrases. The result should be shorter, clearer, and maintain the medical essence:
-
+    let prompt;
+    let hasParts = hasAnalysis(englishDescription);
+    if (hasParts) {
+      // Prompt seguro para casos con imagen
+      prompt = `
+    You are a clinical editor.
+    
+    You will receive up to three sections, delimited by XML-like tags:
+    <PATIENT_TEXT> … </PATIENT_TEXT>
+    <DOCUMENT_TEXT> … </DOCUMENT_TEXT>
+    <IMAGE_REPORT> … </IMAGE_REPORT>  ← already formatted radiology/ECG/US report
+    
+    TASK
+    1) Create a concise clinical summary ONLY from PATIENT_TEXT and DOCUMENT_TEXT.
+       - Keep symptoms, onset/evolution, key PMH, meds, relevant exam.
+       - Max 6 lines. No repetition. No diagnoses not stated.
+    2) REPRODUCE the IMAGE_REPORT VERBATIM (do not rewrite, shorten, or translate).
+    3) Output exactly these two sections, in Spanish if input is Spanish:
+    
+    Resumen clínico
+    <your summary from patient/document text>
+    
+    Hallazgos de imagen (no modificar)
+    <the IMAGE_REPORT text verbatim>
+    
+    If a section is missing, omit it. Do not add other headings or commentary.
+    
+    Content to analyze:
+    "${englishDescription}"`;
+    } else {
+      // Prompt genérico actual
+      prompt = `
+    Summarize the following patient's medical description, keeping only relevant clinical information such as symptoms, evolution time, important medical history, and physical signs. Do not include irrelevant details or repeat phrases. The result should be shorter, clearer, and maintain the medical essence. Do not infer diagnoses or add medical interpretation.
+    
     "${englishDescription}"
-
+    
     Return ONLY the summarized description, with no additional commentary or explanation.`;
+    }
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0, // Cambiado a 0 para máxima precisión
       max_tokens: 1000,
@@ -155,19 +187,27 @@ async function summarize(req, res) {
 
     // 3. Llamar a AI con failover
     let aiStartTime = Date.now();
-    //let endpoint = `${API_MANAGEMENT_BASE}/eu1/summarize/gpt-4o-mini`;
-    //const diagnoseResponse = await axios.post(endpoint, requestBody, {
-    //  headers: {
-    //    'Content-Type': 'application/json',
-    //    'Ocp-Apim-Subscription-Key': ApiManagementKey,
-    //  }
-    //});
     const dataRequest = {
       tenantId: req.body.tenantId,
       subscriptionId: req.body.subscriptionId,
       myuuid: req.body.myuuid
     };
-    const diagnoseResponse = await callAiWithFailover(requestBody, req.body.timezone, 'summarizegpt4omini', 0, dataRequest);
+
+    let model = 'gpt5mini';//'gpt4o';
+    if(model == 'gpt5nano'){
+      requestBody = {
+        model: "gpt-5-nano",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    }
+    const diagnoseResponse = await callAiWithFailover(requestBody, req.body.timezone, model, 0, dataRequest);
     let aiEndTime = Date.now();
 
     if (!diagnoseResponse.data.choices[0].message.content) {
@@ -199,14 +239,14 @@ async function summarize(req, res) {
     // 6. Guardar cost tracking solo en caso de éxito
     try {
       const usage = diagnoseResponse.data.usage;
-      const costData = calculatePrice(usage, 'gpt4o');
+      const costData = calculatePrice(usage, model);
       console.log(`💰 summarize - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
       const aiStage = {
         name: 'ai_call',
         cost: costData.totalCost,
         tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
-        model: 'gpt4o',
+        model: model,
         duration: aiEndTime - aiStartTime,
         success: true
       };
@@ -258,6 +298,12 @@ async function summarize(req, res) {
 
     return res.status(500).send({ result: "error" });
   }
+}
+
+function hasAnalysis(description) {
+  return description.includes('<PATIENT_TEXT>') || 
+         description.includes('<DOCUMENT_TEXT>') ||
+         description.includes('<IMAGE_REPORT>');
 }
 
 module.exports = {

@@ -42,8 +42,10 @@ function validateOpinionData(data) {
     }
   }
 
-  if (typeof data.isNewModel !== 'boolean') {
-    errors.push({ field: 'isNewModel', reason: 'Must be a boolean' });
+  if (!data.versionModel) {
+    errors.push({ field: 'versionModel', reason: 'Field is required' });
+  } else if (typeof data.versionModel !== 'string') {
+    errors.push({ field: 'versionModel', reason: 'Must be a string' });
   }
 
   if (data.topRelatedConditions) {
@@ -106,7 +108,7 @@ function sanitizeOpinionData(data) {
           : ''
       }))
       : [],
-    isNewModel: typeof data.isNewModel === 'boolean' ? data.isNewModel : false
+    versionModel: typeof data.versionModel === 'string' ? data.versionModel.trim() : 'unknown'
   };
 }
 
@@ -145,7 +147,7 @@ async function opinion(req, res) {
       vote: sanitizedData.vote,
       version: sanitizedData.version,
       topRelatedConditions: sanitizedData.topRelatedConditions,
-      isNewModel: sanitizedData.isNewModel,
+      versionModel: sanitizedData.versionModel,
       tenantId: tenantId,
       subscriptionId: subscriptionId
     });

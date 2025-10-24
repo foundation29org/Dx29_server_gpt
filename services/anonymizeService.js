@@ -62,6 +62,12 @@ Original document:
       messages: [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }],
       reasoning_effort: "low" //minimal, low, medium, high
     };
+  }else if(model=='gpt5mini'){
+    requestBody = {
+      model: "gpt-5-mini",
+      messages: [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }],
+      reasoning_effort: "low" //minimal, low, medium, high
+    };
   }
 
   async function tryEndpoint(endpointUrl) {

@@ -268,7 +268,7 @@ async function generateFollowUpQuestions(req, res) {
       `;
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0.7,
       max_tokens: 1000,
@@ -284,12 +284,20 @@ async function generateFollowUpQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     }
     const aiStartTime = Date.now();
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+    let model = 'gpt5mini';
+    if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } 
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
     const aiEndTime = Date.now();
 
     // Calcular costos y tokens para la llamada AI
     const usage = diagnoseResponse.data.usage;
-    const costData = calculatePrice(usage, 'gpt4o');
+    const costData = calculatePrice(usage, model);
 
     console.log(`💰 generateFollowUpQuestions - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
@@ -396,7 +404,7 @@ async function generateFollowUpQuestions(req, res) {
         name: 'ai_call',
         cost: costData.totalCost,
         tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
-        model: 'gpt4o',
+        model: model,
         duration: aiEndTime - aiStartTime,
         success: true
       };
@@ -713,7 +721,7 @@ async function processFollowUpAnswers(req, res) {
       Return ONLY the updated description, with no additional commentary or explanation.`;
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0.3,
       max_tokens: 2000,
@@ -728,8 +736,48 @@ async function processFollowUpAnswers(req, res) {
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     }
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+    let model = 'gpt5mini';
+    if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } 
+    const aiStartTime = Date.now();
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
+    const aiEndTime = Date.now();
+    
+    // Guardar cost tracking solo en caso de éxito
+    const usage = diagnoseResponse.data.usage;
+    const costData = calculatePrice(usage, model);
+    
 
+    console.log(`💰 processFollowUpAnswers - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+
+    try {
+      const aiStage = {
+        name: 'ai_call',
+        cost: costData.totalCost,
+        tokens: { 
+          input: costData.inputTokens, 
+          output: costData.outputTokens, 
+          total: costData.totalTokens 
+        },
+        model: model,
+        duration: aiEndTime - aiStartTime,
+        success: true
+      };
+      await CostTrackingService.saveSimpleOperationCost(
+        costTrackingData,
+        'process-follow-up',
+        aiStage,
+        'success'
+      );
+    } catch (costError) {
+      console.error('Error saving cost tracking:', costError);
+      // No fallar la operación por error de cost tracking
+    }
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
         message: "Empty AI process-follow-up response",
@@ -1054,7 +1102,7 @@ async function generateERQuestions(req, res) {
 
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0.7,
       max_tokens: 1000,
@@ -1070,13 +1118,40 @@ async function generateERQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     }
     const aiStartTime = Date.now();
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+    let model = 'gpt5mini';
+    if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } 
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
     let aiEndTime = Date.now();
 
     // Calcular costos y tokens para la llamada AI
     const usage = diagnoseResponse.data.usage;
-    const costData = calculatePrice(usage, 'gpt4o');
+    const costData = calculatePrice(usage, model);
     console.log(`💰 generateERQuestions - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+    // Guardar cost tracking solo en caso de éxito
+    try {
+      const aiStage = {
+        name: 'ai_call',
+        cost: costData.totalCost,
+        tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
+        model: model,
+        duration: aiEndTime - aiStartTime,
+        success: true
+      };
+      await CostTrackingService.saveSimpleOperationCost(
+        costTrackingData,
+        'emergency_questions',
+        aiStage,
+        'success'
+      );
+    } catch (costError) {
+      console.error('Error guardando cost tracking:', costError);
+    }
 
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({

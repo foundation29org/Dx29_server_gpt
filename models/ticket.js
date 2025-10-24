@@ -23,7 +23,7 @@ const TicketSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'gpt5nano']
+    enum: ['gpt4o', 'o3', 'gpt5nano', 'gpt5mini', 'gpt5']
   },
   position: Number,
   requestData: Schema.Types.Mixed,

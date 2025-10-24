@@ -24,7 +24,7 @@ const CostTrackingSchema = new Schema({
   operation: {
     type: String,
     required: true,
-    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image'],
+    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'emergency_questions', 'process-follow-up'],
     index: true
   },
   
@@ -32,7 +32,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini'],
+    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5'],
     index: true
   },
   
@@ -59,7 +59,8 @@ const CostTrackingSchema = new Schema({
         'reverse_translation',  // Traducción inversa
         'database_save',         // Guardado en BD
         'clinical_check', // Verificación de escenario clínico
-        'general_medical_response' // Verificación de escenario clínico
+        'general_medical_response', // Verificación de escenario clínico
+        'emergency_questions' // Verificación de escenario clínico
       ]
     },
     cost: {
@@ -73,7 +74,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini']
+      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5']
     },
     duration: {
       type: Number,  // Duración en milisegundos

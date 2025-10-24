@@ -32,6 +32,10 @@ const PRICING = {
     input: 0.00025,    // $0.25 per 1M tokens
     output: 0.0020,    // $2.00 per 1M tokens
   },
+  gpt5: {
+    input: 0.0125,    // $1.25 per 1M tokens
+    output: 0.0200,    // $10.00 per 1M tokens
+  }
 };
 
 function calculatePrice(usage, model = 'gpt4o') {

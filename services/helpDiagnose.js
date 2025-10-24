@@ -32,7 +32,7 @@ async function callSonarAPI(prompt, timezone) {
 
   Prioritice medical guidelines references.
   
-  Include a "References" section with real, working links that you found through web search.`;
+  Include a References section with real, working links that you found through web search.`;
 
 
 
@@ -77,14 +77,14 @@ async function callGPT4oAPI(prompt, timezone, dataRequest, model = 'gpt4o') {
 
      requestBody = {
         model: "gpt-5-nano",
-        messages: [{ role: "user", content: temporalPrompt }],
+        messages: [{ role: "user", content: prompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
   } else if (model === 'gpt5mini') {
 
     requestBody = {
       model: "gpt-5-mini",
-      messages: [{ role: "user", content: temporalPrompt }],
+      messages: [{ role: "user", content: prompt }],
       reasoning_effort: "low" //minimal, low, medium, high
     };
   }
@@ -482,7 +482,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                   
                   Answer in the same language as the question using proper markdown formatting.`;
 
-                 // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano')
+                 // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano', 'gpt5mini)
                  const modelType = 'gpt4o'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini'
                   try {
                     // Obtener respuesta del modelo seleccionado
@@ -724,13 +724,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
 
     // 2. FASE ÚNICA: Obtener diagnósticos completos en una sola llamada
     
-    const helpDiagnosePrompt = englishDiseasesList ?
+    let helpDiagnosePrompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
         .replace("{{description}}", englishDescription)
         .replace("{{previous_diagnoses}}", englishDiseasesList) :
       PROMPTS.diagnosis.withoutDiseases
         .replace("{{description}}", englishDescription);
-    console.log('Calling IA for full diagnoses')
+    console.log('Calling IA for full diagnoses');
     let requestBody;
     if (model === 'o3') {
       requestBody = {
@@ -765,6 +765,43 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         messages: [{ role: "user", content: helpDiagnosePrompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
+    }else if (model === 'gpt5') {
+      /*requestBody = {
+        model: "gpt-5",
+        messages: [{ role: "user", content: helpDiagnosePrompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };*/
+
+      requestBody = {
+        model: "gpt-5",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: helpDiagnosePrompt
+              }
+            ]
+          }
+        ],
+        reasoning_effort: "low"
+      };
+
+      if (data.imageUrls && data.imageUrls.length > 0) {
+        const imagePrompts = data.imageUrls.map((image, index) => 
+          { 
+            return {
+              type: "image_url",
+              image_url: {
+                url: image.url
+              }
+            }
+          }
+        );
+        requestBody.messages[0].content.push(...imagePrompts);
+        console.log('imagePrompts', imagePrompts);
+      }
     } else {
       const messages = [{ role: "user", content: helpDiagnosePrompt }];
       requestBody = {
@@ -929,7 +966,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let hasPersonalInfo = false;
 
     if (parsedResponse.length > 0) {
-      let modelAnonymization = 'gpt4o';//'gpt5nano'//'gpt4o'//'gpt4omini'
+      let modelAnonymization = 'gpt5nano';//'gpt5nano'//'gpt4o'//'gpt4omini' 'gpt5mini'
       anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
       anonymizedDescription = anonymizedResult.anonymizedText;
       anonymizedDescriptionEnglish = anonymizedDescription;
@@ -1030,10 +1067,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         if (parsedResponse.length == 0) {
           await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
         } else {
-          if (model == 'gpt4o' || model == 'gpt5nano') {
+          if (model == 'gpt4o' || model == 'gpt5nano' || model == 'gpt5mini') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
           } else if (model == 'o3') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
+          }else if (model == 'gpt5') {
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v5');
           }
         }
       }
@@ -1100,6 +1139,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let diseasesList = [];
     if (parsedResponse.length > 0) {
       diseasesList = parsedResponse;
+    }
+    if(!hasPersonalInfo){
+      anonymizedDescription = '';
+      anonymizedResult.htmlText = '';
     }
     const result = {
       result: 'success',
@@ -1345,7 +1388,7 @@ async function diagnose(req, res) {
     }
 
     // 2. Si es modelo largo, responde rápido y procesa en background
-    const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini');
+    const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini' || model === 'gpt5');
     const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
     
     // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos
