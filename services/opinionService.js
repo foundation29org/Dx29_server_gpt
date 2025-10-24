@@ -148,6 +148,7 @@ async function opinion(req, res) {
       version: sanitizedData.version,
       topRelatedConditions: sanitizedData.topRelatedConditions,
       versionModel: sanitizedData.versionModel,
+      fileNames: sanitizedData.fileNames,
       tenantId: tenantId,
       subscriptionId: subscriptionId
     });

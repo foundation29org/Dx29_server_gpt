@@ -9,6 +9,7 @@ const OpinionStatsSchema = new Schema({
   vote: String,
   topRelatedConditions: Array,
   versionModel: String,
+  fileNames: String,
   version: String,
   tenantId: String,
   subscriptionId: String,

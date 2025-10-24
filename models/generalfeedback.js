@@ -5,6 +5,8 @@ const Schema = mongoose.Schema;
 
 const GeneralfeedbackSchema = new Schema({
   myuuid: String,
+  fileNames: String,
+  model: String,
   pregunta1: String,
   pregunta2: String,
   userType: String,
