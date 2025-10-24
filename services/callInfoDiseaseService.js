@@ -379,49 +379,6 @@ async function callInfoDisease(req, res) {
                   specialConsiderations: 'Special considerations:'
                 };
                 
-                // Traducir etiquetas si es necesario
-                if (sanitizedData.detectedLang !== 'en') {
-                  try {
-                    reverseTranslationStartTime = Date.now();
-                    const labelsToTranslate = Object.values(fieldLabels).concat(Object.values(sectionTitles));
-                    const translatedLabels = await Promise.all(
-                      labelsToTranslate.map(label => translateInvertWithRetry(label, sanitizedData.detectedLang))
-                    );
-                    reverseTranslationEndTime = Date.now();
-                    
-                    // Agregar etapa de traducción inversa
-                    stages.push({
-                      name: 'reverse_translation',
-                      cost: 0,
-                      tokens: { input: 0, output: 0, total: 0 },
-                      model: 'translation_service',
-                      duration: reverseTranslationEndTime - reverseTranslationStartTime,
-                      success: true
-                    });
-                    
-                    // Actualizar las etiquetas traducidas
-                    const labelKeys = Object.keys(fieldLabels);
-                    const titleKeys = Object.keys(sectionTitles);
-                    
-                    labelKeys.forEach((key, index) => {
-                      fieldLabels[key] = translatedLabels[index];
-                    });
-                    
-                    titleKeys.forEach((key, index) => {
-                      sectionTitles[key] = translatedLabels[labelKeys.length + index];
-                    });
-                    
-                  } catch (translationError) {
-                    console.error('Translation error for labels:', translationError);
-                    insights.error({
-                      message: 'Error traduciendo etiquetas genéticas',
-                      error: translationError.message,
-                      disease: sanitizedData.disease,
-                      tenantId: tenantId,
-                      subscriptionId: subscriptionId
-                    });
-                  }
-                }
                 
                 processedContent = `<p><strong>${sectionTitles.listTitle}</strong></p>`;
                 
@@ -463,12 +420,13 @@ async function callInfoDisease(req, res) {
               
               // Añadir mensaje informativo para todos los usuarios
               let disclaimerMessage = 'NHS genomic test information is only applicable within the United Kingdom. Please consult with local medical services for equivalent options in your country.';
+              processedContent += `<p style="margin-top: 15px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #007bff; font-style: italic;">${disclaimerMessage}</p>`;
               
-              // Traducir si es necesario
+              // Traducir todo el contenido de una vez si es necesario
               if (sanitizedData.detectedLang !== 'en') {
                 try {
                   reverseTranslationStartTime = Date.now();
-                  disclaimerMessage = await translateInvertWithRetry(disclaimerMessage, sanitizedData.detectedLang);
+                  processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
                   reverseTranslationEndTime = Date.now();
                   
                   // Agregar etapa de traducción inversa
@@ -481,9 +439,9 @@ async function callInfoDisease(req, res) {
                     success: true
                   });
                 } catch (translationError) {
-                  console.error('Translation error for disclaimer message:', translationError);
+                  console.error('Translation error for processed content:', translationError);
                   insights.error({
-                    message: 'Error traduciendo mensaje de disclaimer',
+                    message: 'Error traduciendo contenido procesado',
                     error: translationError.message,
                     disease: sanitizedData.disease,
                     tenantId: tenantId,
@@ -491,8 +449,6 @@ async function callInfoDisease(req, res) {
                   });
                 }
               }
-              
-              processedContent += `<p style="margin-top: 15px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #007bff; font-style: italic;">${disclaimerMessage}</p>`;
             } else {
               let errorMessage = 'Unable to generate recommendations at this time. Please consult with a clinical geneticist.';
               
@@ -577,7 +533,7 @@ async function callInfoDisease(req, res) {
       }
   
       const messages = [{ role: "user", content: prompt }];
-      const requestBody = {
+      let requestBody = {
         messages: messages,
         temperature: 0,
         max_tokens: 1000,
@@ -598,19 +554,54 @@ async function callInfoDisease(req, res) {
         myuuid: sanitizedData.myuuid
       }
       
+    let model = 'gpt4o';
+    if(sanitizedData.imageUrls){
+      model = 'gpt5';
+
+      requestBody = {
+        model: "gpt-5",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: prompt
+              }
+            ]
+          }
+        ],
+        reasoning_effort: "low"
+      };
+      if (sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0) {
+        const imagePrompts = sanitizedData.imageUrls.map((image, index) => 
+          { 
+            return {
+              type: "image_url",
+              image_url: {
+                url: image.url
+              }
+            }
+          }
+        );
+
+        requestBody.messages[0].content.push(...imagePrompts);
+      }
+    }
+
       aiStartTime = Date.now();
-      const result = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+      const result = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
       aiEndTime = Date.now();
       // Calcular costos y tokens para la llamada AI
       const usage = result.data.usage;
-      const costData = calculatePrice(usage, 'gpt4o');
+      const costData = calculatePrice(usage, model);
       
       // Agregar etapa de IA
       stages.push({
         name: 'ai_call',
         cost: costData.totalCost,
         tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
-        model: 'gpt4o',
+        model: model,
         duration: aiEndTime - aiStartTime,
         success: true
       });

@@ -343,6 +343,11 @@ const processMultimodalInput = async (req, res) => {
             if(hasImage){
                 model = 'gpt5';
             }
+
+            let isImageOnly = false;
+            if(!hasDoc && !hasPatient && hasImage){
+                isImageOnly = true;
+            }
             const diagnoseData = {
                 description: description,
                 diseases_list: "",
@@ -351,15 +356,17 @@ const processMultimodalInput = async (req, res) => {
                 timezone: req.body.timezone || 'UTC',
                 model: model,
                 iframeParams: req.body.iframeParams || {},
-                imageUrls: results.imageUrls || []
+                imageUrls: results.imageUrls || [],
+                isImageOnly: isImageOnly
             };
             const diagnoseResult = await callDiagnoses(diagnoseData, requestInfo);
-            res.status(200).send({ result: 'processing', description: description, imageUrls: results.imageUrls || [] });
+            res.status(200).send({ result: 'processing', description: description, imageUrls: results.imageUrls || [], isImageOnly: isImageOnly });
             // Devolver resultado de diagnose
             /*return res.status(200).send({
                 result: 'success',
                 data: diagnoseResult.data,
                 imageUrls: results.imageUrls || [],
+                isImageOnly: isImageOnly,
                 details: results,
                 detectedLang: req.body.lang || 'en'
             });*/
@@ -420,7 +427,7 @@ async function callDiagnoses(data, requestInfo) {
             timezone: data.timezone || 'UTC',
             model: data.model || 'gpt5mini',
             iframeParams: data.iframeParams || {},
-            imageUrls: data.imageUrls || [] // ← Añadir URLs de imagen
+            imageUrls: data.imageUrls || []
         },
         headers: requestInfo.headers,
         get: (header) => requestInfo.headers[header.toLowerCase()],
