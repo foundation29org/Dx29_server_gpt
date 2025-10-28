@@ -555,7 +555,7 @@ async function callInfoDisease(req, res) {
       }
       
     let model = 'gpt4o';
-    if(sanitizedData.imageUrls){
+    if(sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0){
       model = 'gpt5';
 
       requestBody = {

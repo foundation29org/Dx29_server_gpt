@@ -875,8 +875,19 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       // Limpiar la respuesta para asegurar que es un JSON válido
       let cleanResponse = aiResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
       cleanResponse = cleanResponse.replace(/^```\s*|\s*```$/g, '');
-      parsedResponse = JSON.parse(cleanResponse);
-      parsedResponseEnglish = JSON.parse(cleanResponse);
+      
+      // Fix quirúrgico para paréntesis sobrantes después de comillas de cierre
+      // Solo aplicamos el fix si el JSON inicial es inválido
+      try {
+        parsedResponse = JSON.parse(cleanResponse);
+      } catch (initialError) {
+        // Solo si falla el parseo inicial, aplicamos el fix específico
+        if (initialError.message.includes('Unexpected token )')) {
+          cleanResponse = cleanResponse.replace(/\"\)\s*\",\s*/g, '",');
+        }
+        parsedResponse = JSON.parse(cleanResponse);
+      }
+      parsedResponseEnglish = parsedResponse;
       if (!Array.isArray(parsedResponse)) {
         throw new Error('Response is not an array');
       }
@@ -1067,12 +1078,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         if (parsedResponse.length == 0) {
           await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
         } else {
-          if (model == 'gpt4o' || model == 'gpt5nano' || model == 'gpt5mini') {
+          if (model == 'gpt4o') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
           } else if (model == 'o3') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
           }else if (model == 'gpt5') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v5');
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
+          }else if (model == 'gpt5mini'){
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
+          }else if (model == 'gpt5nano'){
+            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
           }
         }
       }

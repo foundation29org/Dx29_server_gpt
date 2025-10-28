@@ -66,7 +66,10 @@ async function createBlobFile(fileBuffer, originalName, body) {
                 (ss < 10 ? '0' : '') + ss + 
                 (ff < 10 ? '0' : '') + ff;
     
-    const name = (body.myuuid || 'noid') + '/' + date;
+    // Extraer la extensión del archivo original
+    const fileExtension = originalName.toLowerCase().split('.').pop();
+    
+    const name = (body.myuuid || 'noid') + '/' + date + '.' + fileExtension;
     const url = y.toString().substr(-2) + '/' + 
                 (m < 10 ? '0' : '') + m + '/' + 
                 (d < 10 ? '0' : '') + d + '/' + 
