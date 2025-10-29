@@ -183,7 +183,7 @@ async function callInfoDisease(req, res) {
       // Sanitizar los datos
       const sanitizedData = sanitizeQuestionData(req.body);
   
-      const answerFormat = 'The output should be as HTML but only with <p>, <li>, </ul>, and <span> tags. Use <strong> for titles';
+      const answerFormat = 'Return ONLY the HTML content without any introductory text, explanations, or markdown formatting. Use only <p>, <li>, </ul>, and <span> tags. Use <strong> for titles. Do not include any text before or after the HTML.';
   
       // Construir el prompt según el tipo de pregunta
       let prompt = '';

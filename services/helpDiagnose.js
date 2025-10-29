@@ -21,7 +21,7 @@ const {
 const { calculatePrice, formatCost } = require('./costUtils');
 
 // Función para llamar a Sonar (Perplexity API)
-async function callSonarAPI(prompt, timezone) {
+async function callSonarAPI(prompt, timezone, modelType) {
   const axios = require('axios');
   
   const perplexityPrompt = `${prompt}
@@ -32,15 +32,18 @@ async function callSonarAPI(prompt, timezone) {
 
   Prioritice medical guidelines references.
   
-  Include a References section with real, working links that you found through web search.`;
+  Include a references section with real, working links that you found through web search.`;
 
-
+let reasoning_effort = "low";
+  if (modelType === 'sonar-reasoning-pro' || modelType === 'sonar-pro') {
+    reasoning_effort = "medium";
+  }
 
   const perplexityResponse = await axios.post('https://api.perplexity.ai/chat/completions', {
-    model: "sonar",
+    model: modelType,
     messages: [{ role: "user", content: perplexityPrompt }],
     search_mode: "academic",
-    web_search_options: {search_context_size: "low"}
+    web_search_options: {search_context_size: reasoning_effort}
   }, {
     headers: {
       'Authorization': `Bearer ${PerplexityApiKey}`,
@@ -108,6 +111,12 @@ function processSonarResponse(perplexityResponse) {
 
   let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
   
+  // Eliminar secciones de razonamiento redactado si están presentes
+  // Esto maneja <think>...</think> que puede aparecer en modelos reasoning
+  // Formato según Perplexity: <think>...</think>
+  medicalAnswer = medicalAnswer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  medicalAnswer = medicalAnswer.replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '').trim();
+  
   // Limpiar marcadores de código markdown si están presentes
   if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
     medicalAnswer = medicalAnswer.slice(7, -3).trim();
@@ -126,7 +135,7 @@ function processSonarResponse(perplexityResponse) {
 }
 
 // Función para procesar respuesta de GPT-4o
-function processGPT4oResponse(generalMedicalResponse) {
+function processGPTResponse(generalMedicalResponse) {
   let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
   
   // Limpiar marcadores de código markdown si están presentes
@@ -148,12 +157,16 @@ async function getMedicalResponse(prompt, timezone, dataRequest, modelType = 'gp
   
   switch (modelType) {
     case 'sonar':
-      response = await callSonarAPI(prompt, timezone);
+      response = await callSonarAPI(prompt, timezone, modelType);
       model = 'sonar';
       break;
-    case 'gpt4omini':
-      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt4omini');
-      model = 'gpt4omini';
+    case 'sonar-reasoning-pro':
+      response = await callSonarAPI(prompt, timezone, modelType);
+      model = 'sonar-reasoning-pro';
+      break;
+    case 'sonar-pro':
+      response = await callSonarAPI(prompt, timezone, modelType);
+      model = 'sonar-pro';
       break;
     case 'gpt5nano':
       response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt5nano');
@@ -177,13 +190,13 @@ async function getMedicalResponse(prompt, timezone, dataRequest, modelType = 'gp
 function processMedicalResponse(response, model) {
   let medicalAnswer, sonarData;
   
-  if (model === 'sonar') {
+  if (model === 'sonar' || model === 'sonar-reasoning-pro' || model === 'sonar-pro') {
     const processedResponse = processSonarResponse(response);
     medicalAnswer = processedResponse.medicalAnswer;
     sonarData = processedResponse.sonarData;
   } else {
     // Para GPT-4o, gpt-5-nano y otros modelos GPT
-    const processedResponse = processGPT4oResponse(response);
+    const processedResponse = processGPTResponse(response);
     medicalAnswer = processedResponse.medicalAnswer;
     sonarData = processedResponse.sonarData;
   }
@@ -249,7 +262,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
   };
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
-  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local'];
+  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -336,11 +349,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let clinicalScenarioResponse = null;
     let clinicalScenarioResult = '';
     let clinicalScenarioCost = null;
+    let modelIntencion = 'gpt4o';
     try {
-      clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+      clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, modelIntencion, 0, dataRequest);
       if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
         clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
-        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, 'gpt4omini') : null;
+        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, modelIntencion) : null;
         if (clinicalScenarioCost) {
           costTracking.etapa0_clinical_check = {
             cost: clinicalScenarioCost.totalCost,
@@ -418,7 +432,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         };
         
         try {
-          const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, 'gpt4omini', 0, dataRequest);
+          const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, modelIntencion, 0, dataRequest);
           if (medicalQuestionResponse.data.choices && medicalQuestionResponse.data.choices[0].message.content) {
             const medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
             
@@ -483,7 +497,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                   Answer in the same language as the question using proper markdown formatting.`;
 
                  // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano', 'gpt5mini)
-                 const modelType = 'gpt4o'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini'
+                 const modelType = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
                   try {
                     // Obtener respuesta del modelo seleccionado
                     const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
@@ -492,6 +506,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       dataRequest, 
                       modelType
                     );
+                    data.model = selectedModel;
                     
                     // Procesar respuesta
                     const { medicalAnswer, sonarData } = processMedicalResponse(generalMedicalResponse, selectedModel);
@@ -519,7 +534,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         name: 'clinical_check',
                         cost: costTracking.etapa0_clinical_check.cost,
                         tokens: costTracking.etapa0_clinical_check.tokens,
-                        model: 'gpt4omini',
+                        model: modelIntencion,
                         duration: 0,
                         success: true
                       });
@@ -528,6 +543,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                     // Agregar costos de la respuesta médica general
                     if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
                       const usage = generalMedicalResponse.data.usage;
+                      console.log('usage', usage)
+                      console.log('selectedModel', selectedModel)
                       const etapa1Cost = calculatePrice(usage, selectedModel);
                       stages.push({
                         name: 'general_medical_response',
@@ -586,7 +603,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       // No lanzamos el error para no afectar la respuesta al usuario
                     }
                     // Enviar progreso inicial
-                    await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 10);
+                    await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
                     // Enviar resultado final via WebPubSub
                     await pubsubService.sendResult(userId, result);
                     console.log('✅ Resultado final enviado via WebPubSub');
@@ -690,7 +707,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           name: 'clinical_check',
           cost: costTracking.etapa0_clinical_check.cost,
           tokens: costTracking.etapa0_clinical_check.tokens,
-          model: 'gpt4omini',
+          model: modelIntencion,
           duration: 0,
           success: true
         });
@@ -1110,7 +1127,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         name: 'clinical_check',
         cost: costTracking.etapa0_clinical_check.cost,
         tokens: costTracking.etapa0_clinical_check.tokens,
-        model: 'gpt4omini',
+        model: modelIntencion,
         duration: 0,
         success: true
       });
@@ -1341,7 +1358,7 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
-  const model = req.body.model || 'gpt4o';
+  const model = req.body.model || 'gpt5mini';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
 

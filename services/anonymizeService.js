@@ -12,9 +12,9 @@ function calculateMaxTokensAnon(jsonText) {
   return patientDescriptionTokens + 100;
 }
 
-async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt4o') {
+async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt5nano') {
   const RETRY_DELAY = 1000;
-  const endpoints = getEndpointsByTimezone(timezone, model, 'anonymized');
+  const endpoints = getEndpointsByTimezone(timezone, model);
 
   const anonymizationPromptOld = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
   where N is the count of characters that have been anonymized. 

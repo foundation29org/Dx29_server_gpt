@@ -125,36 +125,6 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
     ]
   },
-  o3images: {
-    europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
-    ],
-    asia: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
-    ],
-    northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`  // Suiza como backup
-    ],
-    southamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`  // Suiza como backup
-    ],
-    africa: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
-    ],
-    oceania: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`  // Suiza como backup
-    ],
-    other: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2 como backup
-    ]
-  },
   gpt5nano: {
     asia: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
@@ -277,7 +247,7 @@ const endpointsMap = {
   }
 };
 
-function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
+function getEndpointsByTimezone(timezone, model = 'gpt4o') {
   const tz = timezone?.split('/')[0]?.toLowerCase();
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
@@ -287,19 +257,15 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o', mode = 'call') {
     if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
     return 'other';
   })();
-  let suffix = mode === 'anonymized' ? 'anonymized' : 'call';
   console.log('model', model);
-  if((model=='gpt5nano' || model=='gpt5mini') && mode == 'anonymized'){
-    suffix = 'call';
-  }
   const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
-  return endpoints.map(endpoint => endpoint.replace('/call/', `/${suffix}/`));
+  return endpoints;
 }
 
 async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0, dataRequest = null) {
     const RETRY_DELAY = 1000;
   
-    const endpoints = getEndpointsByTimezone(timezone, model, 'call');
+    const endpoints = getEndpointsByTimezone(timezone, model);
     try {
       const response = await axios.post(endpoints[retryCount], requestBody, {
         headers: {
