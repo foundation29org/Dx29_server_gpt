@@ -10,6 +10,7 @@ const callInfoDiseaseCtrl = require('../services/callInfoDiseaseService')
 const summarizeCtrl = require('../services/summarizeService')
 const followUpCtrl = require('../services/followUpService')
 const generalFeedbackCtrl = require('../services/generalFeedbackService')
+const questionsFeedbackCtrl = require('../services/questionsFeedbackService')
 const opinionCtrl = require('../services/opinionService')
 const systemStatusCtrl = require('../services/systemStatusService')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
@@ -47,6 +48,8 @@ api.get('/internal/health', healthLimiter, systemStatusCtrl.checkHealth)
 api.post('/internal/opinion', smartLimiter, opinionCtrl.opinion)
 
 api.post('/internal/generalfeedback', smartLimiter, generalFeedbackCtrl.sendGeneralFeedback)
+
+api.post('/internal/questionsfeedback', smartLimiter, questionsFeedbackCtrl.sendQuestionsFeedback)
 
 // Rutas de Permalinks
 api.post('/internal/permalink', smartLimiter, permalinkCtrl.createPermalink)

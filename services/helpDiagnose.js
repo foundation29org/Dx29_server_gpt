@@ -263,6 +263,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
   const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
+  const isDxgptTenant = !!data.tenantId && data.tenantId.startsWith('dxgpt-');
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -418,8 +419,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     if (clinicalScenarioResult === 'true') {
       queryType = 'diagnostic';
     } else {
-      // Si no es diagnóstico y es un tenant especial, verificar si es una pregunta médica
-      if (specialTenants.includes(data.tenantId)) {
+      // Si no es diagnóstico y es un tenant especial,
+      // en dxgpt solo habilitar en página beta (betaPage === true)
+      if (specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true)) {
         console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
         
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
@@ -456,8 +458,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
 
     console.log('Query type detected:', queryType);
 
-    // Si es una consulta general para tenants especiales, generar respuesta educativa
-    if (specialTenants.includes(data.tenantId) && queryType === 'general') {
+    // Si es una consulta general para tenants especiales
+    // en dxgpt solo habilitar en página beta (betaPage === true)
+    if (specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
 
                   await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
                   console.log('General medical question detected for special tenant, generating educational response');
@@ -522,7 +525,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         anonymizedTextHtml: ''
                       },
                       detectedLang: detectedLanguage,
-                      model: model,
+                      model: modelType,
                       queryType: queryType,
                       question: data.description
                     };
@@ -1309,6 +1312,11 @@ function validateDiagnoseRequest(data) {
         }
       }
     }
+  }
+
+  // Validar flag opcional para habilitar funcionalidades beta en dxgpt
+  if (data.betaPage !== undefined && typeof data.betaPage !== 'boolean') {
+    errors.push({ field: 'betaPage', reason: 'Must be a boolean' });
   }
 
   // Verificar patrones sospechosos
