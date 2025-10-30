@@ -20,6 +20,9 @@ const {
 } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 
+const defaultModel = 'gpt5mini';
+const modelIntencion = 'gpt4o';
+
 // Función para llamar a Sonar (Perplexity API)
 async function callSonarAPI(prompt, timezone, modelType) {
   const axios = require('axios');
@@ -55,19 +58,8 @@ let reasoning_effort = "low";
 }
 
 // Función para llamar a modelos GPT
-async function callGPT4oAPI(prompt, timezone, dataRequest, model = 'gpt4o') {
+async function callGPTAPI(prompt, timezone, dataRequest, model = defaultModel) {
   
-
-  const temporalPrompt = `${prompt}
-
-    IMPORTANT: Use your web search capabilities to find current, accurate medical information.
-    
-    Search for recent medical information, studies, and official sources to provide the most up-to-date and accurate response.
-  
-    Prioritice medical guidelines references.
-    
-    Include a References section with real, working links that you found through web search.`;
-
     let requestBody = {
       messages: [{ role: "user", content: prompt }],
       temperature: 0,
@@ -152,7 +144,7 @@ function processGPTResponse(generalMedicalResponse) {
 }
 
 // Función unificada para manejar todos los modelos
-async function getMedicalResponse(prompt, timezone, dataRequest, modelType = 'gpt4o') {
+async function getMedicalResponse(prompt, timezone, dataRequest, modelType = defaultModel) {
   let response, model;
   
   switch (modelType) {
@@ -169,16 +161,16 @@ async function getMedicalResponse(prompt, timezone, dataRequest, modelType = 'gp
       model = 'sonar-pro';
       break;
     case 'gpt5nano':
-      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt5nano');
+      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt5nano');
       model = 'gpt5nano';
       break;
     case 'gpt5mini':
-      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt5mini');
+      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt5mini');
       model = 'gpt5mini';
       break;
     case 'gpt4o':
     default:
-      response = await callGPT4oAPI(prompt, timezone, dataRequest, 'gpt4o');
+      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt4o');
       model = 'gpt4o';
       break;
   }
@@ -212,7 +204,7 @@ function processMedicalResponse(response, model) {
 // para tenants específicos como centro médico, ámbito, especialidad, etc.
 
 // Extraer la lógica principal a una función reutilizable
-async function processAIRequest(data, requestInfo = null, model = 'gpt4o', region = null) {
+async function processAIRequest(data, requestInfo = null, model = defaultModel, region = null) {
   // Si es un modelo largo, usar WebPubSub con progreso
   //const isLongModel = (model === 'o3');
   const isLongModel = true;
@@ -250,7 +242,7 @@ async function processAIRequest(data, requestInfo = null, model = 'gpt4o', regio
 }
 
 // Función interna que contiene toda la lógica de procesamiento
-async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o', userId = null, region = null) {
+async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null, region = null) {
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -363,7 +355,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let clinicalScenarioResponse = null;
     let clinicalScenarioResult = '';
     let clinicalScenarioCost = null;
-    let modelIntencion = 'gpt4o';
+    
 
     let medicalQuestionResponse = null;
     let medicalQuestionResult = '';
