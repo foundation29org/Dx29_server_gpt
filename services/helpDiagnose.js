@@ -256,11 +256,18 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
   // Inicializar objeto para rastrear costos de cada etapa
   const costTracking = {
     etapa0_clinical_check: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
-    etapa0_general_medical_response: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    etapa0__medical_check: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    translation: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    reverse_translation: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    etapa1_medical_response: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_diagnosticos: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     total: { cost: 0, tokens: { input: 0, output: 0, total: 0 } }
   };
+
+  // Seguimiento de caracteres para costes de traducción (Azure Translator: $10/M chars)
+  let translationChars = 0; // detección + traducción a inglés
+  let reverseTranslationChars = 0; // traducción inversa al idioma original
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
   const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
@@ -276,10 +283,15 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let englishDiseasesList = data.diseases_list;
 
     try {
+      // Detección de idioma: se cobra por carácter
+      translationChars += (data.description ? data.description.length : 0);
       detectedLanguage = await detectLanguageWithRetry(data.description, data.lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
+        // Traducción a inglés: se cobra por carácter
+        translationChars += (data.description ? data.description.length : 0);
         englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
         if (englishDiseasesList) {
+          translationChars += (data.diseases_list ? data.diseases_list.length : 0);
           englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
         }
       }
@@ -444,7 +456,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
             medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
             medicalQuestionCost = medicalQuestionResponse.data.usage ? calculatePrice(medicalQuestionResponse.data.usage, modelIntencion) : null;
             if (medicalQuestionCost) {
-              costTracking.etapa0_general_medical_response = {
+              costTracking.etapa0__medical_check = {
                 cost: medicalQuestionCost.totalCost,
                 tokens: {
                   input: medicalQuestionCost.inputTokens,
@@ -562,11 +574,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       });
                     }
 
-                    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+                    if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
                       stages.push({
                         name: 'medical_question_check',
-                        cost: costTracking.etapa0_general_medical_response.cost,
-                        tokens: costTracking.etapa0_general_medical_response.tokens,
+                        cost: costTracking.etapa0__medical_check.cost,
+                        tokens: costTracking.etapa0__medical_check.tokens,
                         model: modelIntencion,
                         duration: 0,
                         success: true
@@ -579,6 +591,19 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       console.log('usage', usage)
                       console.log('selectedModel', selectedModel)
                       etapa1Cost = calculatePrice(usage, selectedModel);
+                      costTracking.etapa1_medical_response = {
+                        cost: etapa1Cost.totalCost,
+                        tokens: etapa1Cost.totalTokens,
+                        model: selectedModel,
+                        duration: 0,
+                        success: true
+                      };
+                      costTracking.total.cost += etapa1Cost.totalCost;
+                      costTracking.total.tokens.input += etapa1Cost.inputTokens;
+                      costTracking.total.tokens.output += etapa1Cost.outputTokens;
+                      costTracking.total.tokens.total += etapa1Cost.totalTokens;
+                      console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
+
                       stages.push({
                         name: 'general_medical_response',
                         cost: etapa1Cost.totalCost,
@@ -589,12 +614,59 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       });
                     }
 
+                    // Añadir costes de traducción (detección + traducción a inglés)
+                    if (translationChars > 0) {
+                      const translationCost = (translationChars / 1000000) * 10;
+                      costTracking.translation = {
+                        cost: translationCost,
+                        tokens: { input: translationChars, output: translationChars, total: translationChars },
+                        model: 'translation_service',
+                        duration: 0,
+                        success: true
+                      };
+                      costTracking.total.cost += translationCost;
+                      stages.push({
+                        name: 'translation',
+                        cost: translationCost,
+                        tokens: { input: 0, output: 0, total: 0 },
+                        model: 'translation_service',
+                        duration: 0,
+                        success: true
+                      });
+                    }
+                    // Añadir costes de traducción inversa
+                    if (reverseTranslationChars > 0) {
+                      const reverseCost = (reverseTranslationChars / 1000000) * 10;
+                      costTracking.reverse_translation = {
+                        cost: reverseCost,
+                        tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+                        model: 'translation_service',
+                        duration: 0,
+                        success: true
+                      };
+                      costTracking.total.cost += reverseCost;
+                      stages.push({
+                        name: 'reverse_translation',
+                        cost: reverseCost,
+                        tokens: { input: 0, output: 0, total: 0 },
+                        model: 'translation_service',
+                        duration: 0,
+                        success: true
+                      });
+                    }
+
                     console.log(`\n💰 RESUMEN DE COSTOS:`);
                     if (costTracking.etapa0_clinical_check.cost > 0) {
                       console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
                     }
-                    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
-                      console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0_general_medical_response.cost)}`);
+                    if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
+                      console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
+                    }
+                    if (costTracking.translation && costTracking.translation.cost > 0) {
+                      console.log(`   Etapa 1 - Translation: ${formatCost(costTracking.translation.cost)}`);
+                    }
+                    if (costTracking.reverse_translation && costTracking.reverse_translation.cost > 0) {
+                      console.log(`   Etapa 1 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
                     }
 
                     if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
@@ -759,12 +831,32 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           success: true
         });
       }
-      if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+      if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
         stages.push({
           name: 'medical_question_check',
-          cost: costTracking.etapa0_general_medical_response.cost,
-          tokens: costTracking.etapa0_general_medical_response.tokens,
+          cost: costTracking.etapa0__medical_check.cost,
+          tokens: costTracking.etapa0__medical_check.tokens,
           model: modelIntencion,
+          duration: 0,
+          success: true
+        });
+      }
+      // Etapa de traducción (detección + traducción a inglés)
+      if (translationChars > 0) {
+        const translationCost = (translationChars / 1000000) * 10;
+        costTracking.translation = {
+          cost: translationCost,
+          tokens: { input: translationChars, output: translationChars, total: translationChars },
+          model: 'translation_service',
+          duration: 0,
+          success: true
+        };
+        costTracking.total.cost += translationCost;
+        stages.push({
+          name: 'translation',
+          cost: translationCost,
+          tokens: { input: 0, output: 0, total: 0 },
+          model: 'translation_service',
           duration: 0,
           success: true
         });
@@ -908,7 +1000,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     }
 
     console.log('usage', aiResponse.data.usage);
-    console.log('aiResponseText', aiResponseText);
+    //console.log('aiResponseText', aiResponseText);
 
     // Calcular costos de la Etapa 1: Diagnósticos completos
     if (usage) {
@@ -1074,6 +1166,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       }
       if (detectedLanguage !== 'en') {
         try {
+          // Contabilizar caracteres para traducción inversa de anonimización
+          reverseTranslationChars += (anonymizedDescription ? anonymizedDescription.length : 0);
+          reverseTranslationChars += (anonymizedResult.htmlText ? anonymizedResult.htmlText.length : 0);
           anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
           anonymizedResult.htmlText = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
         } catch (translationError) {
@@ -1095,6 +1190,21 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     // Traducir la respuesta si es necesario
     if (detectedLanguage !== 'en' && parsedResponse.length > 0) {
       try {
+        // Contabilizar caracteres para traducción inversa de cada diagnóstico
+        try {
+          let reverseInChars = 0;
+          for (const diagnosis of parsedResponse) {
+            reverseInChars += (diagnosis.diagnosis ? diagnosis.diagnosis.length : 0);
+            reverseInChars += (diagnosis.description ? diagnosis.description.length : 0);
+            if (Array.isArray(diagnosis.symptoms_in_common)) {
+              for (const s of diagnosis.symptoms_in_common) reverseInChars += (s ? s.length : 0);
+            }
+            if (Array.isArray(diagnosis.symptoms_not_in_common)) {
+              for (const s of diagnosis.symptoms_not_in_common) reverseInChars += (s ? s.length : 0);
+            }
+          }
+          reverseTranslationChars += reverseInChars;
+        } catch (_) {}
         parsedResponse = await Promise.all(
           parsedResponse.map(async diagnosis => ({
             diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
@@ -1167,19 +1277,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
       }
     }
 
-    // Mostrar resumen final de costos
-    console.log(`\n💰 RESUMEN DE COSTOS:`);
-    if (costTracking.etapa0_clinical_check.cost > 0) {
-      console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
-    }
-    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
-      console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0_general_medical_response.cost)}`);
-    }
-    console.log(`   Etapa 1 - Diagnósticos: ${formatCost(costTracking.etapa1_diagnosticos.cost)}`);
-    console.log(`   Etapa 2 - Anonimización: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
-    console.log(`   ──────────────────────────`);
-    console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
-
     // Convertir costTracking a array de etapas para guardar en DB
     const stages = [];
     if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
@@ -1192,11 +1289,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         success: true
       });
     }
-    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+    if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
       stages.push({
         name: 'medical_question_check',
-        cost: costTracking.etapa0_general_medical_response.cost,
-        tokens: costTracking.etapa0_general_medical_response.tokens,
+        cost: costTracking.etapa0__medical_check.cost,
+        tokens: costTracking.etapa0__medical_check.tokens,
         model: modelIntencion,
         duration: 0,
         success: true
@@ -1222,6 +1319,63 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         success: true
       });
     }
+    // Añadir etapas de traducción (texto -> inglés) y traducción inversa (inglés -> idioma original)
+    if (translationChars > 0) {
+      const translationCost = (translationChars / 1000000) * 10;
+      costTracking.translation = {
+        cost: translationCost,
+        tokens: { input: translationChars, output: translationChars, total: translationChars },
+        model: 'translation_service',
+        duration: 0,
+        success: true
+      };
+      costTracking.total.cost += translationCost;
+      stages.push({
+        name: 'translation',
+        cost: translationCost,
+        tokens: { input: 0, output: 0, total: 0 },
+        model: 'translation_service',
+        duration: 0,
+        success: true
+      });
+    }
+    if (reverseTranslationChars > 0) {
+      const reverseCost = (reverseTranslationChars / 1000000) * 10;
+      costTracking.reverse_translation = {
+        cost: reverseCost,
+        tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+        model: 'translation_service',
+        duration: 0,
+        success: true
+      };
+      costTracking.total.cost += reverseCost;
+      stages.push({
+        name: 'reverse_translation',
+        cost: reverseCost,
+        tokens: { input: 0, output: 0, total: 0 },
+        model: 'translation_service',
+        duration: 0,
+        success: true
+      });
+    }
+     // Mostrar resumen final de costos
+     console.log(`\n💰 RESUMEN DE COSTOS:`);
+     if (costTracking.etapa0_clinical_check.cost > 0) {
+       console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+     }
+     if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
+       console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
+     }
+     console.log(`   Etapa 1 - Diagnósticos: ${formatCost(costTracking.etapa1_diagnosticos.cost)}`);
+     console.log(`   Etapa 2 - Anonimización: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
+     if (costTracking.translation && costTracking.translation.cost > 0) {
+       console.log(`   Etapa 1 - Translation: ${formatCost(costTracking.translation.cost)}`);
+     }
+     if (costTracking.reverse_translation && costTracking.reverse_translation.cost > 0) {
+       console.log(`   Etapa 1 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
+     }
+     console.log(`   ──────────────────────────`);
+     console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
     try {
       await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
       console.log('✅ Costos guardados en la base de datos');
@@ -1278,22 +1432,22 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           });
         }
 
-        if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+        if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
           stages.push({
             name: 'medical_question_check',
-            cost: costTracking.etapa0_general_medical_response.cost,
-            tokens: costTracking.etapa0_general_medical_response.tokens,
+            cost: costTracking.etapa0__medical_check.cost,
+            tokens: costTracking.etapa0__medical_check.tokens,
             model: modelIntencion,
             duration: 0,
             success: false
           });
         }
-        //etapa0_general_medical_response
-        if(costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+        //etapa0__medical_check
+        if(costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
           stages.push({
             name: 'medical_question_check',
-            cost: costTracking.etapa0_general_medical_response.cost,
-            tokens: costTracking.etapa0_general_medical_response.tokens,
+            cost: costTracking.etapa0__medical_check.cost,
+            tokens: costTracking.etapa0__medical_check.tokens,
             model: modelIntencion,
             duration: 0,
             success: false
@@ -1318,6 +1472,46 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
             cost: costTracking.etapa2_anonimizacion.cost,
             tokens: costTracking.etapa2_anonimizacion.tokens,
             model: model,
+            duration: 0,
+            success: false
+          });
+        }
+
+        // Etapas de traducción en caso de error
+        if (translationChars > 0) {
+          const translationCost = (translationChars / 1000000) * 10;
+          costTracking.translation = {
+            cost: translationCost,
+            tokens: { input: translationChars, output: translationChars, total: translationChars },
+            model: 'translation_service',
+            duration: 0,
+            success: false
+          };
+          costTracking.total.cost += translationCost;
+          stages.push({
+            name: 'translation',
+            cost: translationCost,
+            tokens: { input: 0, output: 0, total: 0 },
+            model: 'translation_service',
+            duration: 0,
+            success: false
+          });
+        }
+        if (reverseTranslationChars > 0) {
+          const reverseCost = (reverseTranslationChars / 1000000) * 10;
+          costTracking.reverse_translation = {
+            cost: reverseCost,
+            tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+            model: 'translation_service',
+            duration: 0,
+            success: false
+          };
+          costTracking.total.cost += reverseCost;
+          stages.push({
+            name: 'reverse_translation',
+            cost: reverseCost,
+            tokens: { input: 0, output: 0, total: 0 },
+            model: 'translation_service',
             duration: 0,
             success: false
           });
