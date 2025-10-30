@@ -256,6 +256,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
   // Inicializar objeto para rastrear costos de cada etapa
   const costTracking = {
     etapa0_clinical_check: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    etapa0_general_medical_response: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_diagnosticos: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     total: { cost: 0, tokens: { input: 0, output: 0, total: 0 } }
@@ -351,6 +352,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     let clinicalScenarioResult = '';
     let clinicalScenarioCost = null;
     let modelIntencion = 'gpt4o';
+
+    let medicalQuestionResponse = null;
+    let medicalQuestionResult = '';
+    let medicalQuestionCost = null;
     try {
       clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, modelIntencion, 0, dataRequest);
       if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
@@ -436,8 +441,22 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         try {
           const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, modelIntencion, 0, dataRequest);
           if (medicalQuestionResponse.data.choices && medicalQuestionResponse.data.choices[0].message.content) {
-            const medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
-            
+            medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
+            medicalQuestionCost = medicalQuestionResponse.data.usage ? calculatePrice(medicalQuestionResponse.data.usage, modelIntencion) : null;
+            if (medicalQuestionCost) {
+              costTracking.etapa0_general_medical_response = {
+                cost: medicalQuestionCost.totalCost,
+                tokens: {
+                  input: medicalQuestionCost.inputTokens,
+                  output: medicalQuestionCost.outputTokens,
+                  total: medicalQuestionCost.totalTokens
+                }
+              };
+              costTracking.total.cost += medicalQuestionCost.totalCost;
+              costTracking.total.tokens.input += medicalQuestionCost.inputTokens;
+              costTracking.total.tokens.output += medicalQuestionCost.outputTokens;
+              costTracking.total.tokens.total += medicalQuestionCost.totalTokens;
+            }
             if (medicalQuestionResult === 'medical') {
               queryType = 'general';
             } else {
@@ -542,13 +561,24 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                         success: true
                       });
                     }
-                    
+
+                    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+                      stages.push({
+                        name: 'medical_question_check',
+                        cost: costTracking.etapa0_general_medical_response.cost,
+                        tokens: costTracking.etapa0_general_medical_response.tokens,
+                        model: modelIntencion,
+                        duration: 0,
+                        success: true
+                      });
+                    }
+                    let etapa1Cost = null;
                     // Agregar costos de la respuesta médica general
                     if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
                       const usage = generalMedicalResponse.data.usage;
                       console.log('usage', usage)
                       console.log('selectedModel', selectedModel)
-                      const etapa1Cost = calculatePrice(usage, selectedModel);
+                      etapa1Cost = calculatePrice(usage, selectedModel);
                       stages.push({
                         name: 'general_medical_response',
                         cost: etapa1Cost.totalCost,
@@ -559,6 +589,20 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
                       });
                     }
 
+                    console.log(`\n💰 RESUMEN DE COSTOS:`);
+                    if (costTracking.etapa0_clinical_check.cost > 0) {
+                      console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+                    }
+                    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+                      console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0_general_medical_response.cost)}`);
+                    }
+
+                    if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
+                      console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
+                    }
+                    console.log(`   ──────────────────────────`);
+                    console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
+                    console.log(`   ──────────────────────────`);
                     try {
                       await CostTrackingService.saveDiagnoseCost(data, stages, 'success', {
                         message: 'General medical question response',
@@ -710,6 +754,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           name: 'clinical_check',
           cost: costTracking.etapa0_clinical_check.cost,
           tokens: costTracking.etapa0_clinical_check.tokens,
+          model: modelIntencion,
+          duration: 0,
+          success: true
+        });
+      }
+      if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+        stages.push({
+          name: 'medical_question_check',
+          cost: costTracking.etapa0_general_medical_response.cost,
+          tokens: costTracking.etapa0_general_medical_response.tokens,
           model: modelIntencion,
           duration: 0,
           success: true
@@ -1118,6 +1172,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
     if (costTracking.etapa0_clinical_check.cost > 0) {
       console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
     }
+    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+      console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0_general_medical_response.cost)}`);
+    }
     console.log(`   Etapa 1 - Diagnósticos: ${formatCost(costTracking.etapa1_diagnosticos.cost)}`);
     console.log(`   Etapa 2 - Anonimización: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
     console.log(`   ──────────────────────────`);
@@ -1130,6 +1187,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         name: 'clinical_check',
         cost: costTracking.etapa0_clinical_check.cost,
         tokens: costTracking.etapa0_clinical_check.tokens,
+        model: modelIntencion,
+        duration: 0,
+        success: true
+      });
+    }
+    if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+      stages.push({
+        name: 'medical_question_check',
+        cost: costTracking.etapa0_general_medical_response.cost,
+        tokens: costTracking.etapa0_general_medical_response.tokens,
         model: modelIntencion,
         duration: 0,
         success: true
@@ -1200,8 +1267,41 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
         // Convertir costTracking a array de etapas para guardar en DB
         const stages = [];
 
+        if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
+          stages.push({
+            name: 'clinical_check',
+            cost: costTracking.etapa0_clinical_check.cost,
+            tokens: costTracking.etapa0_clinical_check.tokens,
+            model: modelIntencion,
+            duration: 0,
+            success: false
+          });
+        }
+
+        if (costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+          stages.push({
+            name: 'medical_question_check',
+            cost: costTracking.etapa0_general_medical_response.cost,
+            tokens: costTracking.etapa0_general_medical_response.tokens,
+            model: modelIntencion,
+            duration: 0,
+            success: false
+          });
+        }
+        //etapa0_general_medical_response
+        if(costTracking.etapa0_general_medical_response && costTracking.etapa0_general_medical_response.cost > 0) {
+          stages.push({
+            name: 'medical_question_check',
+            cost: costTracking.etapa0_general_medical_response.cost,
+            tokens: costTracking.etapa0_general_medical_response.tokens,
+            model: modelIntencion,
+            duration: 0,
+            success: false
+          });
+        }
+
         // Etapa 1: Diagnósticos
-        if (costTracking.etapa1_diagnosticos.cost > 0) {
+        if (costTracking.etapa1_diagnosticos && costTracking.etapa1_diagnosticos.cost > 0) {
           stages.push({
             name: 'ai_call',
             cost: costTracking.etapa1_diagnosticos.cost,
@@ -1212,7 +1312,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = 'gpt4o
           });
         }
         // Etapa 2: Anonimización
-        if (costTracking.etapa2_anonimizacion.cost > 0) {
+        if (costTracking.etapa2_anonimizacion && costTracking.etapa2_anonimizacion.cost > 0) {
           stages.push({
             name: 'anonymization',
             cost: costTracking.etapa2_anonimizacion.cost,
