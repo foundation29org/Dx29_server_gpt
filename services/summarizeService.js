@@ -1,4 +1,5 @@
 const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData } = require('./aiUtils');
+const { detectLanguageSmart } = require('./languageDetect');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const blobOpenDx29Ctrl = require('./blobOpenDx29');
@@ -125,49 +126,95 @@ async function summarize(req, res) {
   let translationChars = 0;
   let reverseTranslationChars = 0;
 
-    // 1. Detectar idioma y traducir a inglés si es necesario
+    // 1. Detectar idioma (smart) y traducir a inglés si es necesario (LLM primero, fallback Azure)
     let englishDescription = description;
     let detectedLanguage = lang;
+    let forwardLLMUsed = false;
+    let forwardLLMCost = null;
+    let forwardStart = 0, forwardEnd = 0;
+    let detectLLMUsed = false;
+    let detectLLMCost = null;
+    let detectModel = null;
+    let detectDuration = 0;
     try {
-      // Detección (se cobra por carácter)
-      translationChars += (description ? description.length : 0);
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      // Detección inteligente: Azure (<30), LLM (>=30)
+      const det = await detectLanguageSmart(description || '', lang, req.body.timezone, tenantId, subscriptionId, req.body.myuuid);
+      detectedLanguage = det.lang;
+      if (det.azureCharsBilled && det.azureCharsBilled > 0) {
+        translationChars += det.azureCharsBilled;
+      }
+      if (det.usage && (det.modelUsed === 'gpt5mini' || det.modelUsed === 'gpt5nano')) {
+        detectLLMCost = calculatePrice(det.usage, det.modelUsed);
+        detectLLMUsed = true;
+        detectModel = det.modelUsed;
+        detectDuration = det.durationMs || 0;
+      }
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Traducción a inglés (se cobra por carácter)
-        translationChars += (description ? description.length : 0);
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        // Intentar traducción a inglés con LLM (gpt-5-nano)
+        try {
+          forwardStart = Date.now();
+          const translatePromptIn = `Translate the following text into English. Return ONLY the translated text.`;
+          const requestBodyLLMIn = {
+            model: "gpt-5-mini",
+            messages: [
+              { role: "user", content: translatePromptIn },
+              { role: "user", content: description }
+            ],
+            reasoning_effort: "low"
+          };
+          const dataReqIn = {
+            tenantId: req.body.tenantId,
+            subscriptionId: req.body.subscriptionId,
+            myuuid: req.body.myuuid
+          };
+          const llmInResp = await callAiWithFailover(requestBodyLLMIn, req.body.timezone, 'gpt5mini', 0, dataReqIn);
+          forwardEnd = Date.now();
+          if (!llmInResp.data.choices?.[0]?.message?.content) {
+            throw new Error('Empty LLM forward translation response');
+          }
+          englishDescription = llmInResp.data.choices[0].message.content.trim();
+          if (llmInResp.data.usage) {
+            forwardLLMCost = calculatePrice(llmInResp.data.usage, 'gpt5mini');
+            forwardLLMUsed = true;
+          }
+        } catch (llmForwardError) {
+          // Fallback Azure translate to English
+          translationChars += (description ? description.length : 0);
+          englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        }
       }
     } catch (translationError) {
-      // ... manejo de error existente ...
+      // Manejo en caso de fallo de detección/traducción de ida: continuar sin traducir
+      console.error('Language detect/forward translation error:', translationError.message);
+      try {
+        insights.error({
+          type: 'TRANSLATION_FORWARD_ERROR',
+          message: translationError.message,
+          operation: 'summarize',
+          tenantId: tenantId,
+          subscriptionId: subscriptionId
+        });
+      } catch (_) {}
+      // Mantener el texto original para el resumen
+      detectedLanguage = lang || 'en';
+      englishDescription = description;
     }
 
     // 2. Construir el prompt para el resumen
     let prompt;
     let hasParts = hasAnalysis(englishDescription);
     if (hasParts) {
-      // Prompt seguro para casos con imagen
+      // Prompt seguro para casos con texto posiblemente estructurado (sin etiquetas)
       prompt = `
     You are a clinical editor.
     
-    You will receive up to three sections, delimited by XML-like tags:
-    <PATIENT_TEXT> … </PATIENT_TEXT>
-    <DOCUMENT_TEXT> … </DOCUMENT_TEXT>
-    <IMAGE_REPORT> … </IMAGE_REPORT>  ← already formatted radiology/ECG/US report
-    
     TASK
-    1) Create a concise clinical summary ONLY from PATIENT_TEXT and DOCUMENT_TEXT.
-       - Keep symptoms, onset/evolution, key PMH, meds, relevant exam.
-       - Max 6 lines. No repetition. No diagnoses not stated.
-    2) REPRODUCE the IMAGE_REPORT VERBATIM (do not rewrite, shorten, or translate).
-    3) Output exactly these two sections, in Spanish if input is Spanish:
+    Create a concise clinical summary from the content below:
+      - Keep symptoms, onset/evolution, key past medical history, medications, and relevant exam findings.
+      - Max 6 lines. No repetition. Do not invent information.
+      - Do not infer diagnoses.
     
-    Resumen clínico
-    <your summary from patient/document text>
-    
-    Hallazgos de imagen (no modificar)
-    <the IMAGE_REPORT text verbatim>
-    
-    If a section is missing, omit it. Do not add other headings or commentary.
+    Return ONLY the summary, with no headings or additional commentary.
     
     Content to analyze:
     "${englishDescription}"`;
@@ -232,15 +279,47 @@ async function summarize(req, res) {
     let summary = diagnoseResponse.data.choices[0].message.content.trim();
     let summaryEnglish = summary;
 
-    // 5. Traducir el resumen al idioma original si es necesario
+    // 5. Traducir el resumen al idioma original si es necesario (LLM primero, fallback Azure)
+    let reverseLLMUsed = false;
+    let reverseLLMCost = null;
+    let reverseStart = 0, reverseEnd = 0;
     if (detectedLanguage !== 'en') {
       try {
-        // Traducción inversa del resultado (se cobra por carácter)
-        reverseTranslationChars += (summary ? summary.length : 0);
-        summary = await translateInvertWithRetry(summary, detectedLanguage);
+        reverseStart = Date.now();
+        const translatePrompt = `Translate the following text into ${detectedLanguage}. Return ONLY the translated text.`;
+        const requestBodyLLM = {
+          model: "gpt-5-mini",
+          messages: [
+            { role: "user", content: translatePrompt },
+            { role: "user", content: summary }
+          ],
+          reasoning_effort: "low"
+        };
+        const dataReq = {
+          tenantId: req.body.tenantId,
+          subscriptionId: req.body.subscriptionId,
+          myuuid: req.body.myuuid
+        };
+        const llmResp = await callAiWithFailover(requestBodyLLM, req.body.timezone, 'gpt5mini', 0, dataReq);
+        reverseEnd = Date.now();
+        if (!llmResp.data.choices?.[0]?.message?.content) {
+          throw new Error('Empty LLM translation response');
+        }
+        const translated = llmResp.data.choices[0].message.content.trim();
+        summary = translated;
+        if (llmResp.data.usage) {
+          reverseLLMCost = calculatePrice(llmResp.data.usage, 'gpt5mini');
+          reverseLLMUsed = true;
+        }
       } catch (translationError) {
-        console.error('Translation error:', translationError);
-        throw translationError;
+        // Fallback Azure
+        try {
+          reverseTranslationChars += (summary ? summary.length : 0);
+          summary = await translateInvertWithRetry(summary, detectedLanguage);
+        } catch (translationError2) {
+          console.error('Translation error (LLM+Azure):', translationError2);
+          throw translationError2;
+        }
       }
     }
 
@@ -251,6 +330,29 @@ async function summarize(req, res) {
       console.log(`💰 summarize - AI Call: $${formatCost(aiCost.totalCost)} (${aiCost.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
       const stages = [];
+
+      if (detectLLMUsed && detectLLMCost) {
+        stages.push({
+          name: 'translation',
+          cost: detectLLMCost.totalCost,
+          tokens: { input: detectLLMCost.inputTokens, output: detectLLMCost.outputTokens, total: detectLLMCost.totalTokens },
+          model: detectModel === 'gpt5mini' ? 'gpt5mini' : 'gpt5nano',
+          duration: detectDuration,
+          success: true
+        });
+      }
+
+      // Coste LLM de traducción de ida (a inglés)
+      if (forwardLLMUsed && forwardLLMCost) {
+        stages.push({
+          name: 'translation',
+          cost: forwardLLMCost.totalCost,
+          tokens: { input: forwardLLMCost.inputTokens, output: forwardLLMCost.outputTokens, total: forwardLLMCost.totalTokens },
+          model: 'gpt5mini',
+          duration: forwardEnd - forwardStart,
+          success: true
+        });
+      }
 
       if (translationChars > 0) {
         console.log('translationChars:', translationChars);
@@ -274,6 +376,16 @@ async function summarize(req, res) {
         success: true
       });
 
+      if (reverseLLMUsed && reverseLLMCost) {
+        stages.push({
+          name: 'reverse_translation',
+          cost: reverseLLMCost.totalCost,
+          tokens: { input: reverseLLMCost.inputTokens, output: reverseLLMCost.outputTokens, total: reverseLLMCost.totalTokens },
+          model: 'gpt5mini',
+          duration: reverseEnd - reverseStart,
+          success: true
+        });
+      } 
       if (reverseTranslationChars > 0) {
         console.log('reverseTranslationChars:', reverseTranslationChars);
         const reverseCost = (reverseTranslationChars / 1000000) * 10;
@@ -286,6 +398,27 @@ async function summarize(req, res) {
           success: true
         });
       }
+
+      // Desglose de costes por tipo
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => stages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+
+      const transLLM = toSummary(group('translation', m => m !== 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revLLM = toSummary(group('reverse_translation', m => m !== 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+
+      console.log(`\n💰 RESUMEN DE COSTOS summarize:`);
+      console.log(`   Translation (LLM): $${formatCost(transLLM.cost)} (${transLLM.tokens} tokens, ${transLLM.duration}ms)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCost.totalCost)} (${aiCost.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+      console.log(`   Reverse Translation (LLM): $${formatCost(revLLM.cost)} (${revLLM.tokens} tokens, ${revLLM.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
 
       const totalCost = stages.reduce((sum, s) => sum + (s.cost || 0), 0);
       const totalTokens = {
