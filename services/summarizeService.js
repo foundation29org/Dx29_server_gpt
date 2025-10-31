@@ -253,6 +253,7 @@ async function summarize(req, res) {
       const stages = [];
 
       if (translationChars > 0) {
+        console.log('translationChars:', translationChars);
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
           name: 'translation',
@@ -274,6 +275,7 @@ async function summarize(req, res) {
       });
 
       if (reverseTranslationChars > 0) {
+        console.log('reverseTranslationChars:', reverseTranslationChars);
         const reverseCost = (reverseTranslationChars / 1000000) * 10;
         stages.push({
           name: 'reverse_translation',

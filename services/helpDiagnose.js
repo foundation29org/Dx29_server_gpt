@@ -270,7 +270,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
   try {
     // 1. Detectar idioma y traducir a inglés si es necesario
-    console.log('data.description', data.description)
+    //console.log('data.description', data.description)
     let englishDescription = data.description;
     let detectedLanguage = data.lang;
     let englishDiseasesList = data.diseases_list;
@@ -339,7 +339,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     // 1.5. Verificar si el input es un escenario clínico antes de continuar
-    console.log('englishDescription', englishDescription)
+    //console.log('englishDescription', englishDescription)
     const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
     let clinicalScenarioRequest;
     if (modelIntencion === 'gpt5mini') {
@@ -506,7 +506,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               queryType = 'other';
             }
             
-            console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
+            //console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
           }
         } catch (medicalError) {
           const medicalElapsedMs = Date.now() - medicalStartMs;
@@ -530,26 +530,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   console.log('General medical question detected for special tenant, generating educational response');
 
                   // Llamar al modelo para contestar la pregunta médica general
-                  const generalMedicalPrompt0 = `You are a medical educator. Answer the following medical question in a clear, educational manner using HTML formatting.
-
-                  Guidelines:
-                  - Provide accurate, evidence-based information
-                  - Use clear, understandable language
-                  - Include relevant medical context when appropriate
-                  - Focus on educational value
-                  - Keep the response concise but comprehensive
-                  - Format the response using HTML tags for better readability:
-                    * Use <h3> for main sections
-                    * Use <h4> for subsections
-                    * Use <ul> and <li> for bullet points
-                    * Use <ol> and <li> for numbered lists
-                    * Use <p> for paragraphs
-                    * Use <strong> for emphasis on important terms
-                    * Use <br> for line breaks when needed
-                  
-                  Medical Question: ${data.description}
-                  
-                  Answer in the same language as the question using proper HTML formatting.`;
                   let generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using markdown formatting.
 
                   Guidelines:
@@ -996,7 +976,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           }
         );
         requestBody.messages[0].content.push(...imagePrompts);
-        console.log('imagePrompts', imagePrompts);
+        //console.log('imagePrompts', imagePrompts);
       }
     } else {
       const messages = [{ role: "user", content: helpDiagnosePrompt }];

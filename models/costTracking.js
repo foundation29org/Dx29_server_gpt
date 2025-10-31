@@ -39,7 +39,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro'],
+    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence'],
     index: true
   },
   

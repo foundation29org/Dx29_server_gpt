@@ -201,6 +201,7 @@ const processMultimodalInput = async (req, res) => {
 
                     // Guardar coste de Azure Document Intelligence (Layout)
                     if (totalPagesProcessed > 0) {
+                        console.log('Pages processed:', totalPagesProcessed);
                         // Tarifa S0 Web/Contenedor Lectura: $1.50 por 1000 páginas (<1M)
                         const diCost = (totalPagesProcessed / 1000) * 1.5;
                         try {
