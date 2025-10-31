@@ -166,6 +166,7 @@ async function callInfoDisease(req, res) {
     };
     
     const stages = [];
+    let reverseTranslationChars = 0;
     let translationStartTime, translationEndTime;
     let reverseTranslationStartTime, reverseTranslationEndTime;
     let aiStartTime, aiEndTime;
@@ -298,20 +299,12 @@ async function callInfoDisease(req, res) {
                   try {
                     reverseTranslationStartTime = Date.now();
                     const labelsToTranslate = Object.values(noTestsLabels).concat([sectionTitles.source]);
+                    const labelsChars = labelsToTranslate.reduce((sum, s) => sum + (s ? s.length : 0), 0);
+                    reverseTranslationChars += labelsChars;
                     const translatedLabels = await Promise.all(
                       labelsToTranslate.map(label => translateInvertWithRetry(label, sanitizedData.detectedLang))
                     );
                     reverseTranslationEndTime = Date.now();
-                    
-                    // Agregar etapa de traducción inversa
-                    stages.push({
-                      name: 'reverse_translation',
-                      cost: 0,
-                      tokens: { input: 0, output: 0, total: 0 },
-                      model: 'translation_service',
-                      duration: reverseTranslationEndTime - reverseTranslationStartTime,
-                      success: true
-                    });
                     
                     // Actualizar las etiquetas traducidas
                     Object.keys(noTestsLabels).forEach((key, index) => {
@@ -426,18 +419,9 @@ async function callInfoDisease(req, res) {
               if (sanitizedData.detectedLang !== 'en') {
                 try {
                   reverseTranslationStartTime = Date.now();
+                  reverseTranslationChars += (processedContent ? processedContent.length : 0);
                   processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
                   reverseTranslationEndTime = Date.now();
-                  
-                  // Agregar etapa de traducción inversa
-                  stages.push({
-                    name: 'reverse_translation',
-                    cost: 0,
-                    tokens: { input: 0, output: 0, total: 0 },
-                    model: 'translation_service',
-                    duration: reverseTranslationEndTime - reverseTranslationStartTime,
-                    success: true
-                  });
                 } catch (translationError) {
                   console.error('Translation error for processed content:', translationError);
                   insights.error({
@@ -482,14 +466,42 @@ async function callInfoDisease(req, res) {
               processedContent = `<p><strong>${errorTitle}</strong></p><p>${genomicRecommendations.message || errorMessage}</p>`;
             }
   
-            // Guardar cost tracking
+            // Guardar cost tracking (multi-etapa)
             try {
-              await CostTrackingService.saveSimpleOperationCost(
-                costTrackingData,
-                'info_disease',
-                stages[0], // La etapa de Azure AI Studio
-                'success'
-              );
+              // Añadir etapa de traducción inversa agregada si aplica
+              if (reverseTranslationChars > 0) {
+                const reverseCost = (reverseTranslationChars / 1000000) * 10;
+                stages.push({
+                  name: 'reverse_translation',
+                  cost: reverseCost,
+                  tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+                  model: 'translation_service',
+                  duration: (reverseTranslationEndTime && reverseTranslationStartTime) ? (reverseTranslationEndTime - reverseTranslationStartTime) : 0,
+                  success: true
+                });
+              }
+              const totalCost = stages.reduce((sum, st) => sum + (st.cost || 0), 0);
+              const totalTokens = {
+                input: stages.reduce((sum, st) => sum + (st.tokens?.input || 0), 0),
+                output: stages.reduce((sum, st) => sum + (st.tokens?.output || 0), 0),
+                total: stages.reduce((sum, st) => sum + (st.tokens?.total || 0), 0)
+              };
+              await CostTrackingService.saveCostRecord({
+                myuuid: costTrackingData.myuuid,
+                tenantId: costTrackingData.tenantId,
+                subscriptionId: costTrackingData.subscriptionId,
+                operation: 'info_disease',
+                model: stages[0]?.model || 'azure_ai_studio',
+                lang: costTrackingData.lang,
+                timezone: costTrackingData.timezone,
+                stages,
+                totalCost,
+                totalTokens,
+                description: costTrackingData.description,
+                status: 'success',
+                iframeParams: costTrackingData.iframeParams,
+                operationData: { detectedLanguage: costTrackingData.lang }
+              });
             } catch (costError) {
               console.error('Error guardando cost tracking:', costError);
               insights.error({
@@ -739,14 +751,47 @@ async function callInfoDisease(req, res) {
             return { name, checked: false };
           });
   
-        // Guardar cost tracking
-        try {
-          await CostTrackingService.saveSimpleOperationCost(
-            costTrackingData,
-            'info_disease',
-            stages[0], // La etapa de IA
-            'success'
-          );
+      // Guardar cost tracking multi-etapa (AI + reverse_translation si aplica)
+      try {
+        if (sanitizedData.detectedLang !== 'en') {
+          reverseTranslationStartTime = Date.now();
+          const origLen = processedContent ? processedContent.length : 0;
+          // Ya traducido arriba ➔ solo contamos caracteres
+          reverseTranslationEndTime = Date.now();
+          const reverseCost = (origLen / 1000000) * 10;
+          if (origLen > 0) {
+            stages.push({
+              name: 'reverse_translation',
+              cost: reverseCost,
+              tokens: { input: origLen, output: origLen, total: origLen },
+              model: 'translation_service',
+              duration: reverseTranslationEndTime - reverseTranslationStartTime,
+              success: true
+            });
+          }
+        }
+        const totalCost = stages.reduce((sum, st) => sum + (st.cost || 0), 0);
+        const totalTokens = {
+          input: stages.reduce((sum, st) => sum + (st.tokens?.input || 0), 0),
+          output: stages.reduce((sum, st) => sum + (st.tokens?.output || 0), 0),
+          total: stages.reduce((sum, st) => sum + (st.tokens?.total || 0), 0)
+        };
+        await CostTrackingService.saveCostRecord({
+          myuuid: costTrackingData.myuuid,
+          tenantId: costTrackingData.tenantId,
+          subscriptionId: costTrackingData.subscriptionId,
+          operation: 'info_disease',
+          model: stages.find(s => s.name === 'ai_call')?.model || 'gpt4o',
+          lang: costTrackingData.lang,
+          timezone: costTrackingData.timezone,
+          stages,
+          totalCost,
+          totalTokens,
+          description: costTrackingData.description,
+          status: 'success',
+          iframeParams: costTrackingData.iframeParams,
+          operationData: { detectedLanguage: costTrackingData.lang }
+        });
         } catch (costError) {
           console.error('Error guardando cost tracking:', costError);
           insights.error({

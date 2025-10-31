@@ -21,7 +21,8 @@ const {
 const { calculatePrice, formatCost } = require('./costUtils');
 
 const defaultModel = 'gpt5mini';
-const modelIntencion = 'gpt4o';
+const modelIntencion = 'gpt5mini'; //'gpt4o';
+const modelQuestions = 'sonar-pro' // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 
 // Función para llamar a Sonar (Perplexity API)
 async function callSonarAPI(prompt, timezone, modelType) {
@@ -340,13 +341,28 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // 1.5. Verificar si el input es un escenario clínico antes de continuar
     console.log('englishDescription', englishDescription)
     const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
-    const clinicalScenarioRequest = {
-      messages: [{ role: "user", content: clinicalScenarioPrompt }],
-      temperature: 0,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-    };
+    let clinicalScenarioRequest;
+    if (modelIntencion === 'gpt5mini') {
+      clinicalScenarioRequest = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: clinicalScenarioPrompt }],
+        reasoning_effort: "low"
+      };
+    } else if (modelIntencion === 'gpt5nano') {
+      clinicalScenarioRequest = {
+        model: "gpt-5-nano",
+        messages: [{ role: "user", content: clinicalScenarioPrompt }],
+        reasoning_effort: "low"
+      };
+    } else {
+      clinicalScenarioRequest = {
+        messages: [{ role: "user", content: clinicalScenarioPrompt }],
+        temperature: 0,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+      };
+    }
     let dataRequest = {
       tenantId: data.tenantId,
       subscriptionId: data.subscriptionId,
@@ -355,6 +371,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let clinicalScenarioResponse = null;
     let clinicalScenarioResult = '';
     let clinicalScenarioCost = null;
+    const clinicalStartMs = Date.now();
     
 
     let medicalQuestionResponse = null;
@@ -362,6 +379,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let medicalQuestionCost = null;
     try {
       clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, modelIntencion, 0, dataRequest);
+      const clinicalElapsedMs = Date.now() - clinicalStartMs;
+      console.log(`⏱ clinicalScenarioCheck (${modelIntencion}) ${clinicalElapsedMs}ms`);
       if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
         clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
         clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, modelIntencion) : null;
@@ -381,6 +400,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         }
       }
     } catch (error) {
+      const clinicalElapsedMs = Date.now() - clinicalStartMs;
+      console.log(`⏱ clinicalScenarioCheck ERROR (${modelIntencion}) ${clinicalElapsedMs}ms`);
       // Si es un error 400 o ERR_BAD_REQUEST, asumir que es un escenario clínico válido y continuar
       if ((error.code && error.code === 'ERR_BAD_REQUEST') || (error.response && error.response.status === 400)) {
         console.error('Clinical scenario check skipped due to ERR_BAD_REQUEST:', error.message);
@@ -434,16 +455,34 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
         
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
-        const medicalQuestionRequest = {
-          messages: [{ role: "user", content: medicalQuestionPrompt }],
-          temperature: 0,
-          top_p: 1,
-          frequency_penalty: 0,
-          presence_penalty: 0,
-        };
+        let medicalQuestionRequest;
+        if (modelIntencion === 'gpt5mini') {
+          medicalQuestionRequest = {
+            model: "gpt-5-mini",
+            messages: [{ role: "user", content: medicalQuestionPrompt }],
+            reasoning_effort: "low"
+          };
+        } else if (modelIntencion === 'gpt5nano') {
+          medicalQuestionRequest = {
+            model: "gpt-5-nano",
+            messages: [{ role: "user", content: medicalQuestionPrompt }],
+            reasoning_effort: "low"
+          };
+        } else {
+          medicalQuestionRequest = {
+            messages: [{ role: "user", content: medicalQuestionPrompt }],
+            temperature: 0,
+            top_p: 1,
+            frequency_penalty: 0,
+            presence_penalty: 0,
+          };
+        }
         
+        const medicalStartMs = Date.now();
         try {
           const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, modelIntencion, 0, dataRequest);
+          const medicalElapsedMs = Date.now() - medicalStartMs;
+          console.log(`⏱ medicalQuestionCheck (${modelIntencion}) ${medicalElapsedMs}ms`);
           if (medicalQuestionResponse.data.choices && medicalQuestionResponse.data.choices[0].message.content) {
             medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
             medicalQuestionCost = medicalQuestionResponse.data.usage ? calculatePrice(medicalQuestionResponse.data.usage, modelIntencion) : null;
@@ -470,6 +509,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
           }
         } catch (medicalError) {
+          const medicalElapsedMs = Date.now() - medicalStartMs;
+          console.log(`⏱ medicalQuestionCheck ERROR (${modelIntencion}) ${medicalElapsedMs}ms`);
           console.error('Error in medical question check:', medicalError);
           // En caso de error, asumir que no es médico
           queryType = 'other';
@@ -523,7 +564,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   Answer in the same language as the question using proper markdown formatting.`;
 
                  // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano', 'gpt5mini)
-                 const modelType = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
+                 const modelType = modelQuestions;
                   try {
                     // Obtener respuesta del modelo seleccionado
                     const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
@@ -668,8 +709,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                     console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
                     console.log(`   ──────────────────────────`);
                     try {
-                      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', {
-                        message: 'General medical question response',
+                      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+                        intent: 'medical_question',
                         queryType: queryType
                       });
                       console.log('✅ Costos de consulta médica general guardados en la base de datos');
@@ -854,7 +895,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         });
       }
       try {
-        await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
+        await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+          intent: 'non_diagnostic',
+          queryType: queryType
+        });
       } catch (costError) {
         console.error('❌ Error guardando costos en DB:', costError.message);
         insights.error({
@@ -924,12 +968,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         reasoning_effort: "low" //minimal, low, medium, high
       };
     }else if (model === 'gpt5') {
-      /*requestBody = {
-        model: "gpt-5",
-        messages: [{ role: "user", content: helpDiagnosePrompt }],
-        reasoning_effort: "low" //minimal, low, medium, high
-      };*/
-
       requestBody = {
         model: "gpt-5",
         messages: [
@@ -1369,7 +1407,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
      console.log(`   ──────────────────────────`);
      console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
     try {
-      await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
+      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+        intent: 'diagnostic',
+        queryType: queryType
+      });
       console.log('✅ Costos guardados en la base de datos');
     } catch (costError) {
       console.error('❌ Error guardando costos en DB:', costError.message);
@@ -1512,7 +1553,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         await CostTrackingService.saveDiagnoseCost(data, stages, 'error', {
           message: error.message,
           code: error.code || 'UNKNOWN_ERROR',
-          phase: error.phase || 'unknown'
+          phase: error.phase || 'unknown',
+          queryType: queryType
+        }, {
+          intent: queryType || 'unknown',
+          queryType: queryType
         });
         console.log('✅ Costos de operación fallida guardados en la base de datos');
       } catch (costError) {

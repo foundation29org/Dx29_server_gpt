@@ -35,19 +35,22 @@ class CostTrackingService {
    * @param {String} status - Estado de la operación
    * @param {Object} error - Información de error (opcional)
    */
-  static async saveDiagnoseCost(data, stages, status = 'success', error = null) {
+  static async saveDiagnoseCost(data, stages, status = 'success', error = null, options = {}) {
     const totalCost = stages.reduce((sum, stage) => sum + (stage.cost || 0), 0);
     const totalTokens = {
       input: stages.reduce((sum, stage) => sum + (stage.tokens?.input || 0), 0),
       output: stages.reduce((sum, stage) => sum + (stage.tokens?.output || 0), 0),
       total: stages.reduce((sum, stage) => sum + (stage.tokens?.total || 0), 0)
     };
+    const intent = options.intent || data.queryType || (error && error.queryType) || 'unknown';
+    const queryType = options.queryType || data.queryType || (error && error.queryType);
     
     const costData = {
       myuuid: data.myuuid,
       tenantId: data.tenantId,
       subscriptionId: data.subscriptionId,
       operation: 'diagnose',
+      intent: intent,
       model: data.model || 'gpt4o',
       lang: data.lang,
       timezone: data.timezone,
@@ -60,7 +63,8 @@ class CostTrackingService {
       iframeParams: data.iframeParams || {},
       operationData: {
         diseasesList: data.diseases_list,
-        detectedLanguage: data.detectedLanguage
+        detectedLanguage: data.detectedLanguage,
+        queryType: queryType
       }
     };
     

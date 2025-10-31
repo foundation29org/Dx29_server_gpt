@@ -122,13 +122,19 @@ async function summarize(req, res) {
       description: `${description.substring(0, 100)}... - Summarize`,
       iframeParams: req.body.iframeParams || {}
     };
+  let translationChars = 0;
+  let reverseTranslationChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
     let detectedLanguage = lang;
     try {
+      // Detección (se cobra por carácter)
+      translationChars += (description ? description.length : 0);
       detectedLanguage = await detectLanguageWithRetry(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
+        // Traducción a inglés (se cobra por carácter)
+        translationChars += (description ? description.length : 0);
         englishDescription = await translateTextWithRetry(description, detectedLanguage);
       }
     } catch (translationError) {
@@ -229,6 +235,8 @@ async function summarize(req, res) {
     // 5. Traducir el resumen al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
+        // Traducción inversa del resultado (se cobra por carácter)
+        reverseTranslationChars += (summary ? summary.length : 0);
         summary = await translateInvertWithRetry(summary, detectedLanguage);
       } catch (translationError) {
         console.error('Translation error:', translationError);
@@ -239,23 +247,67 @@ async function summarize(req, res) {
     // 6. Guardar cost tracking solo en caso de éxito
     try {
       const usage = diagnoseResponse.data.usage;
-      const costData = calculatePrice(usage, model);
-      console.log(`💰 summarize - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+      const aiCost = calculatePrice(usage, model);
+      console.log(`💰 summarize - AI Call: $${formatCost(aiCost.totalCost)} (${aiCost.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
-      const aiStage = {
+      const stages = [];
+
+      if (translationChars > 0) {
+        const translationCost = (translationChars / 1000000) * 10;
+        stages.push({
+          name: 'translation',
+          cost: translationCost,
+          tokens: { input: translationChars, output: translationChars, total: translationChars },
+          model: 'translation_service',
+          duration: 0,
+          success: true
+        });
+      }
+
+      stages.push({
         name: 'ai_call',
-        cost: costData.totalCost,
-        tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
+        cost: aiCost.totalCost,
+        tokens: { input: aiCost.inputTokens, output: aiCost.outputTokens, total: aiCost.totalTokens },
         model: model,
         duration: aiEndTime - aiStartTime,
         success: true
+      });
+
+      if (reverseTranslationChars > 0) {
+        const reverseCost = (reverseTranslationChars / 1000000) * 10;
+        stages.push({
+          name: 'reverse_translation',
+          cost: reverseCost,
+          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+          model: 'translation_service',
+          duration: 0,
+          success: true
+        });
+      }
+
+      const totalCost = stages.reduce((sum, s) => sum + (s.cost || 0), 0);
+      const totalTokens = {
+        input: stages.reduce((sum, s) => sum + (s.tokens?.input || 0), 0),
+        output: stages.reduce((sum, s) => sum + (s.tokens?.output || 0), 0),
+        total: stages.reduce((sum, s) => sum + (s.tokens?.total || 0), 0)
       };
-      await CostTrackingService.saveSimpleOperationCost(
-        costTrackingData,
-        'summarize',
-        aiStage,
-        'success'
-      );
+
+      await CostTrackingService.saveCostRecord({
+        myuuid: costTrackingData.myuuid,
+        tenantId: costTrackingData.tenantId,
+        subscriptionId: costTrackingData.subscriptionId,
+        operation: 'summarize',
+        model: model,
+        lang: costTrackingData.lang,
+        timezone: costTrackingData.timezone,
+        stages,
+        totalCost,
+        totalTokens,
+        description: costTrackingData.description,
+        status: 'success',
+        iframeParams: costTrackingData.iframeParams,
+        operationData: { detectedLanguage }
+      });
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);
     }

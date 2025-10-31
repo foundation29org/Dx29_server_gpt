@@ -55,7 +55,8 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         const fileExtension = originalName.toLowerCase().split('.').pop();
         if (fileExtension === 'txt') {
             const textContent = fileBuffer.toString('utf-8');
-            return textContent;
+            // Texto plano no usa Document Intelligence → 0 páginas cobrables
+            return { content: textContent, pages: 0 };
         }
         
         // Para otros tipos de archivo, usar Azure Document Intelligence
@@ -95,7 +96,8 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
             throw new Error('Error processing the document after multiple attempts. Please try again with other document.');
         } else {
             console.log('Documento procesado exitosamente');
-            return result.analyzeResult.content;
+            const pages = Array.isArray(result?.analyzeResult?.pages) ? result.analyzeResult.pages.length : 1;
+            return { content: result.analyzeResult.content, pages };
         }
     } catch (error) {
         console.error('Error detallado procesando documento:', {
@@ -171,6 +173,8 @@ const processMultimodalInput = async (req, res) => {
             if (req.files && req.files.document) {
                 try {
                     let documentTexts = [];
+                    let totalPagesProcessed = 0;
+                    let processedDocNames = [];
                     
                     // Procesar cada documento
                     for (let i = 0; i < req.files.document.length; i++) {
@@ -186,12 +190,48 @@ const processMultimodalInput = async (req, res) => {
                         console.log(`Documento ${i + 1} subido a Azure Blob:`, blobUrl);
                         
                         // Procesar el documento
-                        const documentText = await processDocument(fileBuffer, originalName, blobUrl);
+                        const { content: documentText, pages } = await processDocument(fileBuffer, originalName, blobUrl);
                         documentTexts.push(`--- Documento ${i + 1}: ${originalName} ---\n${documentText}`);
+                        totalPagesProcessed += (pages || 0);
+                        processedDocNames.push(originalName);
                     }
                     
                     // Combinar todos los documentos
                     results.documentAnalysis = documentTexts.join('\n\n');
+
+                    // Guardar coste de Azure Document Intelligence (Layout)
+                    if (totalPagesProcessed > 0) {
+                        // Tarifa S0 Web/Contenedor Lectura: $1.50 por 1000 páginas (<1M)
+                        const diCost = (totalPagesProcessed / 1000) * 1.5;
+                        try {
+                            await CostTrackingService.saveCostRecord({
+                                myuuid: req.body.myuuid || 'default-uuid',
+                                tenantId: tenantId,
+                                subscriptionId: subscriptionId,
+                                operation: 'multimodal_process_image',
+                                model: 'document_intelligence',
+                                lang: req.body.lang || 'en',
+                                timezone: req.body.timezone || 'UTC',
+                                stages: [{
+                                    name: 'document_intelligence',
+                                    cost: diCost,
+                                    tokens: { input: 0, output: 0, total: 0 },
+                                    model: 'document_intelligence',
+                                    duration: 0,
+                                    success: true
+                                }],
+                                totalCost: diCost,
+                                totalTokens: { input: 0, output: 0, total: 0 },
+                                description: `Azure Document Intelligence: ${totalPagesProcessed} páginas — ${processedDocNames.join(', ')}`,
+                                status: 'success',
+                                iframeParams: req.body.iframeParams || {},
+                                operationData: { totalPages: totalPagesProcessed, documents: processedDocNames }
+                            });
+                        } catch (ctErr) {
+                            console.error('Error guardando coste de Document Intelligence:', ctErr.message);
+                            insights.error({ message: 'Error guardando coste DI', error: ctErr.message, pages: totalPagesProcessed, tenantId, subscriptionId });
+                        }
+                    }
                 } catch (error) {
                     let originalNames = '';
                     for (let i = 0; i < req.files.document.length; i++) {
