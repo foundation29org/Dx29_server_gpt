@@ -16,21 +16,6 @@ async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, m
   const RETRY_DELAY = 1000;
   const endpoints = getEndpointsByTimezone(timezone, model);
 
-  const anonymizationPromptOld = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
-  where N is the count of characters that have been anonymized. 
-  Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
-  full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. 
-  However, it's essential to maintain all medical specifics, such as medical history, diagnosis, treatment plans, and lab results, as they are not classified as PII. 
-  Note: Do not anonymize age, as it is not considered PII in this context. 
-  The anonymized document should retain the integrity of the original content, apart from the replaced PII. 
-  Avoid including any information that wasn't part of the original document and ensure the output reflects the original content structure and intent, albeit anonymized. 
-  If any part of the text is already anonymized (represented by asterisks or [ANON-N]), do not anonymize it again. 
-  Here is the original document:
-
-  {{text}}
-
-  ANONYMIZED DOCUMENT:"`;
-
   const anonymizationPrompt = `Anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
 where N is the count of characters that have been anonymized. 
 Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 

@@ -151,6 +151,7 @@ async function generateFollowUpQuestions(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -158,8 +159,8 @@ async function generateFollowUpQuestions(req, res) {
     let englishDiseases = diseases;
 
     try {
-      // Detección
-      translationChars += (description ? description.length : 0);
+      // Detección (Azure) — contar caracteres aparte
+      detectChars += (description ? description.length : 0);
       detectedLanguage = await detectLanguageWithRetry(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción de descripción y lista de enfermedades
@@ -410,6 +411,17 @@ async function generateFollowUpQuestions(req, res) {
     // Guardar cost tracking multi-etapa
     try {
       const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: 0,
+          success: true
+        });
+      }
       if (translationChars > 0) {
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
@@ -462,6 +474,23 @@ async function generateFollowUpQuestions(req, res) {
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
       });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => stages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS generateFollowUpQuestions:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);
     }
@@ -676,8 +705,8 @@ async function processFollowUpAnswers(req, res) {
     let detectedLanguage = lang;
     let englishAnswers = answers;
     try {
-      // Detección
-      translationChars += (description ? description.length : 0);
+      // Detección (Azure) — contar caracteres aparte
+      detectChars += (description ? description.length : 0);
       detectedLanguage = await detectLanguageWithRetry(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción de descripción y Q/A
@@ -816,6 +845,17 @@ async function processFollowUpAnswers(req, res) {
 
     try {
       const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: 0,
+          success: true
+        });
+      }
       if (translationChars > 0) {
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
@@ -936,6 +976,23 @@ async function processFollowUpAnswers(req, res) {
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
       });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => followUpStages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS processFollowUpAnswers:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error saving final cost tracking:', costError);
     }
@@ -1115,8 +1172,8 @@ async function generateERQuestions(req, res) {
     let englishDescription = description;
     let detectedLanguage = lang;
     try {
-      // Detección
-      translationChars += (description ? description.length : 0);
+      // Detección (Azure) — contar caracteres aparte
+      detectChars += (description ? description.length : 0);
       detectedLanguage = await detectLanguageWithRetry(description, lang);
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción a inglés
@@ -1258,6 +1315,17 @@ async function generateERQuestions(req, res) {
     // Guardar cost tracking multi-etapa
     try {
       const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: 0,
+          success: true
+        });
+      }
       if (translationChars > 0) {
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
@@ -1412,6 +1480,23 @@ async function generateERQuestions(req, res) {
         iframeParams: costTrackingData.iframeParams,
         operationData: { }
       });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => erStages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS generateERQuestions:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking (final):', costError);
     }

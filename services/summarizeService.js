@@ -1,12 +1,9 @@
-const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData } = require('./aiUtils');
+const { translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
-const config = require('../config');
-const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
-const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const { calculatePrice, formatCost } = require('./costUtils');
 
 function getHeader(req, name) {
@@ -125,6 +122,7 @@ async function summarize(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
 
     // 1. Detectar idioma (smart) y traducir a inglés si es necesario (LLM primero, fallback Azure)
     let englishDescription = description;
@@ -141,7 +139,7 @@ async function summarize(req, res) {
       const det = await detectLanguageSmart(description || '', lang, req.body.timezone, tenantId, subscriptionId, req.body.myuuid);
       detectedLanguage = det.lang;
       if (det.azureCharsBilled && det.azureCharsBilled > 0) {
-        translationChars += det.azureCharsBilled;
+        detectChars += det.azureCharsBilled;
       }
       if (det.usage && (det.modelUsed === 'gpt5mini' || det.modelUsed === 'gpt5nano')) {
         detectLLMCost = calculatePrice(det.usage, det.modelUsed);
@@ -260,14 +258,14 @@ async function summarize(req, res) {
         reasoning_effort: "low" //minimal, low, medium, high
       };
     }
-    const diagnoseResponse = await callAiWithFailover(requestBody, req.body.timezone, model, 0, dataRequest);
+    const summarizeResponse = await callAiWithFailover(requestBody, req.body.timezone, model, 0, dataRequest);
     let aiEndTime = Date.now();
 
-    if (!diagnoseResponse.data.choices[0].message.content) {
+    if (!summarizeResponse.data.choices[0].message.content) {
       insights.error({
         message: "Empty AI summarize response",
         requestInfo: requestInfo,
-        response: diagnoseResponse,
+        response: summarizeResponse,
         operation: 'summarize',
         tenantId: tenantId,
         subscriptionId: subscriptionId
@@ -276,7 +274,7 @@ async function summarize(req, res) {
     }
 
     // 4. Obtener el resumen
-    let summary = diagnoseResponse.data.choices[0].message.content.trim();
+    let summary = summarizeResponse.data.choices[0].message.content.trim();
     let summaryEnglish = summary;
 
     // 5. Traducir el resumen al idioma original si es necesario (LLM primero, fallback Azure)
@@ -325,7 +323,7 @@ async function summarize(req, res) {
 
     // 6. Guardar cost tracking solo en caso de éxito
     try {
-      const usage = diagnoseResponse.data.usage;
+      const usage = summarizeResponse.data.usage;
       const aiCost = calculatePrice(usage, model);
       console.log(`💰 summarize - AI Call: $${formatCost(aiCost.totalCost)} (${aiCost.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
@@ -333,11 +331,23 @@ async function summarize(req, res) {
 
       if (detectLLMUsed && detectLLMCost) {
         stages.push({
-          name: 'translation',
+          name: 'detect_language',
           cost: detectLLMCost.totalCost,
           tokens: { input: detectLLMCost.inputTokens, output: detectLLMCost.outputTokens, total: detectLLMCost.totalTokens },
           model: detectModel === 'gpt5mini' ? 'gpt5mini' : 'gpt5nano',
           duration: detectDuration,
+          success: true
+        });
+      }
+      // Coste Azure de detección
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: 0,
           success: true
         });
       }
@@ -408,12 +418,16 @@ async function summarize(req, res) {
         duration: sumBy(arr, 'duration')
       });
 
+      const detectLLMSum = toSummary(group('detect_language', m => m !== 'translation_service'));
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
       const transLLM = toSummary(group('translation', m => m !== 'translation_service'));
       const transAzure = toSummary(group('translation', m => m === 'translation_service'));
       const revLLM = toSummary(group('reverse_translation', m => m !== 'translation_service'));
       const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
 
       console.log(`\n💰 RESUMEN DE COSTOS summarize:`);
+      console.log(`   Detect language (LLM): $${formatCost(detectLLMSum.cost)} (${detectLLMSum.tokens} tokens, ${detectLLMSum.duration}ms)`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
       console.log(`   Translation (LLM): $${formatCost(transLLM.cost)} (${transLLM.tokens} tokens, ${transLLM.duration}ms)`);
       console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
       console.log(`   AI Call: $${formatCost(aiCost.totalCost)} (${aiCost.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
