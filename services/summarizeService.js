@@ -5,6 +5,8 @@ const serviceEmail = require('./email');
 const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
 const { calculatePrice, formatCost } = require('./costUtils');
+const modelTranslation = 'gpt5mini';
+const modelSummarize = 'gpt5mini';
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -137,7 +139,7 @@ async function summarize(req, res) {
   let detectAzureDuration = 0;
   let forwardAzureDuration = 0;
     try {
-      // Detección inteligente: Azure (<500 chars), LLM (>=500 chars)
+      // Detección inteligente: Azure (<1000 chars), LLM (>=1000 chars)
       const det = await detectLanguageSmart(description || '', lang, req.body.timezone, tenantId, subscriptionId, req.body.myuuid);
       detectedLanguage = det.lang;
       if (det.azureCharsBilled && det.azureCharsBilled > 0) {
@@ -151,7 +153,7 @@ async function summarize(req, res) {
         detectDuration = det.durationMs || 0;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Intentar traducción a inglés con LLM (gpt-5-nano)
+        // Intentar traducción a inglés con LLM
         try {
           forwardStart = Date.now();
           const translatePromptIn = `Translate the following text into English. Return ONLY the translated text.`;
@@ -168,14 +170,14 @@ async function summarize(req, res) {
             subscriptionId: req.body.subscriptionId,
             myuuid: req.body.myuuid
           };
-          const llmInResp = await callAiWithFailover(requestBodyLLMIn, req.body.timezone, 'gpt5mini', 0, dataReqIn);
+          const llmInResp = await callAiWithFailover(requestBodyLLMIn, req.body.timezone, modelTranslation, 0, dataReqIn);
           forwardEnd = Date.now();
           if (!llmInResp.data.choices?.[0]?.message?.content) {
             throw new Error('Empty LLM forward translation response');
           }
           englishDescription = llmInResp.data.choices[0].message.content.trim();
           if (llmInResp.data.usage) {
-            forwardLLMCost = calculatePrice(llmInResp.data.usage, 'gpt5mini');
+            forwardLLMCost = calculatePrice(llmInResp.data.usage, modelTranslation);
             forwardLLMUsed = true;
           }
         } catch (llmForwardError) {
@@ -229,21 +231,21 @@ async function summarize(req, res) {
       myuuid: req.body.myuuid
     };
 
-    let model = 'gpt5mini';//'gpt4o';
-    if(model == 'gpt5nano'){
+
+    if(modelSummarize == 'gpt5nano'){
       requestBody = {
         model: "gpt-5-nano",
         messages: [{ role: "user", content: prompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
-    } else if(model == 'gpt5mini'){
+    } else if(modelSummarize == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
     }
-    const summarizeResponse = await callAiWithFailover(requestBody, req.body.timezone, model, 0, dataRequest);
+    const summarizeResponse = await callAiWithFailover(requestBody, req.body.timezone, modelSummarize, 0, dataRequest);
     let aiEndTime = Date.now();
 
     if (!summarizeResponse.data.choices[0].message.content) {
@@ -283,7 +285,7 @@ async function summarize(req, res) {
           subscriptionId: req.body.subscriptionId,
           myuuid: req.body.myuuid
         };
-        const llmResp = await callAiWithFailover(requestBodyLLM, req.body.timezone, 'gpt5mini', 0, dataReq);
+        const llmResp = await callAiWithFailover(requestBodyLLM, req.body.timezone, modelTranslation, 0, dataReq);
         reverseEnd = Date.now();
         if (!llmResp.data.choices?.[0]?.message?.content) {
           throw new Error('Empty LLM translation response');
@@ -291,7 +293,7 @@ async function summarize(req, res) {
         const translated = llmResp.data.choices[0].message.content.trim();
         summary = translated;
         if (llmResp.data.usage) {
-          reverseLLMCost = calculatePrice(llmResp.data.usage, 'gpt5mini');
+          reverseLLMCost = calculatePrice(llmResp.data.usage, modelTranslation);
           reverseLLMUsed = true;
         }
       } catch (translationError) {
@@ -311,7 +313,7 @@ async function summarize(req, res) {
     // 6. Guardar cost tracking solo en caso de éxito
     try {
       const usage = summarizeResponse.data.usage;
-      const aiCost = calculatePrice(usage, model);
+      const aiCost = calculatePrice(usage, modelSummarize);
       console.log(`💰 summarize - AI Call: $${formatCost(aiCost.totalCost)} (${aiCost.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
       const stages = [];
@@ -345,7 +347,7 @@ async function summarize(req, res) {
           name: 'translation',
           cost: forwardLLMCost.totalCost,
           tokens: { input: forwardLLMCost.inputTokens, output: forwardLLMCost.outputTokens, total: forwardLLMCost.totalTokens },
-          model: 'gpt5mini',
+          model: modelTranslation,
           duration: forwardEnd - forwardStart,
           success: true
         });
@@ -368,7 +370,7 @@ async function summarize(req, res) {
         name: 'ai_call',
         cost: aiCost.totalCost,
         tokens: { input: aiCost.inputTokens, output: aiCost.outputTokens, total: aiCost.totalTokens },
-        model: model,
+        model: modelSummarize,
         duration: aiEndTime - aiStartTime,
         success: true
       });
@@ -378,7 +380,7 @@ async function summarize(req, res) {
           name: 'reverse_translation',
           cost: reverseLLMCost.totalCost,
           tokens: { input: reverseLLMCost.inputTokens, output: reverseLLMCost.outputTokens, total: reverseLLMCost.totalTokens },
-          model: 'gpt5mini',
+          model: modelTranslation,
           duration: reverseEnd - reverseStart,
           success: true
         });
@@ -433,7 +435,7 @@ async function summarize(req, res) {
         tenantId: costTrackingData.tenantId,
         subscriptionId: costTrackingData.subscriptionId,
         operation: 'summarize',
-        model: model,
+        model: modelSummarize,
         lang: costTrackingData.lang,
         timezone: costTrackingData.timezone,
         stages,
