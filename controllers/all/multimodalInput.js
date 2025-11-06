@@ -9,6 +9,7 @@ const blobOpenDx29Ctrl = require('../../services/blobOpenDx29');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
 const { calculatePrice, formatCost } = require('../../services/costUtils');
+const pubsubService = require('../../services/pubsubService');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -56,7 +57,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         if (fileExtension === 'txt') {
             const textContent = fileBuffer.toString('utf-8');
             // Texto plano no usa Document Intelligence → 0 páginas cobrables
-            return { content: textContent, pages: 0 };
+            return { content: textContent, pages: 0, duration: 0 };
         }
         
         // Para otros tipos de archivo, usar Azure Document Intelligence
@@ -70,6 +71,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         );
 
         console.log('Enviando solicitud a Azure Document Intelligence...');
+        const startDi = Date.now();
         const initialResponse = await clientIntelligence
             .path("/documentModels/{modelId}:analyze", modelId)
             .post({
@@ -89,6 +91,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         console.log('Poller creado, esperando resultado...');
         
         const result = (await poller.pollUntilDone()).body;
+        const duration = Date.now() - startDi;
         console.log('Análisis completado');
 
         if (result.status === 'failed') {
@@ -97,7 +100,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         } else {
             console.log('Documento procesado exitosamente');
             const pages = Array.isArray(result?.analyzeResult?.pages) ? result.analyzeResult.pages.length : 1;
-            return { content: result.analyzeResult.content, pages };
+            return { content: result.analyzeResult.content, pages, duration };
         }
     } catch (error) {
         console.error('Error detallado procesando documento:', {
@@ -126,7 +129,6 @@ const processMultimodalInput = async (req, res) => {
         header_language: req.headers['accept-language'],
         timezone: req.body.timezone
     };
-
     try {
         // Configurar los campos específicos para Multer 2.x
         const uploadFields = upload.fields([
@@ -145,6 +147,13 @@ const processMultimodalInput = async (req, res) => {
                 });
                 return res.status(400).json({ error: err.message });
             }
+
+            // userId está disponible después de que Multer haya procesado el multipart/form-data
+            const userId = req.body.myuuid;
+
+            // Actualizar requestInfo con el body parseado y timezone correcto
+            requestInfo.body = req.body;
+            requestInfo.timezone = req.body.timezone;
 
             // Log para debug - ver qué está llegando
             console.log('Body recibido:', {
@@ -174,6 +183,7 @@ const processMultimodalInput = async (req, res) => {
                 try {
                     let documentTexts = [];
                     let totalPagesProcessed = 0;
+                    let totalDiDurationMs = 0;
                     let processedDocNames = [];
                     
                     // Procesar cada documento
@@ -190,9 +200,13 @@ const processMultimodalInput = async (req, res) => {
                         console.log(`Documento ${i + 1} subido a Azure Blob:`, blobUrl);
                         
                         // Procesar el documento
-                        const { content: documentText, pages } = await processDocument(fileBuffer, originalName, blobUrl);
+                        if (userId) {
+                            await pubsubService.sendProgress(userId.toString(), 'extract_documents', 'Extracting documents...', 5);
+                        }
+                        const { content: documentText, pages, duration } = await processDocument(fileBuffer, originalName, blobUrl);
                         documentTexts.push(`--- Documento ${i + 1}: ${originalName} ---\n${documentText}`);
                         totalPagesProcessed += (pages || 0);
+                        totalDiDurationMs += (duration || 0);
                         processedDocNames.push(originalName);
                     }
                     
@@ -218,7 +232,7 @@ const processMultimodalInput = async (req, res) => {
                                     cost: diCost,
                                     tokens: { input: 0, output: 0, total: 0 },
                                     model: 'document_intelligence',
-                                    duration: 0,
+                                    duration: totalDiDurationMs,
                                     success: true
                                 }],
                                 totalCost: diCost,
@@ -293,13 +307,13 @@ const processMultimodalInput = async (req, res) => {
             // Usar:
             let combinedInput = '';
             if (results.textInput?.trim()) {
-            combinedInput += `<PATIENT_TEXT>\n${results.textInput.trim()}\n</PATIENT_TEXT>\n`;
+                combinedInput += `${results.textInput.trim()}\n\n`;
             }
             if (results.documentAnalysis?.trim()) {
-            combinedInput += `<DOCUMENT_TEXT>\n${results.documentAnalysis.trim()}\n</DOCUMENT_TEXT>\n`;
+                combinedInput += `${results.documentAnalysis.trim()}`;
             }
             if (!combinedInput.trim()) {
-            combinedInput = 'No se proporcionó ningún contenido para analizar.';
+                combinedInput = 'No content was provided to analyze.';
             }
 
             // Crear un objeto request simulado para el servicio de summarize
@@ -346,7 +360,7 @@ const processMultimodalInput = async (req, res) => {
             if (hasPatient || hasDoc) {
                 // Verificar si el combinedInput es lo suficientemente largo para justificar un resumen
                 const combinedInputLength = combinedInput.trim().length;
-                const minLengthForSummary = 2000; // Ajusta según necesites
+                const minLengthForSummary = 1000; // Ajusta según necesites
                 
                 if (combinedInputLength > minLengthForSummary) {
                     // Si hay texto/documento largo, resumir primero
@@ -360,7 +374,9 @@ const processMultimodalInput = async (req, res) => {
                             }
                         })
                     };
-                    
+                    if (userId) {
+                        await pubsubService.sendProgress(userId.toString(), 'summarize_input', 'Summarizing input...', 10);
+                    }
                     await summarizeCtrl.summarize(mockReq, captureRes);
                     description = summaryResult.data.summary;
                 } else {

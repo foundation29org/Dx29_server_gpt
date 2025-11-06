@@ -23,12 +23,13 @@ const { calculatePrice, formatCost } = require('./costUtils');
 
 const defaultModel = 'gpt5mini';
 const modelIntencion = 'gpt5mini'; //'gpt4o';
-const modelQuestions = 'sonar-pro' // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
+const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
+const modelAnonymization = 'gpt5mini';//'gpt5mini'; //'gpt5nano';
 
 // Función para llamar a Sonar (Perplexity API)
 async function callSonarAPI(prompt, timezone, modelType) {
   const axios = require('axios');
-  
+
   const perplexityPrompt = `${prompt}
 
   IMPORTANT: Use your web search capabilities to find current, accurate medical information.
@@ -39,7 +40,7 @@ async function callSonarAPI(prompt, timezone, modelType) {
   
   Include a references section with real, working links that you found through web search.`;
 
-let reasoning_effort = "low";
+  let reasoning_effort = "low";
   if (modelType === 'sonar-reasoning-pro' || modelType === 'sonar-pro') {
     reasoning_effort = "medium";
   }
@@ -48,7 +49,7 @@ let reasoning_effort = "low";
     model: modelType,
     messages: [{ role: "user", content: perplexityPrompt }],
     search_mode: "academic",
-    web_search_options: {search_context_size: reasoning_effort}
+    web_search_options: { search_context_size: reasoning_effort }
   }, {
     headers: {
       'Authorization': `Bearer ${PerplexityApiKey}`,
@@ -61,22 +62,22 @@ let reasoning_effort = "low";
 
 // Función para llamar a modelos GPT
 async function callGPTAPI(prompt, timezone, dataRequest, model = defaultModel) {
-  
-    let requestBody = {
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0
-    };
+
+  let requestBody = {
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0,
+    top_p: 1,
+    frequency_penalty: 0,
+    presence_penalty: 0
+  };
 
   if (model === 'gpt5nano') {
 
-     requestBody = {
-        model: "gpt-5-nano",
-        messages: [{ role: "user", content: prompt }],
-        reasoning_effort: "low" //minimal, low, medium, high
-      };
+    requestBody = {
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: prompt }],
+      reasoning_effort: "low" //minimal, low, medium, high
+    };
   } else if (model === 'gpt5mini') {
 
     requestBody = {
@@ -98,19 +99,19 @@ function processSonarResponse(perplexityResponse) {
         message: {
           content: perplexityResponse.data.choices[0].message.content
         }
-      }], 
+      }],
       usage: perplexityResponse.data.usage
     }
   };
 
   let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
-  
+
   // Eliminar secciones de razonamiento redactado si están presentes
   // Esto maneja <think>...</think> que puede aparecer en modelos reasoning
   // Formato según Perplexity: <think>...</think>
   medicalAnswer = medicalAnswer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   medicalAnswer = medicalAnswer.replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '').trim();
-  
+
   // Limpiar marcadores de código markdown si están presentes
   if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
     medicalAnswer = medicalAnswer.slice(7, -3).trim();
@@ -131,7 +132,7 @@ function processSonarResponse(perplexityResponse) {
 // Función para procesar respuesta de GPT-4o
 function processGPTResponse(generalMedicalResponse) {
   let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
-  
+
   // Limpiar marcadores de código markdown si están presentes
   if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
     medicalAnswer = medicalAnswer.slice(7, -3).trim();
@@ -148,7 +149,7 @@ function processGPTResponse(generalMedicalResponse) {
 // Función unificada para manejar todos los modelos
 async function getMedicalResponse(prompt, timezone, dataRequest, modelType = defaultModel) {
   let response, model;
-  
+
   switch (modelType) {
     case 'sonar':
       response = await callSonarAPI(prompt, timezone, modelType);
@@ -176,14 +177,14 @@ async function getMedicalResponse(prompt, timezone, dataRequest, modelType = def
       model = 'gpt4o';
       break;
   }
-  
+
   return { response, model };
 }
 
 // Función unificada para procesar cualquier respuesta
 function processMedicalResponse(response, model) {
   let medicalAnswer, sonarData;
-  
+
   if (model === 'sonar' || model === 'sonar-reasoning-pro' || model === 'sonar-pro') {
     const processedResponse = processSonarResponse(response);
     medicalAnswer = processedResponse.medicalAnswer;
@@ -194,13 +195,9 @@ function processMedicalResponse(response, model) {
     medicalAnswer = processedResponse.medicalAnswer;
     sonarData = processedResponse.sonarData;
   }
-  
+
   return { medicalAnswer, sonarData };
 }
-
-
-
-
 
 // Función para sanitizar parámetros del iframe que pueden incluir información adicional
 // para tenants específicos como centro médico, ámbito, especialidad, etc.
@@ -217,7 +214,7 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
 
     try {
       // Enviar progreso inicial
-      await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 10);
+      await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 20);
 
       // Continuar con el procesamiento normal pero enviando progreso
       const result = await processAIRequestInternal(data, requestInfo, model, userId, region);
@@ -264,7 +261,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   // Seguimiento de caracteres para costes de traducción (Azure Translator: $10/M chars)
   let translationChars = 0; // solo traducción a inglés (Azure)
   let detectChars = 0; // detección de idioma (Azure)
+  let detectAzureDurationMs = 0; // duración detección Azure
+  let forwardTranslationDurationMs = 0; // duración traducción a inglés (Azure)
+  let reverseTranslationDurationMs = 0; // duración traducción inversa genérica (Azure)
   let reverseTranslationChars = 0; // traducción inversa al idioma original
+  // Hoist queryType to function scope so it's available in error paths
+  let queryType = 'unknown';
+  let modelTranslation = 'gpt5nano'; //'gpt5mini';
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
   const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
@@ -292,7 +295,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       detectedLanguage = det.lang;
       if (det.azureCharsBilled && det.azureCharsBilled > 0) {
         detectChars += det.azureCharsBilled;
+        detectAzureDurationMs += (det.durationMs || 0);
       }
+      modelTranslation = det.modelUsed;
       // Si la detección usó LLM, acumular coste en detect_language (no mezclar con traducción)
       if (det.usage && (det.modelUsed === 'gpt5mini' || det.modelUsed === 'gpt5nano')) {
         const dCost = calculatePrice(det.usage, det.modelUsed);
@@ -313,81 +318,18 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         costTracking.total.tokens.output += dCost.outputTokens;
         costTracking.total.tokens.total += dCost.totalTokens;
       }
+      forwardTranslationDurationMs = 0;
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Intentar traducción a inglés con LLM (gpt5mini); fallback Azure
-        let forwardStart = 0, forwardEnd = 0;
-        let forwardTotalCost = 0;
-        let forwardInputTokens = 0;
-        let forwardOutputTokens = 0;
-        try {
-          // description → en
-          forwardStart = Date.now();
-          const translatePromptIn = `Translate the following text into English. Return ONLY the translated text.`;
-          const requestBodyLLMIn = {
-            model: "gpt-5-mini",
-            messages: [
-              { role: "user", content: translatePromptIn },
-              { role: "user", content: data.description }
-            ],
-            reasoning_effort: "low"
-          };
-          const dataReqIn = { tenantId: data.tenantId, subscriptionId: data.subscriptionId, myuuid: data.myuuid };
-          const llmInResp = await callAiWithFailover(requestBodyLLMIn, data.timezone, 'gpt5mini', 0, dataReqIn);
-          if (!llmInResp.data.choices?.[0]?.message?.content) {
-            throw new Error('Empty LLM forward translation response');
-          }
-          englishDescription = llmInResp.data.choices[0].message.content.trim();
-          forwardEnd = Date.now();
-          if (llmInResp.data.usage) {
-            const fCost = calculatePrice(llmInResp.data.usage, 'gpt5mini');
-            forwardTotalCost += fCost.totalCost;
-            forwardInputTokens += fCost.inputTokens;
-            forwardOutputTokens += fCost.outputTokens;
-          }
-          // diseases_list → en (si existe)
-          if (englishDiseasesList) {
-            const requestBodyLLMIn2 = {
-              model: "gpt-5-mini",
-              messages: [
-                { role: "user", content: translatePromptIn },
-                { role: "user", content: data.diseases_list }
-              ],
-              reasoning_effort: "low"
-            };
-            const llmInResp2 = await callAiWithFailover(requestBodyLLMIn2, data.timezone, 'gpt5mini', 0, dataReqIn);
-            if (!llmInResp2.data.choices?.[0]?.message?.content) {
-              throw new Error('Empty LLM forward translation response (diseases)');
-            }
-            englishDiseasesList = llmInResp2.data.choices[0].message.content.trim();
-            if (llmInResp2.data.usage) {
-              const fCost2 = calculatePrice(llmInResp2.data.usage, 'gpt5mini');
-              forwardTotalCost += fCost2.totalCost;
-              forwardInputTokens += fCost2.inputTokens;
-              forwardOutputTokens += fCost2.outputTokens;
-            }
-          }
-          // Registrar coste en costTracking.translation (LLM - forward)
-          if (forwardTotalCost > 0) {
-            costTracking.translation = {
-              cost: forwardTotalCost,
-              tokens: { input: forwardInputTokens, output: forwardOutputTokens, total: (forwardInputTokens + forwardOutputTokens) },
-              model: 'gpt5mini',
-              duration: forwardEnd - forwardStart,
-              success: true
-            };
-            costTracking.total.cost += forwardTotalCost;
-            costTracking.total.tokens.input += forwardInputTokens;
-            costTracking.total.tokens.output += forwardOutputTokens;
-            costTracking.total.tokens.total += (forwardInputTokens + forwardOutputTokens);
-          }
-        } catch (llmForwardError) {
-          // Fallback Azure translate to English (se cobra por carácter)
-          translationChars += (data.description ? data.description.length : 0);
-          englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
-          if (englishDiseasesList) {
-            translationChars += (data.diseases_list ? data.diseases_list.length : 0);
-            englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
-          }
+        // Azure Translator únicamente (sin LLM) — se cobra por carácter
+        translationChars += (data.description ? data.description.length : 0);
+        const fwdStart1 = Date.now();
+        englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
+        forwardTranslationDurationMs += (Date.now() - fwdStart1);
+        if (englishDiseasesList) {
+          translationChars += (data.diseases_list ? data.diseases_list.length : 0);
+          const fwdStart2 = Date.now();
+          englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
+          forwardTranslationDurationMs += (Date.now() - fwdStart2);
         }
       }
 
@@ -474,7 +416,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let clinicalScenarioResult = '';
     let clinicalScenarioCost = null;
     const clinicalStartMs = Date.now();
-    
+
 
     let medicalQuestionResponse = null;
     let medicalQuestionResult = '';
@@ -493,7 +435,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               input: clinicalScenarioCost.inputTokens,
               output: clinicalScenarioCost.outputTokens,
               total: clinicalScenarioCost.totalTokens
-            }
+            },
+            duration: clinicalElapsedMs
           };
           costTracking.total.cost += clinicalScenarioCost.totalCost;
           costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
@@ -547,7 +490,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     // Determinar el tipo de consulta basado en el resultado del clinical scenario check
-    let queryType = 'other';
+    queryType = 'other';
     if (clinicalScenarioResult === 'true') {
       queryType = 'diagnostic';
     } else {
@@ -555,7 +498,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       // en dxgpt solo habilitar en página beta (betaPage === true)
       if (specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true)) {
         console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
-        
+
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
         let medicalQuestionRequest;
         if (modelIntencion === 'gpt5mini') {
@@ -579,7 +522,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             presence_penalty: 0,
           };
         }
-        
+
         const medicalStartMs = Date.now();
         try {
           const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, modelIntencion, 0, dataRequest);
@@ -595,7 +538,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   input: medicalQuestionCost.inputTokens,
                   output: medicalQuestionCost.outputTokens,
                   total: medicalQuestionCost.totalTokens
-                }
+                },
+                duration: medicalElapsedMs
               };
               costTracking.total.cost += medicalQuestionCost.totalCost;
               costTracking.total.tokens.input += medicalQuestionCost.inputTokens;
@@ -607,7 +551,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             } else {
               queryType = 'other';
             }
-            
+
             //console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
           }
         } catch (medicalError) {
@@ -628,11 +572,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // en dxgpt solo habilitar en página beta (betaPage === true)
     if (specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
 
-                  await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
-                  console.log('General medical question detected for special tenant, generating educational response');
+      await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
+      console.log('General medical question detected for special tenant, generating educational response');
 
-                  // Llamar al modelo para contestar la pregunta médica general
-                  let generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using markdown formatting.
+      // Llamar al modelo para contestar la pregunta médica general
+      let generalMedicalPrompt = `You are a medical educator. Answer the following medical question in a clear, educational manner using markdown formatting.
 
                   Guidelines:
                   - Provide accurate, evidence-based information
@@ -645,303 +589,320 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   
                   Answer in the same language as the question using proper markdown formatting.`;
 
-                 // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano', 'gpt5mini)
-                 const modelType = modelQuestions;
-                  try {
-                    // Obtener respuesta del modelo seleccionado
-                    const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
-                      generalMedicalPrompt, 
-                      data.timezone, 
-                      dataRequest, 
-                      modelType
-                    );
-                    data.model = selectedModel;
-                    
-                    // Procesar respuesta
-                    const { medicalAnswer, sonarData } = processMedicalResponse(generalMedicalResponse, selectedModel);
+      const modelType = modelQuestions;
+      try {
+        // Obtener respuesta del modelo seleccionado
+        const generalStartMs = Date.now();
+        const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
+          generalMedicalPrompt,
+          data.timezone,
+          dataRequest,
+          modelType
+        );
+        const generalElapsedMs = Date.now() - generalStartMs;
+        data.model = selectedModel;
 
-                    const result = {
-                      result: 'success',
-                      data: [], // Sin diagnósticos para consultas generales
-                      medicalAnswer: medicalAnswer, // Respuesta educativa generada
-                      sonarData: sonarData, // Información de citas (solo disponible con Sonar)
-                      anonymization: {
-                        hasPersonalInfo: false,
-                        anonymizedText: '',
-                        anonymizedTextHtml: ''
-                      },
-                      detectedLang: detectedLanguage,
-                      model: modelType,
-                      queryType: queryType,
-                      question: data.description
-                    };
+        // Procesar respuesta
+        let { medicalAnswer, sonarData } = processMedicalResponse(generalMedicalResponse, selectedModel);
+        // Anonimizar medicalAnswer (medir duración y computar coste si hay usage)
+        if (userId) {
+          await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
+        }
 
-                    // Guardar costos del clinical check y la respuesta médica
-                    const stages = [];
-                    if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
-                      stages.push({
-                        name: 'clinical_check',
-                        cost: costTracking.etapa0_clinical_check.cost,
-                        tokens: costTracking.etapa0_clinical_check.tokens,
-                        model: modelIntencion,
-                        duration: 0,
-                        success: true
-                      });
-                    }
+        const anonymStartGeneral = Date.now();
+        const anonymizedMedicalAnswer = await anonymizeText(medicalAnswer, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
+        const anonymElapsedGeneral = Date.now() - anonymStartGeneral;
+        if (anonymizedMedicalAnswer && anonymizedMedicalAnswer.hasPersonalInfo) {
+          medicalAnswer = anonymizedMedicalAnswer.markdownText || anonymizedMedicalAnswer.anonymizedText;
+        }
+        if (anonymizedMedicalAnswer && anonymizedMedicalAnswer.usage) {
+          const anonCostGeneral = calculatePrice(anonymizedMedicalAnswer.usage, modelAnonymization);
+          costTracking.etapa2_anonimizacion = {
+            cost: anonCostGeneral.totalCost,
+            tokens: {
+              input: anonCostGeneral.inputTokens,
+              output: anonCostGeneral.outputTokens,
+              total: anonCostGeneral.totalTokens
+            },
+            model: modelAnonymization,
+            duration: anonymElapsedGeneral
+          };
+          costTracking.total.cost += anonCostGeneral.totalCost;
+          costTracking.total.tokens.input += anonCostGeneral.inputTokens;
+          costTracking.total.tokens.output += anonCostGeneral.outputTokens;
+          costTracking.total.tokens.total += anonCostGeneral.totalTokens;
+        }
+        const result = {
+          result: 'success',
+          data: [], // Sin diagnósticos para consultas generales
+          medicalAnswer: medicalAnswer, // Respuesta educativa generada
+          sonarData: sonarData, // Información de citas (solo disponible con Sonar)
+          anonymization: {
+            hasPersonalInfo: false,
+            anonymizedText: '',
+            anonymizedTextHtml: ''
+          },
+          detectedLang: detectedLanguage,
+          model: modelType,
+          queryType: queryType,
+          question: data.description
+        };
 
-                    if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
-                      stages.push({
-                        name: 'medical_question_check',
-                        cost: costTracking.etapa0__medical_check.cost,
-                        tokens: costTracking.etapa0__medical_check.tokens,
-                        model: modelIntencion,
-                        duration: 0,
-                        success: true
-                      });
-                    }
-                    let etapa1Cost = null;
-                    // Agregar costos de la respuesta médica general
-                    if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
-                      const usage = generalMedicalResponse.data.usage;
-                      console.log('usage', usage)
-                      console.log('selectedModel', selectedModel)
-                      etapa1Cost = calculatePrice(usage, selectedModel);
-                      costTracking.etapa1_medical_response = {
-                        cost: etapa1Cost.totalCost,
-                        tokens: etapa1Cost.totalTokens,
-                        model: selectedModel,
-                        duration: 0,
-                        success: true
-                      };
-                      costTracking.total.cost += etapa1Cost.totalCost;
-                      costTracking.total.tokens.input += etapa1Cost.inputTokens;
-                      costTracking.total.tokens.output += etapa1Cost.outputTokens;
-                      costTracking.total.tokens.total += etapa1Cost.totalTokens;
-                      console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
-
-                      stages.push({
-                        name: 'general_medical_response',
-                        cost: etapa1Cost.totalCost,
-                        tokens: etapa1Cost.totalTokens,
-                        model: selectedModel,
-                        duration: 0,
-                        success: true
-                      });
-                    }
-
-                    // Añadir costes de traducción (detección + traducción a inglés)
-                    // Añadir coste LLM de detección si existe
-                    if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
-                      stages.push({
-                        name: 'detect_language',
-                        cost: costTracking.detect_language.cost,
-                        tokens: costTracking.detect_language.tokens,
-                        model: costTracking.detect_language.model,
-                        duration: costTracking.detect_language.duration || 0,
-                        success: true
-                      });
-                    }
-                    // Añadir coste LLM de traducción a inglés si existe
-                    if (costTracking.translation && costTracking.translation.cost > 0 && (costTracking.translation.model === 'gpt5mini' || costTracking.translation.model === 'gpt5nano')) {
-                      stages.push({
-                        name: 'translation',
-                        cost: costTracking.translation.cost,
-                        tokens: costTracking.translation.tokens,
-                        model: costTracking.translation.model,
-                        duration: costTracking.translation.duration || 0,
-                        success: true
-                      });
-                    }
-                    // Coste Azure de detección
-                    if (detectChars > 0) {
-                      const detectCost = (detectChars / 1000000) * 10;
-                      stages.push({
-                        name: 'detect_language',
-                        cost: detectCost,
-                        tokens: { input: detectChars, output: detectChars, total: detectChars },
-                        model: 'translation_service',
-                        duration: 0,
-                        success: true
-                      });
-                      costTracking.total.cost += detectCost;
-                    }
-        if (translationChars > 0) {
-                      const translationCost = (translationChars / 1000000) * 10;
-                      costTracking.translation = {
-                        cost: translationCost,
-                        tokens: { input: translationChars, output: translationChars, total: translationChars },
-                        model: 'translation_service',
-                        duration: 0,
-                        success: true
-                      };
-                      costTracking.total.cost += translationCost;
-                      stages.push({
-                        name: 'translation',
-                        cost: translationCost,
-                        tokens: { input: translationChars, output: translationChars, total: translationChars },
-                        model: 'translation_service',
-                        duration: 0,
-                        success: true
-                      });
-                    }
-        if (costTracking.reverse_anonymization && costTracking.reverse_anonymization.cost > 0) {
+        // Guardar costos del clinical check y la respuesta médica
+        const stages = [];
+        if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
           stages.push({
-            name: 'reverse_anonymization',
-            cost: costTracking.reverse_anonymization.cost,
-            tokens: costTracking.reverse_anonymization.tokens,
-            model: costTracking.reverse_anonymization.model || 'gpt5mini',
-            duration: costTracking.reverse_anonymization.duration || 0,
+            name: 'clinical_check',
+            cost: costTracking.etapa0_clinical_check.cost,
+            tokens: costTracking.etapa0_clinical_check.tokens,
+            model: modelIntencion,
+            duration: costTracking.etapa0_clinical_check.duration || 0,
             success: true
           });
         }
-                    // Añadir costes de traducción inversa
-     if (reverseTranslationChars > 0) {
-                      const reverseCost = (reverseTranslationChars / 1000000) * 10;
-                      costTracking.reverse_translation = {
-                        cost: reverseCost,
-                        tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
-                        model: 'translation_service',
-                        duration: 0,
-                        success: true
-                      };
-                      costTracking.total.cost += reverseCost;
-                      stages.push({
-                        name: 'reverse_translation',
-                        cost: reverseCost,
-                        tokens: { input: 0, output: 0, total: 0 },
-                        model: 'translation_service',
-                        duration: 0,
-                        success: true
-                      });
-                    }
-     
-                    // Reverse anonymization (LLM) si existe
-                    if (costTracking.reverse_anonymization && costTracking.reverse_anonymization.cost > 0) {
-                      stages.push({
-                        name: 'reverse_anonymization',
-                        cost: costTracking.reverse_anonymization.cost,
-                        tokens: costTracking.reverse_anonymization.tokens,
-                        model: costTracking.reverse_anonymization.model || 'gpt5mini',
-                        duration: costTracking.reverse_anonymization.duration || 0,
-                        success: true
-                      });
-                    }
 
-                    console.log(`\n💰 RESUMEN DE COSTOS:`);
-                    if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
-                      console.log(`   Etapa 0 - Detect Language: ${formatCost(costTracking.detect_language.cost)}`);
-                    }
-                    if (costTracking.etapa0_clinical_check.cost > 0) {
-                      console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
-                    }
-                    if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
-                      console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
-                    }
-                    if (costTracking.translation && costTracking.translation.cost > 0) {
-                      console.log(`   Etapa 1 - Translation: ${formatCost(costTracking.translation.cost)}`);
-                    }
-                    if (costTracking.reverse_translation && costTracking.reverse_translation.cost > 0) {
-                      console.log(`   Etapa 1 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
-                    }
-                    if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
-                      console.log(`   Etapa 1 - Reverse Diseases: ${formatCost(costTracking.reverse_diseases.cost)}`);
-                    }
-                    if (costTracking.reverse_anonymization && costTracking.reverse_anonymization.cost > 0) {
-                      console.log(`   Etapa 2 - Reverse Anonymization: ${formatCost(costTracking.reverse_anonymization.cost)}`);
-                    }
+        if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
+          stages.push({
+            name: 'medical_question_check',
+            cost: costTracking.etapa0__medical_check.cost,
+            tokens: costTracking.etapa0__medical_check.tokens,
+            model: modelIntencion,
+            duration: costTracking.etapa0__medical_check.duration || 0,
+            success: true
+          });
+        }
+        let etapa1Cost = null;
+        // Agregar costos de la respuesta médica general
+        if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
+          const usage = generalMedicalResponse.data.usage;
+          console.log('usage', usage)
+          console.log('selectedModel', selectedModel)
+          etapa1Cost = calculatePrice(usage, selectedModel);
+          costTracking.etapa1_medical_response = {
+            cost: etapa1Cost.totalCost,
+            tokens: { input: etapa1Cost.inputTokens, output: etapa1Cost.outputTokens, total: etapa1Cost.totalTokens },
+            model: selectedModel,
+            duration: generalElapsedMs,
+            success: true
+          };
+          costTracking.total.cost += etapa1Cost.totalCost;
+          costTracking.total.tokens.input += etapa1Cost.inputTokens;
+          costTracking.total.tokens.output += etapa1Cost.outputTokens;
+          costTracking.total.tokens.total += etapa1Cost.totalTokens;
+          console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
 
-                    if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
-                      console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
-                    }
-                    console.log(`   ──────────────────────────`);
-                    console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
-                    console.log(`   ──────────────────────────`);
-                    try {
-                      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
-                        intent: 'medical_question',
-                        queryType: queryType
-                      });
-                      console.log('✅ Costos de consulta médica general guardados en la base de datos');
-                    } catch (costError) {
-                      console.error('❌ Error guardando costos de consulta médica general:', costError.message);
-                    }
+          stages.push({
+            name: 'general_medical_response',
+            cost: etapa1Cost.totalCost,
+            tokens: { input: etapa1Cost.inputTokens, output: etapa1Cost.outputTokens, total: etapa1Cost.totalTokens },
+            model: selectedModel,
+            duration: generalElapsedMs,
+            success: true
+          });
+        }
+        // Añadir anonimización si se ha realizado
+        if (costTracking.etapa2_anonimizacion && costTracking.etapa2_anonimizacion.cost > 0) {
+          stages.push({
+            name: 'anonymization',
+            cost: costTracking.etapa2_anonimizacion.cost,
+            tokens: costTracking.etapa2_anonimizacion.tokens,
+            model: costTracking.etapa2_anonimizacion.model || modelAnonymization,
+            duration: costTracking.etapa2_anonimizacion.duration || 0,
+            success: true
+          });
+        }
 
-                    // Guardar sesión de diagnóstico en la base de datos
-                    try {
-                      const questionData = {
-                        myuuid: data.myuuid,
-                        tenantId: data.tenantId,
-                        subscriptionId: data.subscriptionId,
-                        iframeParams: data.iframeParams || {},
-                        question: {
-                          originalText: data.description,
-                          detectedLanguage: detectedLanguage,
-                          translatedText: englishDescription
-                        },
-                        answer: {
-                          medicalAnswer : medicalAnswer,
-                          queryType: queryType,
-                          model: modelType
-                        },
-                        timezone: data.timezone,
-                        lang: data.lang || 'en',
-                        processingTime: Date.now() - startTime,
-                        status: 'success'
-                      };
+        // Añadir costes de traducción (detección + traducción a inglés)
+        // Añadir coste LLM de detección si existe
+        if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
+          stages.push({
+            name: 'detect_language',
+            cost: costTracking.detect_language.cost,
+            tokens: costTracking.detect_language.tokens,
+            model: costTracking.detect_language.model,
+            duration: costTracking.detect_language.duration || 0,
+            success: true
+          });
+        }
+        // Añadir coste LLM de traducción a inglés si existe
+        if (costTracking.translation && costTracking.translation.cost > 0 && (costTracking.translation.model === 'gpt5mini' || costTracking.translation.model === 'gpt5nano')) {
+          stages.push({
+            name: 'translation',
+            cost: costTracking.translation.cost,
+            tokens: costTracking.translation.tokens,
+            model: costTracking.translation.model,
+            duration: costTracking.translation.duration || 0,
+            success: true
+          });
+        }
+        // Coste Azure de detección
+        if (detectChars > 0) {
+          const detectCost = (detectChars / 1000000) * 10;
+          stages.push({
+            name: 'detect_language',
+            cost: detectCost,
+            tokens: { input: detectChars, output: detectChars, total: detectChars },
+            model: 'translation_service',
+            duration: detectAzureDurationMs,
+            success: true
+          });
+          costTracking.total.cost += detectCost;
+        }
+        if (translationChars > 0) {
+          const translationCost = (translationChars / 1000000) * 10;
+          costTracking.translation = {
+            cost: translationCost,
+            tokens: { input: translationChars, output: translationChars, total: translationChars },
+            model: 'translation_service',
+            duration: forwardTranslationDurationMs,
+            success: true
+          };
+          costTracking.total.cost += translationCost;
+          stages.push({
+            name: 'translation',
+            cost: translationCost,
+            tokens: { input: translationChars, output: translationChars, total: translationChars },
+            model: 'translation_service',
+            duration: forwardTranslationDurationMs,
+            success: true
+          });
+        }
+        
+        // Añadir costes de traducción inversa
+        if (reverseTranslationChars > 0) {
+          const reverseCost = (reverseTranslationChars / 1000000) * 10;
+          costTracking.reverse_translation = {
+            cost: reverseCost,
+            tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+            model: 'translation_service',
+            duration: reverseTranslationDurationMs || 0,
+            success: true
+          };
+          costTracking.total.cost += reverseCost;
+          stages.push({
+            name: 'reverse_translation',
+            cost: reverseCost,
+            tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+            model: 'translation_service',
+            duration: reverseTranslationDurationMs || 0,
+            success: true
+          });
+        }
 
-                      await DiagnoseSessionService.saveQuestion(questionData);
-                      console.log('✅ Sesión de diagnóstico guardada exitosamente');
-                    } catch (sessionError) {
-                      console.error('❌ Error guardando sesión de diagnóstico:', sessionError.message);
-                      insights.error({
-                        message: 'Error guardando sesión de diagnóstico',
-                        error: sessionError.message,
-                        myuuid: data.myuuid,
-                        tenantId: data.tenantId,
-                        subscriptionId: data.subscriptionId
-                      });
-                      // No lanzamos el error para no afectar la respuesta al usuario
-                    }
-                    // Enviar progreso inicial
-                    await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
-                    // Enviar resultado final via WebPubSub
-                    await pubsubService.sendResult(userId, result);
-                    console.log('✅ Resultado final enviado via WebPubSub');
-                    return { result: 'success', message: 'Sent via WebPubSub' };
-                    //return result;
-                  } catch (generalMedicalError) {
-                    console.error('Error generating general medical response:', generalMedicalError);
-                    insights.error({
-                      message: 'Error generating general medical response',
-                      error: generalMedicalError.message,
-                      myuuid: data.myuuid,
-                      tenantId: data.tenantId,
-                      subscriptionId: data.subscriptionId
-                    });
-                    const questionData = {
-                      myuuid: data.myuuid,
-                      tenantId: data.tenantId,
-                      subscriptionId: data.subscriptionId,
-                      iframeParams: data.iframeParams || {},
-                      question: {
-                        originalText: data.description,
-                        detectedLanguage: detectedLanguage,
-                        translatedText: englishDescription
-                      },
-                      answer: {
-                        medicalAnswer : '',
-                        queryType: queryType,
-                        model: modelType
-                      },
-                      timezone: data.timezone,
-                      lang: data.lang || 'en',
-                      processingTime: Date.now() - startTime,
-                      status: 'error'
-                    };
-                    await DiagnoseSessionService.saveQuestion(questionData);
-                    throw generalMedicalError;
-                  }
-    }else{
+        
+
+        console.log(`\n💰 RESUMEN DE COSTOS:`);
+        if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
+          console.log(`   Etapa 0 - Detect Language: ${formatCost(costTracking.detect_language.cost)}`);
+        }
+        if (costTracking.etapa0_clinical_check.cost > 0) {
+          console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+        }
+        if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
+          console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
+        }
+        if (costTracking.etapa2_anonimizacion && costTracking.etapa2_anonimizacion.cost > 0) {
+          console.log(`   Etapa 1 - Anonymization: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
+        }
+        if (costTracking.translation && costTracking.translation.cost > 0) {
+          console.log(`   Etapa 1 - Translation: ${formatCost(costTracking.translation.cost)}`);
+        }
+        if (costTracking.reverse_translation && costTracking.reverse_translation.cost > 0) {
+          console.log(`   Etapa 1 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
+        }
+
+        if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
+          console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
+        }
+        console.log(`   ──────────────────────────`);
+        console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
+        console.log(`   ──────────────────────────`);
+        try {
+          await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+            intent: 'medical_question',
+            queryType: queryType
+          });
+          console.log('✅ Costos de consulta médica general guardados en la base de datos');
+        } catch (costError) {
+          console.error('❌ Error guardando costos de consulta médica general:', costError.message);
+        }
+
+        // Guardar sesión de diagnóstico en la base de datos
+        try {
+          const questionData = {
+            myuuid: data.myuuid,
+            tenantId: data.tenantId,
+            subscriptionId: data.subscriptionId,
+            iframeParams: data.iframeParams || {},
+            question: {
+              originalText: data.description,
+              detectedLanguage: detectedLanguage,
+              translatedText: englishDescription
+            },
+            answer: {
+              medicalAnswer: medicalAnswer,
+              queryType: queryType,
+              model: modelType
+            },
+            timezone: data.timezone,
+            lang: data.lang || 'en',
+            processingTime: Date.now() - startTime,
+            status: 'success'
+          };
+
+          await DiagnoseSessionService.saveQuestion(questionData);
+          console.log('✅ Sesión de diagnóstico guardada exitosamente');
+        } catch (sessionError) {
+          console.error('❌ Error guardando sesión de diagnóstico:', sessionError.message);
+          insights.error({
+            message: 'Error guardando sesión de diagnóstico',
+            error: sessionError.message,
+            myuuid: data.myuuid,
+            tenantId: data.tenantId,
+            subscriptionId: data.subscriptionId
+          });
+          // No lanzamos el error para no afectar la respuesta al usuario
+        }
+        // Enviar progreso inicial
+        await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
+        // Enviar resultado final via WebPubSub
+        await pubsubService.sendResult(userId, result);
+        console.log('✅ Resultado final enviado via WebPubSub');
+        return { result: 'success', message: 'Sent via WebPubSub' };
+        //return result;
+      } catch (generalMedicalError) {
+        console.error('Error generating general medical response:', generalMedicalError);
+        insights.error({
+          message: 'Error generating general medical response',
+          error: generalMedicalError.message,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+        const questionData = {
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId,
+          iframeParams: data.iframeParams || {},
+          question: {
+            originalText: data.description,
+            detectedLanguage: detectedLanguage,
+            translatedText: englishDescription
+          },
+          answer: {
+            medicalAnswer: '',
+            queryType: queryType,
+            model: modelType
+          },
+          timezone: data.timezone,
+          lang: data.lang || 'en',
+          processingTime: Date.now() - startTime,
+          status: 'error'
+        };
+        await DiagnoseSessionService.saveQuestion(questionData);
+        throw generalMedicalError;
+      }
+    } else {
       const questionData = {
         myuuid: data.myuuid,
         tenantId: data.tenantId,
@@ -953,7 +914,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           translatedText: englishDescription
         },
         answer: {
-          medicalAnswer : '',
+          medicalAnswer: '',
           queryType: queryType,
           model: model
         },
@@ -1008,7 +969,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           cost: costTracking.etapa0_clinical_check.cost,
           tokens: costTracking.etapa0_clinical_check.tokens,
           model: modelIntencion,
-          duration: 0,
+          duration: costTracking.etapa0_clinical_check.duration || 0,
           success: true
         });
       }
@@ -1018,7 +979,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           cost: costTracking.etapa0__medical_check.cost,
           tokens: costTracking.etapa0__medical_check.tokens,
           model: modelIntencion,
-          duration: 0,
+          duration: costTracking.etapa0__medical_check.duration || 0,
           success: true
         });
       }
@@ -1053,7 +1014,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           cost: detectCost,
           tokens: { input: detectChars, output: detectChars, total: detectChars },
           model: 'translation_service',
-          duration: 0,
+          duration: detectAzureDurationMs,
           success: true
         });
       }
@@ -1063,7 +1024,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           cost: translationCost,
           tokens: { input: translationChars, output: translationChars, total: translationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: forwardTranslationDurationMs,
           success: true
         };
         costTracking.total.cost += translationCost;
@@ -1072,7 +1033,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           cost: translationCost,
           tokens: { input: 0, output: 0, total: 0 },
           model: 'translation_service',
-          duration: 0,
+          duration: forwardTranslationDurationMs,
           success: true
         });
       }
@@ -1107,7 +1068,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     // 2. FASE ÚNICA: Obtener diagnósticos completos en una sola llamada
-    
+
     let helpDiagnosePrompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
         .replace("{{description}}", englishDescription)
@@ -1149,7 +1110,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         messages: [{ role: "user", content: helpDiagnosePrompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
-    }else if (model === 'gpt5') {
+    } else if (model === 'gpt5') {
       requestBody = {
         model: "gpt-5",
         messages: [
@@ -1167,15 +1128,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       };
 
       if (data.imageUrls && data.imageUrls.length > 0) {
-        const imagePrompts = data.imageUrls.map((image, index) => 
-          { 
-            return {
-              type: "image_url",
-              image_url: {
-                url: image.url
-              }
+        const imagePrompts = data.imageUrls.map((image, index) => {
+          return {
+            type: "image_url",
+            image_url: {
+              url: image.url
             }
           }
+        }
         );
         requestBody.messages[0].content.push(...imagePrompts);
         //console.log('imagePrompts', imagePrompts);
@@ -1193,13 +1153,15 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
     }
 
+    const aiStartMs = Date.now();
     const aiResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+    const aiElapsedMs = Date.now() - aiStartMs;
     let usage = null;
 
     // Progreso: IA completada
-          if (userId) {
-        await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
-      }
+    if (userId) {
+      await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
+    }
 
     // Procesar la respuesta según el modelo
     let aiResponseText;
@@ -1223,7 +1185,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           input: etapa1Cost.inputTokens,
           output: etapa1Cost.outputTokens,
           total: etapa1Cost.totalTokens
-        }
+        },
+        duration: aiElapsedMs
       };
       costTracking.total.cost += etapa1Cost.totalCost;
       costTracking.total.tokens.input += etapa1Cost.inputTokens;
@@ -1253,7 +1216,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       // Limpiar la respuesta para asegurar que es un JSON válido
       let cleanResponse = aiResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
       cleanResponse = cleanResponse.replace(/^```\s*|\s*```$/g, '');
-      
+
       // Fix quirúrgico para paréntesis sobrantes después de comillas de cierre
       // Solo aplicamos el fix si el JSON inicial es inválido
       try {
@@ -1355,8 +1318,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let hasPersonalInfo = false;
 
     if (parsedResponse.length > 0) {
-      let modelAnonymization = 'gpt5nano';//'gpt5nano'//'gpt4o'//'gpt4omini' 'gpt5mini'
+      const anonymStartMs = Date.now();
       anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
+      const anonymElapsedMs = Date.now() - anonymStartMs;
       anonymizedDescription = anonymizedResult.anonymizedText;
       anonymizedDescriptionEnglish = anonymizedDescription;
       hasPersonalInfo = anonymizedResult.hasPersonalInfo;
@@ -1368,7 +1332,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             input: etapa3Cost.inputTokens,
             output: etapa3Cost.outputTokens,
             total: etapa3Cost.totalTokens
-          }
+          },
+          duration: anonymElapsedMs
         };
         costTracking.total.cost += etapa3Cost.totalCost;
         costTracking.total.tokens.input += etapa3Cost.inputTokens;
@@ -1377,46 +1342,27 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         console.log(`💰 Etapa 2 - Anonimización: ${formatCost(etapa3Cost.totalCost)} (${etapa3Cost.totalTokens} tokens)`);
       }
       console.log('hasPersonalInfo', hasPersonalInfo);
+      console.log('detectedLanguage', detectedLanguage);
       if (hasPersonalInfo && detectedLanguage !== 'en') {
-        // Intentar con LLM (gpt5mini) y fallback Azure
-        try {
-          const anonTranslatePrompt = `Translate the following text into ${detectedLanguage}. Preserve tokens like [ANON-n] exactly as they are. Return ONLY the translated text.`;
-          const anonRequest = {
-            model: "gpt-5-mini",
-            messages: [
-              { role: "user", content: anonTranslatePrompt },
-              { role: "user", content: anonymizedDescription }
-            ],
-            reasoning_effort: "low"
-          };
-          const dataReqAnon = { tenantId: data.tenantId, subscriptionId: data.subscriptionId, myuuid: data.myuuid };
-          const anonStart = Date.now();
-          const anonResp = await callAiWithFailover(anonRequest, data.timezone, 'gpt5mini', 0, dataReqAnon);
-          const anonEnd = Date.now();
-          if (!anonResp.data.choices?.[0]?.message?.content) {
-            throw new Error('Empty LLM anonymization translation response');
-          }
-          anonymizedDescription = anonResp.data.choices[0].message.content.trim();
-          if (anonResp.data.usage) {
-            const aCost = calculatePrice(anonResp.data.usage, 'gpt5mini');
+        // Azure Translator únicamente para texto anonimizado
+        const anonChars = (anonymizedDescription ? anonymizedDescription.length : 0);
+        console.log('anonChars', anonChars);
+        if (anonChars > 0) {
+          try {
+            const revAnonStart = Date.now();
+            anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
+            const revAnonElapsed = Date.now() - revAnonStart;
+            const reverseCost = (anonChars / 1000000) * 10;
             costTracking.reverse_anonymization = {
-              cost: aCost.totalCost,
-              tokens: { input: aCost.inputTokens, output: aCost.outputTokens, total: aCost.totalTokens },
-              model: 'gpt5mini',
-              duration: anonEnd - anonStart,
+              cost: reverseCost,
+              tokens: { input: anonChars, output: anonChars, total: anonChars },
+              model: 'translation_service',
+              duration: revAnonElapsed,
               success: true
             };
-            costTracking.total.cost += aCost.totalCost;
-            costTracking.total.tokens.input += aCost.inputTokens;
-            costTracking.total.tokens.output += aCost.outputTokens;
-            costTracking.total.tokens.total += aCost.totalTokens;
-          }
-        } catch (translationErrorLLM) {
-          try {
-            reverseTranslationChars += (anonymizedDescription ? anonymizedDescription.length : 0);
-            anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
+            costTracking.total.cost += reverseCost;
           } catch (translationErrorAzure) {
-            console.error('Error en la traducción inversa (LLM+Azure):', translationErrorAzure.message);
+            console.error('Error en la traducción inversa (Azure):', translationErrorAzure.message);
             insights.error({ message: translationErrorAzure.message, phase: 'translation', detectedLanguage });
             throw translationErrorAzure;
           }
@@ -1432,127 +1378,59 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
     }
 
-    // Traducir la respuesta si es necesario
+    // Traducir la respuesta si es necesario (Azure únicamente, sin LLM)
     if (detectedLanguage !== 'en' && parsedResponse.length > 0) {
       try {
-        // LLM (gpt5mini) para traducir el JSON completo preservando estructura
-        const translationPrompt = `You are a bilingual medical translator. Translate the following JSON array into ${detectedLanguage}. Preserve the exact JSON structure and keys. Only translate string values. Return ONLY the JSON array, with no extra text.`;
-        const inputJson = JSON.stringify(parsedResponse);
-        const translateRequest = {
-          model: "gpt-5-mini",
-          messages: [
-            { role: "user", content: translationPrompt },
-            { role: "user", content: inputJson }
-          ],
-          reasoning_effort: "low"
-        };
-        const dataRequestTranslate = {
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId,
-          myuuid: data.myuuid
-        };
-        const translateStart = Date.now();
-        const translateResponse = await callAiWithFailover(translateRequest, data.timezone, 'gpt5mini', 0, dataRequestTranslate);
-        const translateEnd = Date.now();
-        if (!translateResponse.data.choices?.[0]?.message?.content) {
-          throw new Error('Empty LLM translation response');
-        }
-        let translatedContent = translateResponse.data.choices[0].message.content.trim();
-        translatedContent = translatedContent.replace(/^```json\s*|\s*```$/g, '').replace(/^```\s*|\s*```$/g, '');
-        parsedResponse = JSON.parse(translatedContent);
-        // Validar estructura del JSON traducido (igual que validación original)
-        const requiredFields = ['diagnosis', 'description', 'symptoms_in_common', 'symptoms_not_in_common'];
-        if (!Array.isArray(parsedResponse)) {
-          throw new Error('Translated content is not an array');
-        }
-        for (let i = 0; i < parsedResponse.length; i++) {
-          const item = parsedResponse[i];
-          if (!item || typeof item !== 'object') {
-            throw new Error(`Translated item at index ${i} is not an object`);
+        let reverseInChars = 0;
+        for (const diagnosis of parsedResponse) {
+          reverseInChars += (diagnosis.diagnosis ? diagnosis.diagnosis.length : 0);
+          reverseInChars += (diagnosis.description ? diagnosis.description.length : 0);
+          if (Array.isArray(diagnosis.symptoms_in_common)) {
+            for (const s of diagnosis.symptoms_in_common) reverseInChars += (s ? s.length : 0);
           }
-          for (const field of requiredFields) {
-            if (!Object.prototype.hasOwnProperty.call(item, field)) {
-              throw new Error(`Missing required field '${field}' in translated item at index ${i}`);
-            }
-          }
-          if (!Array.isArray(item.symptoms_in_common)) {
-            throw new Error(`'symptoms_in_common' at index ${i} is not an array`);
-          }
-          if (!Array.isArray(item.symptoms_not_in_common)) {
-            throw new Error(`'symptoms_not_in_common' at index ${i} is not an array`);
-          }
-          if (typeof item.diagnosis !== 'string' || item.diagnosis.trim() === '') {
-            throw new Error(`'diagnosis' at index ${i} is not a valid string`);
-          }
-          if (typeof item.description !== 'string' || item.description.trim() === '') {
-            throw new Error(`'description' at index ${i} is not a valid string`);
+          if (Array.isArray(diagnosis.symptoms_not_in_common)) {
+            for (const s of diagnosis.symptoms_not_in_common) reverseInChars += (s ? s.length : 0);
           }
         }
-        // Log coste LLM (si usage disponible)
-        if (translateResponse.data.usage) {
-          const tCost = calculatePrice(translateResponse.data.usage, 'gpt5mini');
-          console.log(`   Reverse Translation via LLM: $${formatCost(tCost.totalCost)} (${tCost.totalTokens} tokens, ${translateEnd - translateStart}ms)`);
-          // Registrar coste en costTracking (LLM)
+        // Traducir por campos con Azure
+        const revDisStart = Date.now();
+        parsedResponse = await Promise.all(
+          parsedResponse.map(async diagnosis => ({
+            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
+            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
+            symptoms_in_common: await Promise.all(
+              diagnosis.symptoms_in_common.map(symptom =>
+                translateInvertWithRetry(symptom, detectedLanguage)
+              )
+            ),
+            symptoms_not_in_common: await Promise.all(
+              diagnosis.symptoms_not_in_common.map(symptom =>
+                translateInvertWithRetry(symptom, detectedLanguage)
+              )
+            )
+          }))
+        );
+        const revDisElapsed = Date.now() - revDisStart;
+        // Registrar coste Azure específico de diagnósticos
+        const reverseCost = (reverseInChars / 1000000) * 10;
+        if (reverseInChars > 0) {
           costTracking.reverse_diseases = {
-            cost: tCost.totalCost,
-            tokens: { input: tCost.inputTokens, output: tCost.outputTokens, total: tCost.totalTokens },
-            model: 'gpt5mini',
-            duration: translateEnd - translateStart,
+            cost: reverseCost,
+            tokens: { input: reverseInChars, output: reverseInChars, total: reverseInChars },
+            model: 'translation_service',
+            duration: revDisElapsed,
             success: true
           };
-          costTracking.total.cost += tCost.totalCost;
-          costTracking.total.tokens.input += tCost.inputTokens;
-          costTracking.total.tokens.output += tCost.outputTokens;
-          costTracking.total.tokens.total += tCost.totalTokens;
+          costTracking.total.cost += reverseCost;
         }
-      } catch (translationError) {
-        console.error('Error en la traducción inversa (LLM), aplicando fallback Azure:', translationError.message);
+      } catch (fallbackError) {
+        console.error('Azure Translator error:', fallbackError.message);
         insights.error({
-          message: 'Fallback to Azure Translator for reverse translation',
-          llmError: translationError.message,
-          detectedLanguage: detectedLanguage,
-          requestData: data,
-          model: model
+          message: 'Azure Translator failed',
+          error: fallbackError.message,
+          detectedLanguage: detectedLanguage
         });
-        // Fallback: Azure Translator por campos
-        try {
-          let reverseInChars = 0;
-          for (const diagnosis of parsedResponse) {
-            reverseInChars += (diagnosis.diagnosis ? diagnosis.diagnosis.length : 0);
-            reverseInChars += (diagnosis.description ? diagnosis.description.length : 0);
-            if (Array.isArray(diagnosis.symptoms_in_common)) {
-              for (const s of diagnosis.symptoms_in_common) reverseInChars += (s ? s.length : 0);
-            }
-            if (Array.isArray(diagnosis.symptoms_not_in_common)) {
-              for (const s of diagnosis.symptoms_not_in_common) reverseInChars += (s ? s.length : 0);
-            }
-          }
-          reverseTranslationChars += reverseInChars;
-          parsedResponse = await Promise.all(
-            parsedResponse.map(async diagnosis => ({
-              diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-              description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
-              symptoms_in_common: await Promise.all(
-                diagnosis.symptoms_in_common.map(symptom =>
-                  translateInvertWithRetry(symptom, detectedLanguage)
-                )
-              ),
-              symptoms_not_in_common: await Promise.all(
-                diagnosis.symptoms_not_in_common.map(symptom =>
-                  translateInvertWithRetry(symptom, detectedLanguage)
-                )
-              )
-            }))
-          );
-        } catch (fallbackError) {
-          console.error('Fallback Azure Translator error:', fallbackError.message);
-          insights.error({
-            message: 'Azure Translator fallback failed',
-            error: fallbackError.message,
-            detectedLanguage: detectedLanguage
-          });
-          throw fallbackError;
-        }
+        throw fallbackError;
       }
     }
 
@@ -1564,6 +1442,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         myuuid: data.myuuid,
         operation: 'find disease',
         lang: data.lang,
+        detectedLanguage: detectedLanguage,
         response: parsedResponse,
         responseEnglish: parsedResponseEnglish,
         topRelatedConditions: data.diseases_list,
@@ -1586,11 +1465,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
           } else if (model == 'o3') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
-          }else if (model == 'gpt5') {
+          } else if (model == 'gpt5') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
-          }else if (model == 'gpt5mini'){
+          } else if (model == 'gpt5mini') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
-          }else if (model == 'gpt5nano'){
+          } else if (model == 'gpt5nano') {
             await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
           }
         }
@@ -1605,7 +1484,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: costTracking.etapa0_clinical_check.cost,
         tokens: costTracking.etapa0_clinical_check.tokens,
         model: modelIntencion,
-        duration: 0,
+        duration: costTracking.etapa0_clinical_check.duration || 0,
         success: true
       });
     }
@@ -1615,7 +1494,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: costTracking.etapa0__medical_check.cost,
         tokens: costTracking.etapa0__medical_check.tokens,
         model: modelIntencion,
-        duration: 0,
+        duration: costTracking.etapa0__medical_check.duration || 0,
         success: true
       });
     }
@@ -1625,7 +1504,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: costTracking.etapa1_diagnosticos.cost,
         tokens: costTracking.etapa1_diagnosticos.tokens,
         model: model,
-        duration: 0,
+        duration: costTracking.etapa1_diagnosticos.duration || 0,
         success: true
       });
     }
@@ -1635,7 +1514,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: costTracking.etapa2_anonimizacion.cost,
         tokens: costTracking.etapa2_anonimizacion.tokens,
         model: model,
-        duration: 0,
+        duration: costTracking.etapa2_anonimizacion.duration || 0,
         success: true
       });
     }
@@ -1671,7 +1550,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: detectCost,
         tokens: { input: detectChars, output: detectChars, total: detectChars },
         model: 'translation_service',
-        duration: 0,
+        duration: detectAzureDurationMs,
         success: true
       });
     }
@@ -1681,7 +1560,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: translationCost,
         tokens: { input: translationChars, output: translationChars, total: translationChars },
         model: 'translation_service',
-        duration: 0,
+        duration: forwardTranslationDurationMs,
         success: true
       };
       costTracking.total.cost += translationCost;
@@ -1690,7 +1569,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: translationCost,
         tokens: { input: translationChars, output: translationChars, total: translationChars },
         model: 'translation_service',
-        duration: 0,
+        duration: forwardTranslationDurationMs,
         success: true
       });
     }
@@ -1700,7 +1579,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: reverseCost,
         tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
         model: 'translation_service',
-        duration: 0,
+        duration: reverseTranslationDurationMs || 0,
         success: true
       };
       costTracking.total.cost += reverseCost;
@@ -1709,7 +1588,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         cost: reverseCost,
         tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
         model: 'translation_service',
-        duration: 0,
+        duration: reverseTranslationDurationMs || 0,
         success: true
       });
     }
@@ -1718,7 +1597,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         name: 'reverse_diseases',
         cost: costTracking.reverse_diseases.cost,
         tokens: costTracking.reverse_diseases.tokens,
-        model: costTracking.reverse_diseases.model || 'gpt5mini',
+        model: costTracking.reverse_diseases.model || modelTranslation,
         duration: costTracking.reverse_diseases.duration || 0,
         success: true
       });
@@ -1728,35 +1607,52 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         name: 'reverse_anonymization',
         cost: costTracking.reverse_anonymization.cost,
         tokens: costTracking.reverse_anonymization.tokens,
-        model: costTracking.reverse_anonymization.model || 'gpt5mini',
+        model: costTracking.reverse_anonymization.model || modelTranslation,
         duration: costTracking.reverse_anonymization.duration || 0,
         success: true
       });
     }
-     // Mostrar resumen final de costos
-     console.log(`\n💰 RESUMEN DE COSTOS:`);
-     if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
-       console.log(`   Etapa 0 - Detect Language: ${formatCost(costTracking.detect_language.cost)}`);
-     }
-     if (costTracking.etapa0_clinical_check.cost > 0) {
-       console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
-     }
-     if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
-       console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
-     }
-     console.log(`   Etapa 1 - Diagnósticos: ${formatCost(costTracking.etapa1_diagnosticos.cost)}`);
-     console.log(`   Etapa 2 - Anonimización: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
-     if (costTracking.translation && costTracking.translation.cost > 0) {
-       console.log(`   Etapa 1 - Translation: ${formatCost(costTracking.translation.cost)}`);
-     }
-     if (costTracking.reverse_translation && costTracking.reverse_translation.cost > 0) {
-       console.log(`   Etapa 1 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
-     }
-     if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
-       console.log(`   Etapa 1 - Reverse Diseases: ${formatCost(costTracking.reverse_diseases.cost)}`);
-     }
-     console.log(`   ──────────────────────────`);
-     console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
+    // Mostrar resumen final de costos
+    console.log(`\n💰 RESUMEN DE COSTOS:`);
+    if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
+      console.log(`   Etapa 1 - Detect Language: ${formatCost(costTracking.detect_language.cost)}`);
+    }
+    if (detectChars > 0) {
+      const detectCostAzure = (detectChars / 1000000) * 10;
+      console.log(`   Etapa 1 - Detect Language (Azure): ${formatCost(detectCostAzure)} (${detectChars} chars)`);
+    }
+    if (costTracking.translation && costTracking.translation.cost > 0) {
+      console.log(`   Etapa 2 - Translation: ${formatCost(costTracking.translation.cost)}`);
+    }
+    if (costTracking.etapa0_clinical_check.cost > 0) {
+      console.log(`   Etapa 3.1 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+    }
+    if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
+      console.log(`   Etapa 3.2 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
+    }
+    console.log(`   Etapa 4 - Diagnósticos: ${formatCost(costTracking.etapa1_diagnosticos.cost)}`);
+    console.log(`   Etapa 5 - Anonimización: ${formatCost(costTracking.etapa2_anonimizacion.cost)}`);
+
+    if (costTracking.reverse_anonymization && costTracking.reverse_anonymization.cost > 0) {
+      console.log(`   Etapa 6 - Reverse Anonymization: ${formatCost(costTracking.reverse_anonymization.cost)}`);
+    }
+    if (costTracking.reverse_translation && costTracking.reverse_translation.cost > 0) {
+      console.log(`   Etapa 6 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
+    }
+    if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
+      console.log(`   Etapa 7 - Reverse Diseases: ${formatCost(costTracking.reverse_diseases.cost)}`);
+    }
+    // Desglose específico Azure para Reverse Diseases
+    try {
+      const revDisAzure = stages.filter(s => s.name === 'reverse_diseases' && s.model === 'translation_service');
+      if (revDisAzure.length > 0) {
+        const revDisAzureCost = revDisAzure.reduce((sum, s) => sum + (s.cost || 0), 0);
+        const revDisAzureChars = revDisAzure.reduce((sum, s) => sum + (s.tokens?.total || 0), 0);
+        console.log(`   Reverse Diseases (Azure): ${formatCost(revDisAzureCost)} (${revDisAzureChars} chars)`);
+      }
+    } catch (_) { }
+    console.log(`   ──────────────────────────`);
+    console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
     try {
       await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
         intent: 'diagnostic',
@@ -1773,14 +1669,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         subscriptionId: data.subscriptionId
       });
     }
-          if (userId) {
-        await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
-      }
+    if (userId) {
+      await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
+    }
     let diseasesList = [];
     if (parsedResponse.length > 0) {
       diseasesList = parsedResponse;
     }
-    if(!hasPersonalInfo){
+    if (!hasPersonalInfo) {
       anonymizedDescription = '';
       anonymizedResult.htmlText = '';
     }
@@ -1811,7 +1707,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             cost: costTracking.etapa0_clinical_check.cost,
             tokens: costTracking.etapa0_clinical_check.tokens,
             model: modelIntencion,
-            duration: 0,
+            duration: costTracking.etapa0_clinical_check.duration || 0,
             success: false
           });
         }
@@ -1822,18 +1718,18 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             cost: costTracking.etapa0__medical_check.cost,
             tokens: costTracking.etapa0__medical_check.tokens,
             model: modelIntencion,
-            duration: 0,
+            duration: costTracking.etapa0__medical_check.duration || 0,
             success: false
           });
         }
         //etapa0__medical_check
-        if(costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
+        if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
           stages.push({
             name: 'medical_question_check',
             cost: costTracking.etapa0__medical_check.cost,
             tokens: costTracking.etapa0__medical_check.tokens,
             model: modelIntencion,
-            duration: 0,
+            duration: costTracking.etapa0__medical_check.duration || 0,
             success: false
           });
         }
@@ -1845,7 +1741,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             cost: costTracking.etapa1_diagnosticos.cost,
             tokens: costTracking.etapa1_diagnosticos.tokens,
             model: model,
-            duration: 0,
+            duration: costTracking.etapa1_diagnosticos.duration || 0,
             success: false
           });
         }
@@ -1856,7 +1752,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             cost: costTracking.etapa2_anonimizacion.cost,
             tokens: costTracking.etapa2_anonimizacion.tokens,
             model: model,
-            duration: 0,
+            duration: costTracking.etapa2_anonimizacion.duration || 0,
             success: false
           });
         }
@@ -1868,16 +1764,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             cost: translationCost,
             tokens: { input: translationChars, output: translationChars, total: translationChars },
             model: 'translation_service',
-            duration: 0,
+            duration: forwardTranslationDurationMs,
             success: false
           };
           costTracking.total.cost += translationCost;
           stages.push({
             name: 'translation',
             cost: translationCost,
-            tokens: { input: 0, output: 0, total: 0 },
+            tokens: { input: translationChars, output: translationChars, total: translationChars },
             model: 'translation_service',
-            duration: 0,
+            duration: forwardTranslationDurationMs,
             success: false
           });
         }
@@ -1887,16 +1783,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             cost: reverseCost,
             tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
             model: 'translation_service',
-            duration: 0,
+            duration: reverseTranslationDurationMs || 0,
             success: false
           };
           costTracking.total.cost += reverseCost;
           stages.push({
             name: 'reverse_translation',
             cost: reverseCost,
-            tokens: { input: 0, output: 0, total: 0 },
+            tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
             model: 'translation_service',
-            duration: 0,
+            duration: reverseTranslationDurationMs || 0,
             success: false
           });
         }
@@ -2112,7 +2008,7 @@ async function diagnose(req, res) {
     // 2. Si es modelo largo, responde rápido y procesa en background
     const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini' || model === 'gpt5');
     const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
-    
+
     // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos
     if (sanitizedData.response_mode === 'direct') {
       try {
@@ -2122,7 +2018,7 @@ async function diagnose(req, res) {
         throw error;
       }
     }
-    
+
     if (isLongModel) {
       res.status(200).send({ result: 'processing' });
       processAIRequest(sanitizedData, requestInfo, model, region)

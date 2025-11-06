@@ -22,23 +22,26 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   const length = content.length;
   const dataRequest = { tenantId, subscriptionId, myuuid };
   // Short: Azure detect
-  if (length < 30) {
+  if (length < 1000) {
     try {
+      const start = Date.now();
       const lang = await detectLanguageWithRetry(content, langHint);
-      return { lang, modelUsed: 'azure_detect', usage: null, durationMs: 0, azureCharsBilled: length };
+      const durationMs = Date.now() - start;
+      return { lang, modelUsed: 'azure_detect', usage: null, durationMs, azureCharsBilled: length };
     } catch (_) {
       return { lang: langHint || 'en', modelUsed: 'fallback_hint', usage: null, durationMs: 0, azureCharsBilled: 0 };
     }
   }
 
-  // Medium / Long: LLM detect
-  const model = length <= 200 ? 'gpt5mini' : 'gpt5nano';
+  // Medium / Long: LLM detect (cap input to 1500 chars to reduce cost)
+  const model = length <= 1000 ? 'gpt5mini' : 'gpt5nano';
+  const llmText = length > 1500 ? content.slice(0, 1500) : content;
   const body = model === 'gpt5mini'
     ? {
         model: 'gpt-5-mini',
         messages: [
           { role: 'user', content: `Detect the language of the following text. Return ONLY the ISO 639-1 or 2-letter code (e.g., en, es). Text:` },
-          { role: 'user', content: content }
+          { role: 'user', content: llmText }
         ],
         reasoning_effort: 'low'
       }
@@ -46,7 +49,7 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
         model: 'gpt-5-nano',
         messages: [
           { role: 'user', content: `Detect the language of the following text. Return ONLY the ISO 639-1 or 2-letter code (e.g., en, es). Text:` },
-          { role: 'user', content: content }
+          { role: 'user', content: llmText }
         ],
         reasoning_effort: 'low'
       };
@@ -60,8 +63,10 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   } catch (_) {
     // Fallback Azure
     try {
+      const start = Date.now();
       const lang = await detectLanguageWithRetry(content, langHint);
-      return { lang, modelUsed: 'azure_detect', usage: null, durationMs: 0, azureCharsBilled: length };
+      const durationMs = Date.now() - start;
+      return { lang, modelUsed: 'azure_detect', usage: null, durationMs, azureCharsBilled: length };
     } catch (__ ) {
       return { lang: langHint || 'en', modelUsed: 'fallback_hint', usage: null, durationMs: 0, azureCharsBilled: 0 };
     }

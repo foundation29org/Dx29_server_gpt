@@ -12,9 +12,17 @@ function calculateMaxTokensAnon(jsonText) {
   return patientDescriptionTokens + 100;
 }
 
-async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt5nano') {
+async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt5mini') {
   const RETRY_DELAY = 1000;
   const endpoints = getEndpointsByTimezone(timezone, model);
+
+  const devInstruction = `You are a medical text anonymizer.
+Follow these rules strictly:
+1) Replace each span of personally identifiable information (PII) with [ANON-N], where N is the exact count of characters replaced.
+2) Do NOT output asterisks or other masking symbols; use only [ANON-N].
+3) Preserve all non-PII content and original structure. Do not add headings or explanations. Return ONLY the anonymized text.
+4) Do not anonymize age.
+5) If a segment is already anonymized using the [ANON-N] format, leave it unchanged.`;
 
   const anonymizationPrompt = `Anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
 where N is the count of characters that have been anonymized. 
@@ -31,7 +39,10 @@ Return ONLY the anonymized text without any prefix, labels, or additional text.
 Original document:
 {{text}}`;
 
-  const messages = [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }];
+  const messages = [
+    //{ role: "developer", content: devInstruction },
+    { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+  ];
   let requestBody = {
     messages,
     temperature: 0,
@@ -44,14 +55,20 @@ Original document:
   if(model=='gpt5nano'){
     requestBody = {
       model: "gpt-5-nano",
-      messages: [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }],
+      messages: [
+        { role: "developer", content: devInstruction },
+        { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+      ],
       reasoning_effort: "low" //minimal, low, medium, high
     };
   }else if(model=='gpt5mini'){
     requestBody = {
       model: "gpt-5-mini",
-      messages: [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }],
-      reasoning_effort: "low" //minimal, low, medium, high
+      messages: [
+        { role: "developer", content: devInstruction },
+        { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+      ],
+      reasoning_effort: "minimal" //minimal, low, medium, high
     };
   }
 
@@ -99,6 +116,7 @@ Original document:
   const resultResponse = {
     hasPersonalInfo: false,
     anonymizedText: '',
+    markdownText: '',
     htmlText: '',
     usage: result?.data?.usage || null
   };
@@ -113,6 +131,12 @@ Original document:
     resultResponse.anonymizedText = parts.map(part => {
       const match = part.match(/\[ANON-(\d+)\]/);
       return match ? '*'.repeat(parseInt(match[1])) : part;
+    }).join('');
+
+    // Versión segura para Markdown: usar bloques negros Unicode (sin HTML)
+    resultResponse.markdownText = parts.map(part => {
+      const match = part.match(/\[ANON-(\d+)\]/);
+      return match ? '█'.repeat(parseInt(match[1])) : part;
     }).join('');
 
     resultResponse.htmlText = parts.map(part => {

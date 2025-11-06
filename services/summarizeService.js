@@ -134,12 +134,15 @@ async function summarize(req, res) {
     let detectLLMCost = null;
     let detectModel = null;
     let detectDuration = 0;
+  let detectAzureDuration = 0;
+  let forwardAzureDuration = 0;
     try {
-      // Detección inteligente: Azure (<30), LLM (>=30)
+      // Detección inteligente: Azure (<500 chars), LLM (>=500 chars)
       const det = await detectLanguageSmart(description || '', lang, req.body.timezone, tenantId, subscriptionId, req.body.myuuid);
       detectedLanguage = det.lang;
       if (det.azureCharsBilled && det.azureCharsBilled > 0) {
         detectChars += det.azureCharsBilled;
+        detectAzureDuration = det.durationMs || 0;
       }
       if (det.usage && (det.modelUsed === 'gpt5mini' || det.modelUsed === 'gpt5nano')) {
         detectLLMCost = calculatePrice(det.usage, det.modelUsed);
@@ -178,7 +181,9 @@ async function summarize(req, res) {
         } catch (llmForwardError) {
           // Fallback Azure translate to English
           translationChars += (description ? description.length : 0);
+          const fwdAzStart = Date.now();
           englishDescription = await translateTextWithRetry(description, detectedLanguage);
+          forwardAzureDuration = Date.now() - fwdAzStart;
         }
       }
     } catch (translationError) {
@@ -198,33 +203,13 @@ async function summarize(req, res) {
       englishDescription = description;
     }
 
-    // 2. Construir el prompt para el resumen
-    let prompt;
-    let hasParts = hasAnalysis(englishDescription);
-    if (hasParts) {
-      // Prompt seguro para casos con texto posiblemente estructurado (sin etiquetas)
-      prompt = `
-    You are a clinical editor.
-    
-    TASK
-    Create a concise clinical summary from the content below:
-      - Keep symptoms, onset/evolution, key past medical history, medications, and relevant exam findings.
-      - Max 6 lines. No repetition. Do not invent information.
-      - Do not infer diagnoses.
-    
-    Return ONLY the summary, with no headings or additional commentary.
-    
-    Content to analyze:
-    "${englishDescription}"`;
-    } else {
-      // Prompt genérico actual
-      prompt = `
+    // 2. Construir el prompt para el resumen (único prompt genérico)
+    const prompt = `
     Summarize the following patient's medical description, keeping only relevant clinical information such as symptoms, evolution time, important medical history, and physical signs. Do not include irrelevant details or repeat phrases. The result should be shorter, clearer, and maintain the medical essence. Do not infer diagnoses or add medical interpretation.
     
     "${englishDescription}"
     
     Return ONLY the summarized description, with no additional commentary or explanation.`;
-    }
 
     const messages = [{ role: "user", content: prompt }];
     let requestBody = {
@@ -313,7 +298,9 @@ async function summarize(req, res) {
         // Fallback Azure
         try {
           reverseTranslationChars += (summary ? summary.length : 0);
+          const revAzStart = Date.now();
           summary = await translateInvertWithRetry(summary, detectedLanguage);
+          var reverseAzureDuration = Date.now() - revAzStart;
         } catch (translationError2) {
           console.error('Translation error (LLM+Azure):', translationError2);
           throw translationError2;
@@ -347,7 +334,7 @@ async function summarize(req, res) {
           cost: detectCost,
           tokens: { input: detectChars, output: detectChars, total: detectChars },
           model: 'translation_service',
-          duration: 0,
+          duration: detectAzureDuration || 0,
           success: true
         });
       }
@@ -372,7 +359,7 @@ async function summarize(req, res) {
           cost: translationCost,
           tokens: { input: translationChars, output: translationChars, total: translationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: forwardAzureDuration || 0,
           success: true
         });
       }
@@ -404,7 +391,7 @@ async function summarize(req, res) {
           cost: reverseCost,
           tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: reverseAzureDuration || 0,
           success: true
         });
       }
@@ -499,12 +486,6 @@ async function summarize(req, res) {
 
     return res.status(500).send({ result: "error" });
   }
-}
-
-function hasAnalysis(description) {
-  return description.includes('<PATIENT_TEXT>') || 
-         description.includes('<DOCUMENT_TEXT>') ||
-         description.includes('<IMAGE_REPORT>');
 }
 
 module.exports = {

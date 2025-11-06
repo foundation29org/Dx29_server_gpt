@@ -24,6 +24,7 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const defaultModel = 'gpt5mini';
 const modelIntencion = 'gpt5mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro' // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
+const modelAnonymization = 'gpt5mini';
 
 // Función para llamar a Sonar (Perplexity API)
 async function callSonarAPI(prompt, timezone, modelType) {
@@ -217,7 +218,7 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
 
     try {
       // Enviar progreso inicial
-      await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 10);
+      await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 20);
 
       // Continuar con el procesamiento normal pero enviando progreso
       const result = await processAIRequestInternal(data, requestInfo, model, userId, region);
@@ -645,7 +646,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   
                   Answer in the same language as the question using proper markdown formatting.`;
 
-                 // Configuración: elegir modelo ('sonar', 'gpt4o', 'gpt-5-nano', 'gpt5mini)
                  const modelType = modelQuestions;
                   try {
                     // Obtener respuesta del modelo seleccionado
@@ -1355,7 +1355,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let hasPersonalInfo = false;
 
     if (parsedResponse.length > 0) {
-      let modelAnonymization = 'gpt5nano';//'gpt5nano'//'gpt4o'//'gpt4omini' 'gpt5mini'
       anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
       anonymizedDescription = anonymizedResult.anonymizedText;
       anonymizedDescriptionEnglish = anonymizedDescription;

@@ -502,6 +502,13 @@ async function callInfoDisease(req, res) {
                 iframeParams: costTrackingData.iframeParams,
                 operationData: { detectedLanguage: costTrackingData.lang }
               });
+              // Desglose de costos en consola
+              console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (NHS Genomic):`);
+              stages.forEach((stage, index) => {
+                console.log(`   Etapa ${index + 1} - ${stage.name}: $${formatCost(stage.cost)} (${stage.tokens?.total || 0} tokens, ${stage.duration}ms, model=${stage.model})`);
+              });
+              console.log(`   ──────────────────────────`);
+              console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens.total} tokens)`);
             } catch (costError) {
               console.error('Error guardando cost tracking:', costError);
               insights.error({
@@ -792,6 +799,13 @@ async function callInfoDisease(req, res) {
           iframeParams: costTrackingData.iframeParams,
           operationData: { detectedLanguage: costTrackingData.lang }
         });
+        // Desglose de costos en consola
+        console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (Differential):`);
+        stages.forEach((stage, index) => {
+          console.log(`   Etapa ${index + 1} - ${stage.name}: $${formatCost(stage.cost)} (${stage.tokens?.total || 0} tokens, ${stage.duration}ms, model=${stage.model})`);
+        });
+        console.log(`   ──────────────────────────`);
+        console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens.total} tokens)`);
         } catch (costError) {
           console.error('Error guardando cost tracking:', costError);
           insights.error({
@@ -849,6 +863,15 @@ async function callInfoDisease(req, res) {
             stages[0], // La etapa de IA
             'success'
           );
+          // Desglose de costos en consola (general)
+          const totalCost = stages.reduce((sum, stage) => sum + (stage.cost || 0), 0);
+          const totalTokens = stages.reduce((sum, stage) => sum + (stage.tokens?.total || 0), 0);
+          console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (General):`);
+          stages.forEach((stage, index) => {
+            console.log(`   Etapa ${index + 1} - ${stage.name}: $${formatCost(stage.cost)} (${stage.tokens?.total || 0} tokens, ${stage.duration || 0}ms, model=${stage.model})`);
+          });
+          console.log(`   ──────────────────────────`);
+          console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens} tokens)`);
         } catch (costError) {
           console.error('Error guardando cost tracking:', costError);
           insights.error({
