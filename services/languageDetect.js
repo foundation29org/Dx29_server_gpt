@@ -63,10 +63,12 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   } catch (_) {
     // Fallback Azure
     try {
+      const sample = length > 1000 ? content.slice(0, 1000) : content;
+      const billed = sample.length;
       const start = Date.now();
-      const lang = await detectLanguageWithRetry(content, langHint);
+      const lang = await detectLanguageWithRetry(sample, langHint);
       const durationMs = Date.now() - start;
-      return { lang, modelUsed: 'azure_detect', usage: null, durationMs, azureCharsBilled: length };
+      return { lang, modelUsed: 'azure_detect', usage: null, durationMs, azureCharsBilled: billed };
     } catch (__ ) {
       return { lang: langHint || 'en', modelUsed: 'fallback_hint', usage: null, durationMs: 0, azureCharsBilled: 0 };
     }
