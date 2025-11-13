@@ -153,8 +153,8 @@ async function summarize(req, res) {
         detectDuration = det.durationMs || 0;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Intentar traducción a inglés con LLM
-        try {
+         // Intentar traducción a inglés con LLM
+         /*try {
           forwardStart = Date.now();
           const translatePromptIn = `Translate the following text into English. Return ONLY the translated text.`;
           const requestBodyLLMIn = {
@@ -186,7 +186,12 @@ async function summarize(req, res) {
           const fwdAzStart = Date.now();
           englishDescription = await translateTextWithRetry(description, detectedLanguage);
           forwardAzureDuration = Date.now() - fwdAzStart;
-        }
+        }*/
+        // Usar Azure Translator directamente para reducir latencia y coste
+        translationChars += (description ? description.length : 0);
+        const fwdAzStart = Date.now();
+        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        forwardAzureDuration = Date.now() - fwdAzStart;
       }
     } catch (translationError) {
       // Manejo en caso de fallo de detección/traducción de ida: continuar sin traducir
@@ -207,7 +212,7 @@ async function summarize(req, res) {
 
     // 2. Construir el prompt para el resumen (único prompt genérico)
     const prompt = `
-    Summarize the following patient's medical description, keeping only relevant clinical information such as symptoms, evolution time, important medical history, and physical signs. Do not include irrelevant details or repeat phrases. The result should be shorter, clearer, and maintain the medical essence. Do not infer diagnoses or add medical interpretation.
+    Summarize the following patient's medical description, keeping only relevant clinical information such as symptoms, evolution time, important medical history, and physical signs. If the patient's age and sex/gender are explicitly mentioned in the text, include them at the beginning of the summary; do not infer or guess. Do not include irrelevant details or repeat phrases. The result should be shorter, clearer, and maintain the medical essence. Do not infer diagnoses or add medical interpretation.
     
     "${englishDescription}"
     
@@ -247,7 +252,6 @@ async function summarize(req, res) {
     }
     const summarizeResponse = await callAiWithFailover(requestBody, req.body.timezone, modelSummarize, 0, dataRequest);
     let aiEndTime = Date.now();
-
     if (!summarizeResponse.data.choices[0].message.content) {
       insights.error({
         message: "Empty AI summarize response",
@@ -269,7 +273,7 @@ async function summarize(req, res) {
     let reverseLLMCost = null;
     let reverseStart = 0, reverseEnd = 0;
     if (detectedLanguage !== 'en') {
-      try {
+      /*try {
         reverseStart = Date.now();
         const translatePrompt = `Translate the following text into ${detectedLanguage}. Return ONLY the translated text.`;
         const requestBodyLLM = {
@@ -307,7 +311,13 @@ async function summarize(req, res) {
           console.error('Translation error (LLM+Azure):', translationError2);
           throw translationError2;
         }
-      }
+      }*/
+
+        // Nueva implementación: usar Azure Translator directamente (rápido y barato)
+      reverseTranslationChars += (summary ? summary.length : 0);
+      const revAzStart = Date.now();
+      summary = await translateInvertWithRetry(summary, detectedLanguage);
+      var reverseAzureDuration = Date.now() - revAzStart;
     }
 
     // 6. Guardar cost tracking solo en caso de éxito

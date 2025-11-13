@@ -33,9 +33,9 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
     }
   }
 
-  // Medium / Long: LLM detect (cap input to 1500 chars to reduce cost)
+  // Medium / Long: LLM detect (cap input to 1000 chars to reduce cost)
   const model = length <= 1000 ? 'gpt5mini' : 'gpt5nano';
-  const llmText = length > 1500 ? content.slice(0, 1500) : content;
+  const llmText = length > 1000 ? content.slice(0, 1000) : content;
   const body = model === 'gpt5mini'
     ? {
         model: 'gpt-5-mini',
