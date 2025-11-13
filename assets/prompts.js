@@ -23,6 +23,7 @@ const PROMPTS = {
             • describes symptoms or clinical manifestations that need diagnostic evaluation, or
             • contains a list of diagnoses/conditions that appear to be describing a specific patient case, or
             • mentions multiple conditions that suggest a complex patient scenario requiring diagnostic analysis
+            • contains imaging findings or radiological reports that need interpretation
 
             Return **false** when the message …
             • asks mainly about treatment, management, drugs, follow-up, or prognosis for a known condition,  

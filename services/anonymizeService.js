@@ -12,41 +12,49 @@ function calculateMaxTokensAnon(jsonText) {
   return patientDescriptionTokens + 100;
 }
 
-async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt4o') {
+async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt5mini') {
   const RETRY_DELAY = 1000;
-  const endpoints = getEndpointsByTimezone(timezone, model, 'anonymized');
+  const endpoints = getEndpointsByTimezone(timezone, model);
+  const devInstruction = `
+You are a medical text anonymizer.
 
-  const anonymizationPromptOld = `The task is to anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
-  where N is the count of characters that have been anonymized. 
-  Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
-  full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. 
-  However, it's essential to maintain all medical specifics, such as medical history, diagnosis, treatment plans, and lab results, as they are not classified as PII. 
-  Note: Do not anonymize age, as it is not considered PII in this context. 
-  The anonymized document should retain the integrity of the original content, apart from the replaced PII. 
-  Avoid including any information that wasn't part of the original document and ensure the output reflects the original content structure and intent, albeit anonymized. 
-  If any part of the text is already anonymized (represented by asterisks or [ANON-N]), do not anonymize it again. 
-  Here is the original document:
+Your ONLY job is to remove direct identifiers of a person.
 
-  {{text}}
+DIRECT IDENTIFIERS (anonymize):
+- Full personal names (e.g. "John Smith", "María García").
+- Full postal addresses.
+- Phone numbers.
+- Email addresses.
+- Government IDs (DNI/NIE/passport/SSN, etc.).
+- Medical record numbers (MRN/NHC, etc.).
 
-  ANONYMIZED DOCUMENT:"`;
+DO NOT anonymize:
+- Ages (e.g. "14-year-old").
+- Clinical event dates (e.g. seizure dates, admission dates, test dates), or years.
+- Diagnoses, symptoms, lab results, imaging findings, vital signs.
+- Gene symbols/variants (e.g. SCN1A, c.4126T>C, p.Cys1376Arg).
+- Medication names (generic or brand: valproate, Diacomit, Depakine, etc.).
+- Device/orthosis/product names (e.g. FODA).
 
-  const anonymizationPrompt = `Anonymize the following medical document by replacing any personally identifiable information (PII) with [ANON-N], 
-where N is the count of characters that have been anonymized. 
-Only specific information that can directly lead to patient identification needs to be anonymized. This includes but is not limited to: 
-full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. 
-However, it's essential to maintain all medical specifics, such as medical history, diagnosis, treatment plans, and lab results, as they are not classified as PII. 
-Note: Do not anonymize age, as it is not considered PII in this context. 
-The anonymized document should retain the integrity of the original content, apart from the replaced PII. 
-Avoid including any information that wasn't part of the original document and ensure the output reflects the original content structure and intent, albeit anonymized. 
-If any part of the text is already anonymized (represented by asterisks or [ANON-N]), do not anonymize it again. 
+If the text contains NO direct identifiers according to this list, return it IDENTICAL.
 
-Return ONLY the anonymized text without any prefix, labels, or additional text.
+When you anonymize a span, replace ONLY that span with [ANON-N],
+where N is the exact count of replaced characters in that span.
 
-Original document:
-{{text}}`;
+Never use asterisks (*). Never add explanations or extra text.
+`;
 
-  const messages = [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }];
+  const anonymizationPrompt = `
+Anonymize the following medical text according to the rules above.
+
+Original text:
+{{text}}
+`;
+
+  const messages = [
+    //{ role: "developer", content: devInstruction },
+    { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+  ];
   let requestBody = {
     messages,
     temperature: 0,
@@ -59,8 +67,20 @@ Original document:
   if(model=='gpt5nano'){
     requestBody = {
       model: "gpt-5-nano",
-      messages: [{ role: "user", content: anonymizationPrompt.replace("{{text}}", text) }],
+      messages: [
+        { role: "developer", content: devInstruction },
+        { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+      ],
       reasoning_effort: "low" //minimal, low, medium, high
+    };
+  }else if(model=='gpt5mini'){
+    requestBody = {
+      model: "gpt-5-mini",
+      messages: [
+        { role: "developer", content: devInstruction },
+        { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+      ],
+      reasoning_effort: "minimal" //minimal, low, medium, high
     };
   }
 
@@ -108,6 +128,7 @@ Original document:
   const resultResponse = {
     hasPersonalInfo: false,
     anonymizedText: '',
+    markdownText: '',
     htmlText: '',
     usage: result?.data?.usage || null
   };
@@ -122,6 +143,12 @@ Original document:
     resultResponse.anonymizedText = parts.map(part => {
       const match = part.match(/\[ANON-(\d+)\]/);
       return match ? '*'.repeat(parseInt(match[1])) : part;
+    }).join('');
+
+    // Versión segura para Markdown: usar bloques negros Unicode (sin HTML)
+    resultResponse.markdownText = parts.map(part => {
+      const match = part.match(/\[ANON-(\d+)\]/);
+      return match ? '█'.repeat(parseInt(match[1])) : part;
     }).join('');
 
     resultResponse.htmlText = parts.map(part => {

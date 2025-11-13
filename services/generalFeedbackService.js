@@ -151,13 +151,15 @@ async function sendGeneralFeedback(req, res) {
       freeText: sanitizedData.value.freeText,
       email: sanitizedData.value.email,
       date: new Date(Date.now()).toString(),
+      fileNames: sanitizedData.fileNames,
+      model: sanitizedData.model,
       tenantId: tenantId,
       subscriptionId: subscriptionId
     });
     sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionId)
     await generalfeedback.save();
     try {
-      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionId);
+      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionId, sanitizedData.fileNames, sanitizedData.model);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');

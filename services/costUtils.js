@@ -22,7 +22,17 @@ const PRICING = {
   sonar: {
     input: 0.001,     // $1 per 1M tokens
     output: 0.001,    // $1 per 1M tokens
-    request: 0.012    // $0.012 per request
+    request: 0.005    // $0.005 per request (Low context: $5 per 1K requests)
+  },
+  'sonar-reasoning-pro': {
+    input: 0.002,     // $2 per 1M tokens
+    output: 0.008,    // $8 per 1M tokens
+    request: 0.01    // $0.01 per request (medium context: $10 per 1K requests)
+  },
+  'sonar-pro': {
+    input: 0.003,     // $3 per 1M tokens
+    output: 0.015,    // $15 per 1M tokens
+    request: 0.01    // $0.01 per request (medium context: $10 per 1K requests)
   },
   gpt5nano: {
     input: 0.00005,    // $0.05 per 1M tokens
@@ -32,6 +42,10 @@ const PRICING = {
     input: 0.00025,    // $0.25 per 1M tokens
     output: 0.0020,    // $2.00 per 1M tokens
   },
+  gpt5: {
+    input: 0.0125,    // $1.25 per 1M tokens
+    output: 0.0200,    // $10.00 per 1M tokens
+  }
 };
 
 function calculatePrice(usage, model = 'gpt4o') {

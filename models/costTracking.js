@@ -24,7 +24,14 @@ const CostTrackingSchema = new Schema({
   operation: {
     type: String,
     required: true,
-    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image'],
+    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'emergency_questions', 'process-follow-up'],
+    index: true
+  },
+
+  // Intención de la operación (subtipo para diagnose)
+  intent: {
+    type: String,
+    enum: ['diagnostic', 'medical_question', 'non_diagnostic', 'unknown'],
     index: true
   },
   
@@ -32,7 +39,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini'],
+    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence'],
     index: true
   },
   
@@ -53,13 +60,21 @@ const CostTrackingSchema = new Schema({
       type: String,
       required: true,
       enum: [
+        'detect_language', // Detección de idioma
         'translation',           // Traducción a inglés
         'ai_call',              // Llamada a IA
         'anonymization',        // Anonimización
         'reverse_translation',  // Traducción inversa
+        'reverse_anonymization', // Traducción inversa de anonimización
         'database_save',         // Guardado en BD
         'clinical_check', // Verificación de escenario clínico
-        'general_medical_response' // Verificación de escenario clínico
+        'translation', // Traducción a inglés
+        'reverse_translation', // Traducción inversa
+        'reverse_diseases', // Traducción inversa de diagnósticos
+        'medical_question_check', // Verificación de pregunta médica
+        'general_medical_response', // Verificación de escenario clínico
+        'emergency_questions', // Verificación de escenario clínico
+        'document_intelligence' // Lectura/analítica de documentos (Azure Document Intelligence)
       ]
     },
     cost: {
@@ -73,7 +88,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini']
+      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence']
     },
     duration: {
       type: Number,  // Duración en milisegundos
@@ -151,6 +166,7 @@ CostTrackingSchema.index({ operation: 1, createdAt: -1 });
 CostTrackingSchema.index({ model: 1, createdAt: -1 });
 CostTrackingSchema.index({ tenantId: 1, operation: 1, createdAt: -1 });
 CostTrackingSchema.index({ 'stages.name': 1, createdAt: -1 });
+CostTrackingSchema.index({ intent: 1, createdAt: -1 });
 
 // Método estático para crear un registro de costo
 CostTrackingSchema.statics.createCostRecord = function(data) {

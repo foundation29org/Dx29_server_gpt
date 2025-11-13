@@ -56,10 +56,13 @@ components:
           type: string
           description: |
             Model to use for diagnosis. 
-            - "gpt4o" (default): Fast processing with good accuracy, returns HTTP response
-            - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates  
-          enum: ["gpt4o", "o3"]
-          default: "gpt4o"
+            - "gpt4o": Fast processing with good accuracy, returns HTTP response
+            - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates
+            - "gpt5mini": Compact model; processed as advanced (WebSocket progress)
+            - "gpt5nano": Ultra-compact model; processed as advanced (WebSocket progress)
+            - "gpt5": Multimodal model (text + images); processed as advanced (WebSocket progress)
+          enum: ["gpt4o", "o3", "gpt5", "gpt5mini", "gpt5nano"]
+          default: "gpt5mini"
 
       required:
         - description
@@ -596,13 +599,16 @@ paths:
         **Available Models:**
         
         **Standard Models (HTTP Response):**
-        - "gpt4o" (default): Fast processing with good accuracy, returns results directly via HTTP
+        - "gpt4o": Fast processing with good accuracy, returns results directly via HTTP
         
         **Advanced Models (WebSocket + HTTP):**
         - "o3": Advanced model with reasoning capabilities, uses WebSocket for progress updates
+        - "gpt5mini": Compact model; progress via WebSocket
+        - "gpt5nano": Ultra-compact model; progress via WebSocket
+        - "gpt5": Multimodal model (text + images); progress via WebSocket
         
         **Workflow for Advanced Models:**
-        For model o3, you must follow this workflow:
+        For models o3, gpt5, gpt5mini and gpt5nano, follow this workflow:
         1. Call `/pubsub/negotiate` to establish a WebSocket connection
         2. Open the WebSocket connection using the provided URL
         3. Make the diagnosis request via HTTP (this endpoint) with the advanced model
@@ -669,7 +675,7 @@ paths:
         
         **Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Importantly, age is NOT considered PII in this context and is preserved. All medical specifics (symptoms, diagnosis, treatment plans, and lab results) are maintained intact. The response provides both a text version with asterisks and an HTML-formatted version with blacked-out sections for visualization.
         
-        **Queue System**: When using the default "gpt4o" model, requests may be queued during high traffic. A queue status will be returned for tracking.
+        **Queue System**: Requests may be queued during high traffic for any model. A queue status will be returned for tracking, including the selected processing region based on user timezone and model capacity.
       tags:
         - Diagnosis
       security:
@@ -686,9 +692,9 @@ paths:
                     model:
                       type: string
                       description: Model to use for diagnosis
-                      enum: ["gpt4o", "o3"]
-                      default: "gpt4o"
-                      example: "gpt4o"
+                      enum: ["gpt4o", "o3", "gpt5", "gpt5mini", "gpt5nano"]
+                      default: "gpt5mini"
+                      example: "gpt5mini"
       responses:
         "200":
           description: Diagnosis response
@@ -717,7 +723,7 @@ paths:
                             example: 5
                           region:
                             type: string
-                            example: "WestUS"
+                            example: "EastUS"
                           utilizationPercentage:
                             type: number
                             format: float

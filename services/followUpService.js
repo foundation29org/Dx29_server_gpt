@@ -149,6 +149,12 @@ async function generateFollowUpQuestions(req, res) {
       description: `${description} - Follow-up questions`,
       iframeParams: req.body.iframeParams || {}
     };
+  let translationChars = 0;
+  let reverseTranslationChars = 0;
+  let detectDurationMs = 0;
+  let forwardDurationMs = 0;
+  let reverseDurationMs = 0;
+  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -156,11 +162,28 @@ async function generateFollowUpQuestions(req, res) {
     let englishDiseases = diseases;
 
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      // Si viene detectado previamente, evitar re-detectar
+      const detectedHint = req.body.detectedLanguage || req.body.detectedLang;
+      if (detectedHint && typeof detectedHint === 'string') {
+        detectedLanguage = detectedHint.toLowerCase();
+      } else {
+        // Detección (Azure) — contar caracteres aparte
+        detectChars += (description ? description.length : 0);
+        const detStart = Date.now();
+        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        detectDurationMs = Date.now() - detStart;
+      }
       if (detectedLanguage && detectedLanguage !== 'en') {
+        // Traducción de descripción y lista de enfermedades
+        translationChars += (description ? description.length : 0);
+        const fwdStart1 = Date.now();
         englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        forwardDurationMs += (Date.now() - fwdStart1);
         if (englishDiseases) {
+          translationChars += (diseases ? diseases.length : 0);
+          const fwdStart2 = Date.now();
           englishDiseases = await translateTextWithRetry(diseases, detectedLanguage);
+          forwardDurationMs += (Date.now() - fwdStart2);
         }
       }
     } catch (translationError) {
@@ -268,7 +291,7 @@ async function generateFollowUpQuestions(req, res) {
       `;
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0.7,
       max_tokens: 1000,
@@ -284,12 +307,20 @@ async function generateFollowUpQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     }
     const aiStartTime = Date.now();
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+    let model = 'gpt5mini';
+    if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } 
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
     const aiEndTime = Date.now();
 
     // Calcular costos y tokens para la llamada AI
     const usage = diagnoseResponse.data.usage;
-    const costData = calculatePrice(usage, 'gpt4o');
+    const costData = calculatePrice(usage, model);
 
     console.log(`💰 generateFollowUpQuestions - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
 
@@ -360,9 +391,13 @@ async function generateFollowUpQuestions(req, res) {
     // 4. Traducir las preguntas al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
+        // Contabilizar caracteres previos a la traducción inversa
+        reverseTranslationChars += questions.reduce((sum, q) => sum + (q ? q.length : 0), 0);
+        const revStart = Date.now();
         questions = await Promise.all(
           questions.map(question => translateInvertWithRetry(question, detectedLanguage))
         );
+        reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -390,22 +425,89 @@ async function generateFollowUpQuestions(req, res) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
     }
 
-    // Guardar cost tracking solo en caso de éxito
+    // Guardar cost tracking multi-etapa
     try {
-      const aiStage = {
+      const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: detectDurationMs,
+          success: true
+        });
+      }
+      if (translationChars > 0) {
+        const translationCost = (translationChars / 1000000) * 10;
+        stages.push({
+          name: 'translation',
+          cost: translationCost,
+          tokens: { input: translationChars, output: translationChars, total: translationChars },
+          model: 'translation_service',
+          duration: forwardDurationMs,
+          success: true
+        });
+      }
+      stages.push({
         name: 'ai_call',
         cost: costData.totalCost,
         tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
-        model: 'gpt4o',
+        model: model,
         duration: aiEndTime - aiStartTime,
         success: true
+      });
+      if (reverseTranslationChars > 0) {
+        const reverseCost = (reverseTranslationChars / 1000000) * 10;
+        stages.push({
+          name: 'reverse_translation',
+          cost: reverseCost,
+          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+          model: 'translation_service',
+          duration: reverseDurationMs,
+          success: true
+        });
+      }
+      const totalCost = stages.reduce((s, st) => s + (st.cost || 0), 0);
+      const totalTokens = {
+        input: stages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
+        output: stages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
+        total: stages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
       };
-      await CostTrackingService.saveSimpleOperationCost(
-        costTrackingData,
-        'follow_up_questions',
-        aiStage,
-        'success'
-      );
+      await CostTrackingService.saveCostRecord({
+        myuuid: costTrackingData.myuuid,
+        tenantId: costTrackingData.tenantId,
+        subscriptionId: costTrackingData.subscriptionId,
+        operation: 'follow_up_questions',
+        model: model,
+        lang: costTrackingData.lang,
+        timezone: costTrackingData.timezone,
+        stages,
+        totalCost,
+        totalTokens,
+        description: costTrackingData.description,
+        status: 'success',
+        iframeParams: costTrackingData.iframeParams,
+        operationData: { detectedLanguage }
+      });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => stages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS generateFollowUpQuestions:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);
     }
@@ -612,22 +714,46 @@ async function processFollowUpAnswers(req, res) {
       description: `${description} - Process follow-up answers`,
       iframeParams: req.body.iframeParams || {}
     };
+  let translationChars = 0;
+  let reverseTranslationChars = 0;
+  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
     let detectedLanguage = lang;
     let englishAnswers = answers;
     try {
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      // Si viene detectado previamente, evitar re-detectar
+      const detectedHint = req.body.detectedLanguage || req.body.detectedLang;
+      if (detectedHint && typeof detectedHint === 'string') {
+        detectedLanguage = detectedHint.toLowerCase();
+      } else {
+        // Detección (Azure) — contar caracteres aparte
+        detectChars += (description ? description.length : 0);
+        const detStart = Date.now();
+        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        detectDurationMs = Date.now() - detStart;
+      }
       if (detectedLanguage && detectedLanguage !== 'en') {
+        // Traducción de descripción y Q/A
+        translationChars += (description ? description.length : 0);
+        const fwdStart1 = Date.now();
         englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        // Traducir las preguntas y respuestas
+        forwardDurationMs += (Date.now() - fwdStart1);
+        let qaChars = 0;
+        const fwdStart2 = Date.now();
         englishAnswers = await Promise.all(
-          answers.map(async (item) => ({
-            question: await translateTextWithRetry(item.question, detectedLanguage),
-            answer: await translateTextWithRetry(item.answer, detectedLanguage)
-          }))
+          answers.map(async (item) => {
+            qaChars += (item.question ? item.question.length : 0);
+            qaChars += (item.answer ? item.answer.length : 0);
+            return {
+              question: await translateTextWithRetry(item.question, detectedLanguage),
+              answer: await translateTextWithRetry(item.answer, detectedLanguage)
+            };
+          })
         );
+        forwardDurationMs += (Date.now() - fwdStart2);
+        translationChars += qaChars;
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
@@ -713,7 +839,7 @@ async function processFollowUpAnswers(req, res) {
       Return ONLY the updated description, with no additional commentary or explanation.`;
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0.3,
       max_tokens: 2000,
@@ -728,8 +854,76 @@ async function processFollowUpAnswers(req, res) {
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     }
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+    let model = 'gpt5mini';
+    if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } 
+    const aiStartTime = Date.now();
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
+    const aiEndTime = Date.now();
+    
+    // Guardar cost tracking solo en caso de éxito
+    const usage = diagnoseResponse.data.usage;
+    const costData = calculatePrice(usage, model);
+    
 
+    console.log(`💰 processFollowUpAnswers - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+
+    try {
+      const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: detectDurationMs,
+          success: true
+        });
+      }
+      if (translationChars > 0) {
+        const translationCost = (translationChars / 1000000) * 10;
+        stages.push({
+          name: 'translation',
+          cost: translationCost,
+          tokens: { input: translationChars, output: translationChars, total: translationChars },
+          model: 'translation_service',
+          duration: forwardDurationMs,
+          success: true
+        });
+      }
+      stages.push({
+        name: 'ai_call',
+        cost: costData.totalCost,
+        tokens: { 
+          input: costData.inputTokens, 
+          output: costData.outputTokens, 
+          total: costData.totalTokens 
+        },
+        model: model,
+        duration: aiEndTime - aiStartTime,
+        success: true
+      });
+      // reverseTranslationChars se calculará más abajo cuando tengamos updatedDescription
+      // (añadimos el stage después del cálculo)
+      const totalCostBase = stages.reduce((s, st) => s + (st.cost || 0), 0);
+      let totalCost = totalCostBase;
+      let totalTokens = {
+        input: stages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
+        output: stages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
+        total: stages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
+      };
+
+      // Guardaremos al final tras calcular reverseTranslationChars
+      var followUpStages = stages;
+    } catch (costError) {
+      console.error('Error saving cost tracking (pre-reverse):', costError);
+    }
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
         message: "Empty AI process-follow-up response",
@@ -748,7 +942,10 @@ async function processFollowUpAnswers(req, res) {
     // 4. Traducir la descripción actualizada al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
+        reverseTranslationChars = (updatedDescription ? updatedDescription.length : 0);
+        const revStart = Date.now();
         updatedDescription = await translateInvertWithRetry(updatedDescription, detectedLanguage);
+        var reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -774,6 +971,62 @@ async function processFollowUpAnswers(req, res) {
 
     if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
+    }
+
+    // Añadir stage de reverse_translation y guardar definitivamente el cost tracking
+    try {
+      if (reverseTranslationChars > 0) {
+        const reverseCost = (reverseTranslationChars / 1000000) * 10;
+        followUpStages.push({
+          name: 'reverse_translation',
+          cost: reverseCost,
+          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+          model: 'translation_service',
+          duration: reverseDurationMs || 0,
+          success: true
+        });
+      }
+      const totalCost = followUpStages.reduce((s, st) => s + (st.cost || 0), 0);
+      const totalTokens = {
+        input: followUpStages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
+        output: followUpStages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
+        total: followUpStages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
+      };
+      await CostTrackingService.saveCostRecord({
+        myuuid: costTrackingData.myuuid,
+        tenantId: costTrackingData.tenantId,
+        subscriptionId: costTrackingData.subscriptionId,
+        operation: 'process-follow-up',
+        model: model,
+        lang: costTrackingData.lang,
+        timezone: costTrackingData.timezone,
+        stages: followUpStages,
+        totalCost,
+        totalTokens,
+        description: costTrackingData.description,
+        status: 'success',
+        iframeParams: costTrackingData.iframeParams,
+        operationData: { detectedLanguage }
+      });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => followUpStages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS processFollowUpAnswers:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
+    } catch (costError) {
+      console.error('Error saving final cost tracking:', costError);
     }
 
     // 6. Preparar la respuesta final
@@ -944,14 +1197,24 @@ async function generateERQuestions(req, res) {
       description: `${description} - ER questions`,
       iframeParams: req.body.iframeParams || {}
     };
+  let translationChars = 0;
+  let reverseTranslationChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
     let detectedLanguage = lang;
     try {
+      // Detección (Azure) — contar caracteres aparte
+      detectChars += (description ? description.length : 0);
+      const detStart = Date.now();
       detectedLanguage = await detectLanguageWithRetry(description, lang);
+      detectDurationMs = Date.now() - detStart;
       if (detectedLanguage && detectedLanguage !== 'en') {
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+      // Traducción a inglés
+      translationChars += (description ? description.length : 0);
+      const fwdStart = Date.now();
+      englishDescription = await translateTextWithRetry(description, detectedLanguage);
+      forwardDurationMs = Date.now() - fwdStart;
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
@@ -1054,7 +1317,7 @@ async function generateERQuestions(req, res) {
 
 
     const messages = [{ role: "user", content: prompt }];
-    const requestBody = {
+    let requestBody = {
       messages,
       temperature: 0.7,
       max_tokens: 1000,
@@ -1070,13 +1333,59 @@ async function generateERQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     }
     const aiStartTime = Date.now();
-    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, 'gpt4o', 0, dataRequest);
+    let model = 'gpt5mini';
+    if(model == 'gpt5mini'){
+      requestBody = {
+        model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } 
+    const diagnoseResponse = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
     let aiEndTime = Date.now();
 
     // Calcular costos y tokens para la llamada AI
     const usage = diagnoseResponse.data.usage;
-    const costData = calculatePrice(usage, 'gpt4o');
+    const costData = calculatePrice(usage, model);
     console.log(`💰 generateERQuestions - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
+    // Guardar cost tracking multi-etapa
+    try {
+      const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: detectDurationMs,
+          success: true
+        });
+      }
+      if (translationChars > 0) {
+        const translationCost = (translationChars / 1000000) * 10;
+        stages.push({
+          name: 'translation',
+          cost: translationCost,
+          tokens: { input: translationChars, output: translationChars, total: translationChars },
+          model: 'translation_service',
+          duration: forwardDurationMs,
+          success: true
+        });
+      }
+      stages.push({
+        name: 'ai_call',
+        cost: costData.totalCost,
+        tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
+        model: model,
+        duration: aiEndTime - aiStartTime,
+        success: true
+      });
+      // reverseTranslationChars se calculará tras traducir preguntas
+      var erStages = stages;
+    } catch (costError) {
+      console.error('Error guardando cost tracking (pre-reverse):', costError);
+    }
 
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
@@ -1143,9 +1452,12 @@ async function generateERQuestions(req, res) {
     // 4. Traducir las preguntas al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
+        reverseTranslationChars = questions.reduce((sum, q) => sum + (q ? q.length : 0), 0);
+        const revStart = Date.now();
         questions = await Promise.all(
           questions.map(question => translateInvertWithRetry(question, detectedLanguage))
         );
+        reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -1169,6 +1481,62 @@ async function generateERQuestions(req, res) {
 
     if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
       blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
+    }
+
+    // Añadir reverse_translation y guardar definitivamente
+    try {
+      if (reverseTranslationChars > 0) {
+        const reverseCost = (reverseTranslationChars / 1000000) * 10;
+        erStages.push({
+          name: 'reverse_translation',
+          cost: reverseCost,
+          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
+          model: 'translation_service',
+          duration: reverseDurationMs,
+          success: true
+        });
+      }
+      const totalCost = erStages.reduce((s, st) => s + (st.cost || 0), 0);
+      const totalTokens = {
+        input: erStages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
+        output: erStages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
+        total: erStages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
+      };
+      await CostTrackingService.saveCostRecord({
+        myuuid: costTrackingData.myuuid,
+        tenantId: costTrackingData.tenantId,
+        subscriptionId: costTrackingData.subscriptionId,
+        operation: 'emergency_questions',
+        model: model,
+        lang: costTrackingData.lang,
+        timezone: costTrackingData.timezone,
+        stages: erStages,
+        totalCost,
+        totalTokens,
+        description: costTrackingData.description,
+        status: 'success',
+        iframeParams: costTrackingData.iframeParams,
+        operationData: { }
+      });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => erStages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS generateERQuestions:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
+    } catch (costError) {
+      console.error('Error guardando cost tracking (final):', costError);
     }
 
     // 6. Preparar la respuesta final

@@ -16,10 +16,10 @@ const baseQueueName = "diagnosis-queue";
 
 const REGION_MAPPING = {
   asia: 'India',        // Redirigir a India para gpt4o
-  europe: 'Suiza',      // Europa
+  europe: 'Sweden',      // Europa
   northamerica: 'WestUS', // Estados Unidos
   southamerica: 'WestUS', // Redirigir a Estados Unidos
-  africa: 'Suiza',      // Redirigir a Europa
+  africa: 'Sweden',      // Redirigir a Europa
   oceania: 'Japan',     // Redirigir a Japan para gpt4o
   other: 'WestUS'       // Redirigir a Estados Unidos
 };
@@ -28,8 +28,9 @@ const REGION_MAPPING = {
 const MODEL_PROCESSING_TIMES = {
   gpt4o: 15,    // 15 segundos 
   o3: 60,       // 1 minuto
-  gpt5nano: 15, // 15 segundos
-  gpt5mini: 25, // 15 segundos
+  gpt5nano: 25, // 25 segundos
+  gpt5mini: 40, // 40 segundos
+  gpt5: 45, // 45 segundos
 };
 
 // Función helper para obtener el tiempo de procesamiento de un modelo
@@ -45,25 +46,37 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     throw new Error(`Model ${model} not supported`);
   }
 
-  // Lógica especial para o3
-  if (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini') {
+  // Lógica especial para gpt5nano
+  if (model === 'gpt5nano') {
     if (
       tz?.includes('america') ||
       tz?.includes('asia')
     ) {
-      return 'WestUS';
+      return 'EastUS';
     }
-    return 'Suiza'; // Europa, África, Oceanía, etc.
+    return 'Sweden'; // Europa, África, Oceanía, etc.
+  }
+  if (model === 'gpt5mini' || model === 'gpt5') {
+    if (tz?.includes('asia')) {
+      return 'India';
+    }
+    if (tz?.includes('america')) {
+      return 'EastUS';
+    }
+    if (tz?.includes('africa') || tz?.includes('australia') || tz?.includes('pacific') || tz?.includes('oceania')) {
+      return 'Japan';
+    }
+    return 'Sweden';
   }
 
-  // Para gpt4o, usar todas las regiones disponibles según continente
+  // Para gpt4o y o3, usar todas las regiones disponibles según continente
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
     if (tz?.includes('europe')) return 'europe';
     if (tz?.includes('asia')) return 'asia';
     if (tz?.includes('africa')) return 'africa';
     if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
-    return 'WestUS';
+    return 'EastUS';
   })();
 
  // Usar REGION_MAPPING para traducir a la región real

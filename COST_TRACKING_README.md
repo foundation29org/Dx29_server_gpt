@@ -6,7 +6,7 @@ Este sistema permite rastrear y analizar los costos de las operaciones de IA en 
 
 - ✅ **Modelo flexible de etapas** que se adapta a cada operación
 - ✅ **Cálculo automático de costos** por etapa individual
-- ✅ **Compatibilidad con múltiples modelos** (gpt4o, o3, gpt-4o-mini, azure_ai_studio)
+- ✅ **Compatibilidad con múltiples modelos** (gpt4o, gpt5-mini, gpt5, o3, gpt-4o-mini, azure_ai_studio)
 - ✅ **Soporte para operaciones complejas y simples**
 - ✅ **Almacenamiento en base de datos** MongoDB con índices optimizados
 - ✅ **APIs para consulta** de estadísticas y costos

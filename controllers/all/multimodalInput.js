@@ -9,6 +9,7 @@ const blobOpenDx29Ctrl = require('../../services/blobOpenDx29');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
 const { calculatePrice, formatCost } = require('../../services/costUtils');
+const pubsubService = require('../../services/pubsubService');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -45,43 +46,6 @@ function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
 
-// Función de delay para retry
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Endpoints para o3-images
-const o3ImagesEndpoints = [
-    `${config.API_MANAGEMENT_BASE}/eu1/call/o3images`, // Suiza
-    `${config.API_MANAGEMENT_BASE}/us2/call/o3images`  // EastUS2
-];
-
-// Función para llamar a o3-images con failover
-async function callO3ImagesWithFailover(requestBody, retryCount = 0) {
-    const RETRY_DELAY = 1000;
-
-    try {
-        const response = await axios.post(o3ImagesEndpoints[retryCount], requestBody, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Ocp-Apim-Subscription-Key': config.API_MANAGEMENT_KEY,
-            }
-        });
-        return response;
-    } catch (error) {
-        if (retryCount < o3ImagesEndpoints.length - 1) {
-            console.warn(`❌ Error en ${o3ImagesEndpoints[retryCount]} — Reintentando en ${RETRY_DELAY}ms...`);
-            insights.error({
-                message: `Fallo o3-images endpoint ${o3ImagesEndpoints[retryCount]}`,
-                error: error.message,
-                retryCount,
-                requestBody
-            });
-            await delay(RETRY_DELAY);
-            return callO3ImagesWithFailover(requestBody, retryCount + 1);
-        }
-        throw error;
-    }
-}
-
 const processDocument = async (fileBuffer, originalName, blobUrl) => {
     try {
         console.log('Iniciando procesamiento de documento:', originalName);
@@ -92,7 +56,8 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         const fileExtension = originalName.toLowerCase().split('.').pop();
         if (fileExtension === 'txt') {
             const textContent = fileBuffer.toString('utf-8');
-            return textContent;
+            // Texto plano no usa Document Intelligence → 0 páginas cobrables
+            return { content: textContent, pages: 0, duration: 0 };
         }
         
         // Para otros tipos de archivo, usar Azure Document Intelligence
@@ -106,6 +71,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         );
 
         console.log('Enviando solicitud a Azure Document Intelligence...');
+        const startDi = Date.now();
         const initialResponse = await clientIntelligence
             .path("/documentModels/{modelId}:analyze", modelId)
             .post({
@@ -125,6 +91,7 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         console.log('Poller creado, esperando resultado...');
         
         const result = (await poller.pollUntilDone()).body;
+        const duration = Date.now() - startDi;
         console.log('Análisis completado');
 
         if (result.status === 'failed') {
@@ -132,7 +99,8 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
             throw new Error('Error processing the document after multiple attempts. Please try again with other document.');
         } else {
             console.log('Documento procesado exitosamente');
-            return result.analyzeResult.content;
+            const pages = Array.isArray(result?.analyzeResult?.pages) ? result.analyzeResult.pages.length : 1;
+            return { content: result.analyzeResult.content, pages, duration };
         }
     } catch (error) {
         console.error('Error detallado procesando documento:', {
@@ -142,186 +110,6 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
             stack: error.stack
         });
         throw new Error(`Error al procesar el documento: ${error.message}`);
-    }
-};
-
-/**
- * Clasifica una imagen médica en:
- *   radiograph | ct | mri | ultrasound | ecg | clinical_photo | text_document | other
- * Devuelve siempre el string en minúsculas.
- */
-const detectTypeDoc = async (base64Image, costTrackingData = null) => {
-  
-    // Prompt MUY conciso: queremos ahorrar tokens y forzar una respuesta única.
-    const promptClassifier = `
-  You are a medical triage assistant.
-  
-  Classify the uploaded image into exactly one of these categories (lower-case):
-  - radiograph         (plain X-ray images)
-  - ct                 (computed tomography)
-  - mri                (magnetic resonance imaging)
-  - ultrasound         (ultrasound / echography)
-  - ecg                (electrocardiogram traces)
-  - face_photo         (photographs where the main focus is the patient's face, especially for dysmorphic features or genetic syndromes)
-  - clinical_photo     (photographs of other body parts, skin, wounds, lesions, but NOT the face as main focus)
-  - text_document      (scanned or photographed medical documents)
-  - other              (anything else)
-  
-  Respond with ONLY the category word, no explanation, no punctuation.
-  `.trim();
-  
-    try {
-      const requestBody = {
-        model: "o3-images",
-        input: [
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: promptClassifier },
-              { type: "input_image", image_url: `data:image/jpeg;base64,${base64Image}` }
-            ]
-          }
-        ],
-        tools: [],
-        text: {
-            format: {
-                type: "text"
-            }
-        },
-        reasoning: {
-            effort: "medium"
-        }
-      };
-
-      let aiStartTime = Date.now();
-      const { data } = await callO3ImagesWithFailover(requestBody);
-      let aiEndTime = Date.now();
-
-      // Cost tracking para detectTypeDoc
-      if (costTrackingData) {
-        try {
-          const usage = data.usage;
-          const costData = calculatePrice(usage, 'o3');
-          console.log(`💰 detectTypeDoc - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
-
-          const aiStage = {
-            name: 'ai_call',
-            cost: costData.totalCost,
-            tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
-            model: 'o3',
-            duration: aiEndTime - aiStartTime,
-            success: true
-          };
-          await CostTrackingService.saveSimpleOperationCost(
-            costTrackingData,
-            'multimodal_detect_type',
-            aiStage,
-            'success'
-          );
-        } catch (costError) {
-          console.error('Error guardando cost tracking para detectTypeDoc:', costError);
-        }
-      }
-  
-      // Azure devuelve un array "output" con elementos type === "message"
-      const raw = data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim().toLowerCase();
-  
-      // Validamos la salida para evitar sorpresas
-      const valid = ["radiograph", "ct", "mri", "ultrasound", "ecg", "clinical_photo", "face_photo", "text_document", "other"];
-      if (!raw || !valid.includes(raw)) {
-        throw new Error(`Unexpected category: ${raw}`);
-      }
-      return raw; // ← la categoría final
-    } catch (err) {
-      console.error("Error classifying image:", err);
-      throw new Error("Failed to detect image type");
-    }
-  };
-
-
-
-const processImage = async (base64Image, promptImage, effort, costTrackingData = null) => {
-    try {
-        const requestBody = {
-            model: "o3-images",
-            input: [
-                /*{
-                    role: "developer",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: "You are a certified medical-imaging technologist. Follow every instruction exactly."
-                        }
-                    ]
-                },*/
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: promptImage
-                        },
-                        {
-                            type: "input_image",
-                            image_url: `data:image/jpeg;base64,${base64Image}`
-                        }
-                    ]
-                }
-            ],
-            tools: [],
-            text: {
-                format: {
-                    type: "text"
-                }
-            },
-            reasoning: {
-                effort: effort
-            }
-        };
-
-        let aiStartTime = Date.now();
-        const response = await callO3ImagesWithFailover(requestBody);
-        let aiEndTime = Date.now();
-
-        // Cost tracking para processImage
-        if (costTrackingData) {
-          try {
-            const usage = response.data.usage;
-            const costData = calculatePrice(usage, 'o3');
-            console.log(`💰 processImage - AI Call: $${formatCost(costData.totalCost)} (${costData.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
-
-            const aiStage = {
-              name: 'ai_call',
-              cost: costData.totalCost,
-              tokens: { input: costData.inputTokens, output: costData.outputTokens, total: costData.totalTokens },
-              model: 'o3',
-              duration: aiEndTime - aiStartTime,
-              success: true
-            };
-            await CostTrackingService.saveSimpleOperationCost(
-              costTrackingData,
-              'multimodal_process_image',
-              aiStage,
-              'success'
-            );
-          } catch (costError) {
-            console.error('Error guardando cost tracking para processImage:', costError);
-          }
-        }
-
-        console.log(response.data);
-        
-        // Buscar el elemento de tipo "message" en el output
-        const messageElement = response.data.output.find(item => item.type === "message");
-        console.log(messageElement);
-        if (messageElement && messageElement.content && messageElement.content[0]) {
-            return messageElement.content[0].text;
-        } else {
-            throw new Error('No se encontró el contenido de la respuesta');
-        }
-    } catch (error) {
-        console.error('Error procesando imagen con Azure OpenAI:', error);
-        throw new Error('Error al procesar la imagen');
     }
 };
 
@@ -341,12 +129,11 @@ const processMultimodalInput = async (req, res) => {
         header_language: req.headers['accept-language'],
         timezone: req.body.timezone
     };
-
     try {
         // Configurar los campos específicos para Multer 2.x
         const uploadFields = upload.fields([
-            { name: 'document', maxCount: 1 },
-            { name: 'image', maxCount: 1 }
+            { name: 'document', maxCount: 5 },  // Permitir hasta 5 documentos
+            { name: 'image', maxCount: 5 }      // Permitir hasta 5 imágenes
         ]);
 
         uploadFields(req, res, async function(err) {
@@ -360,6 +147,13 @@ const processMultimodalInput = async (req, res) => {
                 });
                 return res.status(400).json({ error: err.message });
             }
+
+            // userId está disponible después de que Multer haya procesado el multipart/form-data
+            const userId = req.body.myuuid;
+
+            // Actualizar requestInfo con el body parseado y timezone correcto
+            requestInfo.body = req.body;
+            requestInfo.timezone = req.body.timezone;
 
             // Log para debug - ver qué está llegando
             console.log('Body recibido:', {
@@ -387,25 +181,81 @@ const processMultimodalInput = async (req, res) => {
             // Procesar documento si existe
             if (req.files && req.files.document) {
                 try {
-                    const fileBuffer = req.files.document[0].buffer;
-                    const originalName = req.files.document[0].originalname;
+                    let documentTexts = [];
+                    let totalPagesProcessed = 0;
+                    let totalDiDurationMs = 0;
+                    let processedDocNames = [];
                     
-                    // Subir a Azure Blob
-                    const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
-                        ...req.body,
-                        tenantId: tenantId,
-                        subscriptionId: subscriptionId
-                    });
-                    console.log('Documento subido a Azure Blob:', blobUrl);
+                    // Procesar cada documento
+                    for (let i = 0; i < req.files.document.length; i++) {
+                        const fileBuffer = req.files.document[i].buffer;
+                        const originalName = req.files.document[i].originalname;
+                        
+                        // Subir a Azure Blob
+                        const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
+                            ...req.body,
+                            tenantId: tenantId,
+                            subscriptionId: subscriptionId
+                        });
+                        console.log(`Documento ${i + 1} subido a Azure Blob:`, blobUrl);
+                        
+                        // Procesar el documento
+                        if (userId) {
+                            await pubsubService.sendProgress(userId.toString(), 'extract_documents', 'Extracting documents...', 5);
+                        }
+                        const { content: documentText, pages, duration } = await processDocument(fileBuffer, originalName, blobUrl);
+                        documentTexts.push(`--- Documento ${i + 1}: ${originalName} ---\n${documentText}`);
+                        totalPagesProcessed += (pages || 0);
+                        totalDiDurationMs += (duration || 0);
+                        processedDocNames.push(originalName);
+                    }
                     
-                    // Procesar el documento
-                    const documentText = await processDocument(fileBuffer, originalName, blobUrl);
-                    results.documentAnalysis = documentText;
+                    // Combinar todos los documentos
+                    results.documentAnalysis = documentTexts.join('\n\n');
+
+                    // Guardar coste de Azure Document Intelligence (Layout)
+                    if (totalPagesProcessed > 0) {
+                        console.log('Pages processed:', totalPagesProcessed);
+                        // Tarifa S0 Web/Contenedor Lectura: $1.50 por 1000 páginas (<1M)
+                        const diCost = (totalPagesProcessed / 1000) * 1.5;
+                        try {
+                            await CostTrackingService.saveCostRecord({
+                                myuuid: req.body.myuuid || 'default-uuid',
+                                tenantId: tenantId,
+                                subscriptionId: subscriptionId,
+                                operation: 'multimodal_process_image',
+                                model: 'document_intelligence',
+                                lang: req.body.lang || 'en',
+                                timezone: req.body.timezone || 'UTC',
+                                stages: [{
+                                    name: 'document_intelligence',
+                                    cost: diCost,
+                                    tokens: { input: 0, output: 0, total: 0 },
+                                    model: 'document_intelligence',
+                                    duration: totalDiDurationMs,
+                                    success: true
+                                }],
+                                totalCost: diCost,
+                                totalTokens: { input: 0, output: 0, total: 0 },
+                                description: `Azure Document Intelligence: ${totalPagesProcessed} páginas — ${processedDocNames.join(', ')}`,
+                                status: 'success',
+                                iframeParams: req.body.iframeParams || {},
+                                operationData: { totalPages: totalPagesProcessed, documents: processedDocNames }
+                            });
+                        } catch (ctErr) {
+                            console.error('Error guardando coste de Document Intelligence:', ctErr.message);
+                            insights.error({ message: 'Error guardando coste DI', error: ctErr.message, pages: totalPagesProcessed, tenantId, subscriptionId });
+                        }
+                    }
                 } catch (error) {
+                    let originalNames = '';
+                    for (let i = 0; i < req.files.document.length; i++) {
+                        originalNames += req.files.document[i].originalname + ', ';
+                    }
                     insights.error({
-                        message: "Error procesando documento",
+                        message: "Error procesando documentos",
                         error: error.message,
-                        originalName: req.files.document[0].originalname,
+                        originalName: originalNames,
                         tenantId: tenantId,
                         subscriptionId: subscriptionId,
                         requestInfo: requestInfo
@@ -414,248 +264,32 @@ const processMultimodalInput = async (req, res) => {
                 }
             }
 
-            // Variables para cost tracking
-            const costTrackingData = {
-                myuuid: req.body.myuuid || 'default-uuid',
-                tenantId: tenantId,
-                subscriptionId: subscriptionId,
-                lang: req.body.lang || 'es',
-                timezone: req.body.timezone || 'UTC',
-                description: `${req.body.text ? req.body.text.substring(0, 100) + '...' : 'Multimodal input'} - Process multimodal`,
-                iframeParams: req.body.iframeParams || {}
-            };
-
             // Procesar imagen si existe
             if (req.files && req.files.image) {
                 try {
-                    const fileBuffer = req.files.image[0].buffer;
-                    const originalName = req.files.image[0].originalname;
+                    let imageAnalyses = [];
+                    let imageUrls = [];
                     
-                    // Subir a Azure Blob
-                    const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
-                        ...req.body,
-                        tenantId: tenantId,
-                        subscriptionId: subscriptionId
-                    });
-                    console.log('Imagen subida a Azure Blob:', blobUrl);
-                    const base64Image = fileBuffer.toString("base64");
-                    // Detectar el tipo de imagen
-                    const typeImage = await detectTypeDoc(base64Image, costTrackingData);
-                    console.log('Tipo de imagen:', typeImage);
-                    switch (typeImage) {
-                        case "radiograph":
-                            let promptRadiology = `
-                            **Task – two stages (no diagnosis):**
-                            1️⃣ Identify imaging modality:
-                            • X-ray → state projection (PA, lateral, oblique…)
-                            • CT or MRI → state plane (axial, coronal, sagittal) and sequence/phase
-                            • Ultrasound → state view (longitudinal, transverse, apical four-chamber…)
-                            • Otherwise say "uncertain modality"
-                            2️⃣ For **each anatomical region** list:
-                            • normal structures visible
-                            • abnormal radiographic features (opacity, fractures, devices, artefacts, masses…)
+                    // Procesar cada imagen
+                    for (let i = 0; i < req.files.image.length; i++) {
+                        const fileBuffer = req.files.image[i].buffer;
+                        const originalName = req.files.image[i].originalname;
+                        
+                        // Subir a Azure Blob
+                        const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
+                            ...req.body,
+                            tenantId: tenantId,
+                            subscriptionId: subscriptionId
+                        });
+                        console.log(`Imagen ${i + 1} subida a Azure Blob:`, blobUrl);
+                        imageAnalyses.push(`Paciente con hallazgos de imagen médica:\n\n--- Imagen ${i + 1}: ${originalName} (${blobUrl}) ---\nHallazgos de imagen que requieren interpretación médica`);
 
-                            **Hard rules – must be obeyed:**
-                            - ✅ Output ONLY the two section headers exactly:
-                            "Imaging Identification"
-                            "Radiographic Findings"
-                            - ❌ NO section named diagnosis, impression, assessment, conclusión…
-                            - ❌ Do NOT name diseases (pneumonia, effusion, tumour…). Describe appearances only
-                            (e.g. "homogeneous left-sided opacity").
-                            - If uncertain, write "uncertain" rather than propose a disease.
-                            - Keep total length ≤ 150 words.
-                            `.trim();
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptRadiology += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                            const imageAnalysisRadiology = await processImage(base64Image, promptRadiology, "high", costTrackingData);
-                            results.imageAnalysis = imageAnalysisRadiology;
-                            break;
-                        case "ct":
-                            let promptCT = `
-                            **Task – two stages (no diagnosis)**  
-                            1️⃣ **Imaging Identification**  
-                            • Confirm modality is CT (computed tomography).  
-                            • State acquisition plane(s) shown (axial, coronal, sagittal, 3-D MPR…).  
-                            • Mention contrast phase if recognizable (non-contrast, arterial, venous, delayed) or "uncertain phase".  
-                            • Note slice thickness or kernel only if obvious (e.g. bone algorithm).  
-
-                            2️⃣ **For each anatomical region imaged** list:  
-                            • normal structures visualised;  
-                            • abnormal tomographic features (high/low density areas, masses, fluid collections, calcifications, air, fractures, devices, artefacts…).  
-
-                            **Hard rules – must be obeyed**  
-                            - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
-                            **Imaging Identification**  
-                            **Tomographic Findings**  
-                            - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
-                            - ❌ Do **NOT** name diseases, pathologies, or clinical conditions (e.g. appendicitis, PE, metastasis).  
-                            Describe appearances only (e.g. "focal high-density crescent adjacent to skull inner table").  
-                            - If uncertain, write **"uncertain"** rather than propose a disease.  
-                            - Keep total length ≤ 150 words.
-                            `.trim();
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptCT += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                            const imageAnalysisCT = await processImage(base64Image, promptCT, "high", costTrackingData);
-                            results.imageAnalysis = imageAnalysisCT;
-                            break;
-                        case "mri":
-                            let promptMRI = `
-                            **Task – two stages (no diagnosis)**  
-                            1️⃣ **Imaging Identification**  
-                            • Confirm modality is MRI (magnetic resonance imaging).  
-                            • Specify main sequence(s) seen (T1-w, T2-w, FLAIR, DWI, GRE, etc.).  
-                            • State acquisition plane(s) (axial, coronal, sagittal) and contrast use if obvious  
-                                (pre-contrast, post-gadolinium, or "uncertain").  
-
-                            2️⃣ **For each anatomical region imaged** list:  
-                            • normal structures visualised;  
-                            • abnormal MR features (signal intensities, mass effect, edema, enhancement, restricted diffusion, susceptibility, devices, artefacts…).  
-
-                            **Hard rules – must be obeyed**  
-                            - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
-                            **Imaging Identification**  
-                            **MR Findings**  
-                            - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
-                            - ❌ Do **NOT** name diseases or clinical conditions (e.g. multiple sclerosis, tumour, infarct).  
-                            Describe appearances only (e.g. "hyperintense lesion on T2 with mild mass effect").  
-                            - If uncertain, write **"uncertain"** rather than propose a disease.  
-                            - Keep total length ≤ 150 words.
-                            `.trim();
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptMRI += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                            const imageAnalysisMRI = await processImage(base64Image, promptMRI, "high", costTrackingData);
-                            results.imageAnalysis = imageAnalysisMRI;
-                            break;
-                        case "ultrasound":
-                            let promptUltrasound = `
-                            **Task – two stages (no diagnosis)**  
-                            1️⃣ **Imaging Identification**  
-                            • Confirm modality is ultrasound.  
-                            • Specify view or window (e.g. subcostal four-chamber, longitudinal RUQ, transverse thyroid).  
-                            • Indicate mode(s) used if identifiable (B-mode, Color Doppler, M-mode).  
-                            2️⃣ **For each scanned region** list:  
-                            • normal structures seen;  
-                            • abnormal sonographic features (heterogeneous echotexture, anechoic fluid, shadowing, Doppler aliasing, devices, artefacts…).
-
-                            **Hard rules – must be obeyed**  
-                            - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
-                            **Imaging Identification**  
-                            **Sonographic Findings**  
-                            - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
-                            - ❌ Do **NOT** name diseases, pathologies, or clinical conditions (e.g. cholecystitis, DVT, carcinoma).  
-                            Describe appearances only (e.g. "well-defined round anechoic lesion with posterior enhancement").  
-                            - If uncertain, write **"uncertain"** rather than propose a disease.  
-                            - Keep total length ≤ 150 words.
-                            `.trim();   
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptUltrasound += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                            const imageAnalysisUltrasound = await processImage(base64Image, promptUltrasound, "high", costTrackingData);
-                            results.imageAnalysis = imageAnalysisUltrasound;
-                            break;
-                        case "ecg":
-                            let promptECG = `
-                            **Task – two stages (no diagnosis)**  
-                            1️⃣ **ECG Identification**  
-                               • Confirm modality is ECG.  
-                               • State type (12-lead, rhythm strip, telemetry snapshot).  
-                               • Note paper speed if visible (25 mm/s, 50 mm/s) and calibration (10 mm/mV).  
-                               • List the leads displayed (e.g. I, II, III, V1–V6) or say "uncertain leads".  
-                            
-                            2️⃣ **For the waveform displayed** list:  
-                               • normal features observed (regular rhythm, narrow QRS, upright T in lead II, etc.);  
-                               • abnormal waveform features (irregular R-R intervals, prolonged PR, wide QRS, ST-segment elevation/depression, T-wave inversion, pathologic Q waves, pacemaker spikes, artefacts…).  
-                            
-                            **Hard rules – must be obeyed**  
-                            - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
-                              **ECG Identification**  
-                              **ECG Findings**  
-                            - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
-                            - ❌ Do **NOT** name diseases or clinical conditions (e.g. atrial fibrillation, myocardial infarction, bundle-branch block).  
-                              Describe appearances only (e.g. "irregularly irregular rhythm", "ST-segment elevation 2 mm in V2–V3").  
-                            - If uncertain, write **"uncertain"** rather than propose a disease.  
-                            - Keep total length ≤ 150 words.
-                            `.trim();
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptECG += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                          const imageAnalysisECG = await processImage(base64Image, promptECG, "high", costTrackingData);
-                          results.imageAnalysis = imageAnalysisECG;
-                          break;
-                        case "clinical_photo":
-                            let promptClinicalPhoto = `
-                            **Task – two stages (no diagnosis)**  
-                            1️⃣ **Photo Identification**  
-                               • Confirm modality is a clinical photograph.  
-                               • Specify body region and orientation (e.g. dorsal right hand, anterior face) if discernible.  
-                               • Mention lighting (natural, flash) and presence/absence of scale marker or ruler.  
-                            
-                            2️⃣ **For the region shown** list:  
-                               • normal visible structures (skin creases, nails, hair, surrounding tissue…);  
-                               • abnormal visible features (color change, swelling, ulceration, rash pattern, mass, discharge, scar, devices, foreign bodies, artefacts…).  
-                            
-                            **Hard rules – must be obeyed**  
-                            - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
-                              **Photo Identification**  
-                              **Photo Findings**  
-                            - ❌ Do **NOT** include any section or line labelled diagnosis, impression, assessment, conclusión, posibles diagnósticos, etc.  
-                            - ❌ Do **NOT** name diseases or clinical conditions (e.g. psoriasis, cellulitis, melanoma).  
-                              Describe appearances only (e.g. "round erythematous patch with central crust").  
-                            - If uncertain, write **"uncertain"** rather than propose a disease.  
-                            - Keep total length ≤ 150 words.
-                            `.trim();
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptClinicalPhoto += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                          const imageAnalysisClinicalPhoto = await processImage(base64Image, promptClinicalPhoto, "high", costTrackingData);
-                          results.imageAnalysis = imageAnalysisClinicalPhoto;
-                          break;
-                        case "face_photo":
-                            let promptFace = `You are an expert clinician in pediatric dysmorphology.\n\nTASK\nBased solely on the facial features visible in the provided photograph, return a valid JSON array with the names of 5 possible rare genetic syndromes or diseases that could be considered as differential diagnoses.\n\nOUTPUT RULES\n• Output only the JSON array—no XML, Markdown, or extra text.\n• Use double quotes for all strings.\n• List diagnoses in order from most to least likely.\n If you are unsure, make your best guess based on the visible features.\n\nPATIENT IMAGE: (attach the image as input)`;
-                            if (results.textInput && results.textInput.trim() !== '') {
-                                promptFace += `\n\nAdditional patient description provided by the user:\n"${results.textInput.trim()}"\nUse this information to help inform your analysis.`;
-                            }
-                            promptFace = promptFace.trim();
-                            const imageAnalysisFace = await processImage(base64Image, promptFace, "high", costTrackingData);
-                            results.imageAnalysis = imageAnalysisFace;
-                            break;
-                        case "text_document":
-                            const promptTextDocument = `
-                            **Task – two stages (no interpretation)**  
-                            1️⃣ **Raw Text**  
-                               • Transcribe *verbatim* every readable word from the document image.  
-                               • Preserve line breaks; ignore illegible parts.  
-                            2️⃣ **Document Summary**  
-                               • Produce a concise, lay-friendly summary of the key facts *exactly as written* in the document.  
-                               • Re-use the same order of information when possible (patient details, date, findings, plan, signatures).  
-                               • Do **NOT** add diagnoses, advice, or content that is not present in the text.  
-                            
-                            **Hard rules – must be obeyed**  
-                            - ✅ Output **ONLY** the two section headers (verbatim, case-sensitive):  
-                              **Raw Text**  
-                              **Document Summary**  
-                            - ❌ Do **NOT** include any other sections ("Impression", "Assessment", etc.).  
-                            - ❌ Do **NOT** infer or guess missing information. If part of the text is unreadable, write "[illegible]".  
-                            - Keep *Raw Text* exactly as seen; keep *Document Summary* ≤ 25 lines.  
-                            - If a usual field (e.g. medications, tests) is absent, state "None reported."  
-                            `.trim();
-                          const imageAnalysisTextDocument = await processImage(base64Image, promptTextDocument, "high", costTrackingData);
-                          results.imageAnalysis = imageAnalysisTextDocument;
-                          break;
-                        default:
-                            const promptGeneric = `
-                            You are a visual assistant. Briefly describe the main elements in the image (≤80 words) using plain language.
-                            Do NOT guess diagnoses, personal identities, or sensitive data.
-                            `.trim();
-                            const imageAnalysisGeneric = await processImage(base64Image, promptGeneric, "high", costTrackingData);
-                            results.imageAnalysis = imageAnalysisGeneric;
-                            break;
-                      }
-               
-
+                        imageUrls.push({name: originalName, url: blobUrl});
+                    }
+                    
+                    // Combinar análisis de imágenes
+                    results.imageAnalysis = imageAnalyses.join('\n\n');
+                    results.imageUrls = imageUrls; // Guardar URLs para el frontend
                 } catch (error) {
                     insights.error({
                         message: "Error procesando imagen",
@@ -670,21 +304,23 @@ const processMultimodalInput = async (req, res) => {
             }
 
             // Combinar todos los inputs para el resumen
+            // Usar:
             let combinedInput = '';
-            if (results.textInput) combinedInput += results.textInput + '\n';
-            if (results.documentAnalysis) combinedInput += results.documentAnalysis + '\n';
-            if (results.imageAnalysis) combinedInput += 'Análisis de imagen: ' + results.imageAnalysis + '\n';
-
-            // Si no hay ningún input, usar un mensaje por defecto
+            if (results.textInput?.trim()) {
+                combinedInput += `${results.textInput.trim()}\n\n`;
+            }
+            if (results.documentAnalysis?.trim()) {
+                combinedInput += `${results.documentAnalysis.trim()}`;
+            }
             if (!combinedInput.trim()) {
-                combinedInput = 'No se proporcionó ningún contenido para analizar.';
+                combinedInput = 'No content was provided to analyze.';
             }
 
             // Crear un objeto request simulado para el servicio de summarize
             const mockReq = {
                 body: {
                     description: combinedInput,
-                    lang: req.body.lang || 'es',
+                    lang: req.body.lang || 'en',
                     myuuid: req.body.myuuid || 'default-uuid',
                     timezone: req.body.timezone || 'UTC'
                 },
@@ -695,25 +331,103 @@ const processMultimodalInput = async (req, res) => {
                 query: req.query
             };
 
-            // Crear un objeto response simulado
-            const mockRes = {
-                status: (code) => ({
-                    send: (data) => {
-                        if (code === 200) {
-                            res.json({
-                                summary: data.data.summary,
-                                details: results,
-                                detectedLang: data.detectedLang
-                            });
-                        } else {
-                            res.status(code).json(data);
-                        }
-                    }
-                })
-            };
+            // Usar:
+            let description = '';
 
-            // Llamar directamente al servicio de summarize
-            await summarizeCtrl.summarize(mockReq, mockRes);
+            const hasPatient = !!results.textInput?.trim();
+            const hasDoc = !!results.documentAnalysis?.trim();
+            const hasImage = results.imageUrls?.length > 0;
+
+            let descriptionImage = '';
+            if(hasImage){
+                const translateText = require('../../services/translation');
+                const baseText = 'Patient with medical imaging findings that require diagnostic interpretation';
+                try {
+                    let endpoint =  {
+                        name: 'westeurope',
+                        url: 'https://api.cognitive.microsofttranslator.com',
+                        key: config.translationKey, // West Europe
+                        region: 'westeurope'
+                      };
+                    descriptionImage = await translateText.translateInvert(baseText, req.body.lang || 'en', endpoint);
+                } catch (error) {
+                    console.error('Error en translateInvert:', error);
+                    // Fallback al texto original si falla la traducción
+                    descriptionImage = baseText;
+                }
+            }
+
+            if (hasPatient || hasDoc) {
+                // Verificar si el combinedInput es lo suficientemente largo para justificar un resumen
+                const combinedInputLength = combinedInput.trim().length;
+                const minLengthForSummary = 1000; // Ajusta según necesites
+                
+                if (combinedInputLength > minLengthForSummary) {
+                    // Si hay texto/documento largo, resumir primero
+                    let summaryResult = null;
+                    const captureRes = {
+                        status: (code) => ({
+                            send: (data) => {
+                                if (code === 200) {
+                                    summaryResult = data;
+                                }
+                            }
+                        })
+                    };
+                    if (userId) {
+                        await pubsubService.sendProgress(userId.toString(), 'summarize_input', 'Summarizing input...', 10);
+                    }
+                    await summarizeCtrl.summarize(mockReq, captureRes);
+                    description = summaryResult.data.summary;
+                } else {
+                    // Si es corto, usar directamente el combinedInput
+                    description = combinedInput;
+                }
+                
+                // Si también hay imagen, añadirla
+                if (hasImage) {
+                    //description += '\n\n' + results.imageAnalysis;
+                    description += '\n\n' + descriptionImage;
+                }
+            } else if (hasImage) {
+                // Si solo hay imagen, usar análisis de imagen
+                //description = results.imageAnalysis;
+                description = descriptionImage;
+            }
+            
+            // Llamar a diagnose con la descripción y URLs de imagen
+            let model = 'gpt5mini';
+            if(hasImage){
+                model = 'gpt5';
+            }
+
+            let isImageOnly = false;
+            if(!hasDoc && !hasPatient && hasImage){
+                isImageOnly = true;
+            }
+            const diagnoseData = {
+                description: description,
+                diseases_list: "",
+                myuuid: req.body.myuuid || 'default-uuid',
+                lang: req.body.lang || 'en',
+                timezone: req.body.timezone || 'UTC',
+                model: model,
+                iframeParams: req.body.iframeParams || {},
+                imageUrls: results.imageUrls || [],
+                isImageOnly: isImageOnly
+            };
+            const diagnoseResult = await callDiagnoses(diagnoseData, requestInfo);
+            res.status(200).send({ result: 'processing', description: description, imageUrls: results.imageUrls || [], isImageOnly: isImageOnly });
+            // Devolver resultado de diagnose
+            /*return res.status(200).send({
+                result: 'success',
+                data: diagnoseResult.data,
+                imageUrls: results.imageUrls || [],
+                isImageOnly: isImageOnly,
+                details: results,
+                detectedLang: req.body.lang || 'en'
+            });*/
+            
         });
     } catch (error) {
         console.error('Error en processMultimodalInput:', error);
@@ -756,6 +470,44 @@ const processMultimodalInput = async (req, res) => {
         res.status(500).json({ error: 'Error procesando la entrada multimodal' });
     }
 };
+
+async function callDiagnoses(data, requestInfo) {
+    const { diagnose } = require('../../services/helpDiagnose');
+    
+    // Crear un mock request para diagnose
+    const mockReq = {
+        body: {
+            description: data.description,
+            diseases_list: data.diseases_list || "",
+            myuuid: data.myuuid,
+            lang: data.lang,
+            timezone: data.timezone || 'UTC',
+            model: data.model || 'gpt5mini',
+            iframeParams: data.iframeParams || {},
+            imageUrls: data.imageUrls || []
+        },
+        headers: requestInfo.headers,
+        get: (header) => requestInfo.headers[header.toLowerCase()],
+        connection: { remoteAddress: requestInfo.ip },
+        params: requestInfo.params,
+        query: requestInfo.query
+    };
+
+    // Crear un mock response para capturar el resultado
+    let diagnoseResult = null;
+    const mockRes = {
+        status: (code) => ({
+            send: (data) => {
+                if (code === 200) {
+                    diagnoseResult = data;
+                }
+            }
+        })
+    };
+
+    await diagnose(mockReq, mockRes);
+    return diagnoseResult;
+}
 
 module.exports = {
     processMultimodalInput
