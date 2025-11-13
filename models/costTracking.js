@@ -60,14 +60,17 @@ const CostTrackingSchema = new Schema({
       type: String,
       required: true,
       enum: [
+        'detect_language', // Detección de idioma
         'translation',           // Traducción a inglés
         'ai_call',              // Llamada a IA
         'anonymization',        // Anonimización
         'reverse_translation',  // Traducción inversa
+        'reverse_anonymization', // Traducción inversa de anonimización
         'database_save',         // Guardado en BD
         'clinical_check', // Verificación de escenario clínico
         'translation', // Traducción a inglés
         'reverse_translation', // Traducción inversa
+        'reverse_diseases', // Traducción inversa de diagnósticos
         'medical_question_check', // Verificación de pregunta médica
         'general_medical_response', // Verificación de escenario clínico
         'emergency_questions', // Verificación de escenario clínico

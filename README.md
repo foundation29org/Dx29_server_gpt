@@ -104,7 +104,7 @@ docker-compose up app-dev
 docker-compose up app-prod
 ```
 
-Si en ocasiones falla, hacer:
+If it fails occasionally, try:
 
 ```bash
 docker-compose down
@@ -157,43 +157,33 @@ This specification is necessary to integrate the API with Azure API Management (
 
 ## Cost Tracking System
 
-El sistema de cost tracking permite calcular y guardar el costo de las operaciones de IA de manera simplificada:
+The cost tracking system allows calculating and storing the cost of AI operations in a simplified way:
 
-### Operaciones Soportadas
-- `diagnose` - Diagnóstico principal
-- `info_disease` - Información de enfermedades
-- `follow_up_questions` - Preguntas de seguimiento
-- `er_questions` - Preguntas de emergencia
-- `process_follow_up` - Procesamiento de respuestas de seguimiento
-- `summarize` - Resumen de descripciones médicas
-- `multimodal_detect_type` - Detección de tipo de imagen médica
-- `multimodal_process_image` - Procesamiento de imágenes médicas
+### Supported Operations
+- `diagnose` - Main diagnosis
+- `info_disease` - Disease information
+- `follow_up_questions` - Follow-up questions
+- `er_questions` - Emergency questions
+- `process_follow_up` - Process follow-up answers
+- `summarize` - Summarize medical descriptions
+- `multimodal_detect_type` - Medical image type detection
+- `multimodal_process_image` - Medical image processing
 
-### Enfoque Simplificado
-- **Solo llamada AI**: Se trackea únicamente la llamada principal a IA
-- **Sin traducciones**: Las traducciones no se trackean ya que no tienen costo directo
-- **Guardado en éxito**: Los costos se guardan solo cuando la operación es exitosa
+### Simplified Approach
+- **AI call only**: Track only the main AI call
+- **No translations**: Translations are not tracked as they have no direct cost
+- **Save on success**: Costs are saved only when the operation succeeds
 
-### Modelos Soportados
+### Supported Models
 - `gpt4o` - GPT-4 Omni (precio estándar)
-- `o3` - Claude 3.5 Sonnet (precio estándar)
-- `azure_ai_studio` - Azure AI Studio con file search (precios específicos)
+- `o3` - Modelo de razonamiento prolongado
+- `gpt5` - Multimodal (texto + imágenes)
+- `gpt5mini` - LLM rápido y económico
+- `gpt5nano` - LLM de muy bajo coste para detección/traducción ligeras
+- `sonar` / `sonar-pro` / `sonar-reasoning-pro` - Perplexity con búsqueda web y citas
+- `azure_ai_studio` - Asistentes con File Search (NHS Genomics)
 
-### API Endpoints
-
-#### Obtener Estadísticas de Costos
-```
-GET /costs/stats?tenantId={tenantId}&startDate={startDate}&endDate={endDate}
-```
-
-#### Obtener Estadísticas por Etapa
-```
-GET /costs/stage-stats?tenantId={tenantId}&startDate={startDate}&endDate={endDate}
-```
-
-### Pruebas
-Para probar el sistema de cost tracking:
-
-```bash
-node test-cost-tracking-simplified.js
-```
+Auxiliary services:
+- `translation_service` - Azure Translator (detection and translation)
+- `document_intelligence` - Azure Document Intelligence (Layout)
+- `azure_ai_studio` - Azure AI Studio with file search (specific pricing)

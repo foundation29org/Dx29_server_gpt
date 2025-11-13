@@ -151,6 +151,10 @@ async function generateFollowUpQuestions(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectDurationMs = 0;
+  let forwardDurationMs = 0;
+  let reverseDurationMs = 0;
+  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -158,16 +162,28 @@ async function generateFollowUpQuestions(req, res) {
     let englishDiseases = diseases;
 
     try {
-      // Detección
-      translationChars += (description ? description.length : 0);
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      // Si viene detectado previamente, evitar re-detectar
+      const detectedHint = req.body.detectedLanguage || req.body.detectedLang;
+      if (detectedHint && typeof detectedHint === 'string') {
+        detectedLanguage = detectedHint.toLowerCase();
+      } else {
+        // Detección (Azure) — contar caracteres aparte
+        detectChars += (description ? description.length : 0);
+        const detStart = Date.now();
+        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        detectDurationMs = Date.now() - detStart;
+      }
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción de descripción y lista de enfermedades
         translationChars += (description ? description.length : 0);
+        const fwdStart1 = Date.now();
         englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        forwardDurationMs += (Date.now() - fwdStart1);
         if (englishDiseases) {
           translationChars += (diseases ? diseases.length : 0);
+          const fwdStart2 = Date.now();
           englishDiseases = await translateTextWithRetry(diseases, detectedLanguage);
+          forwardDurationMs += (Date.now() - fwdStart2);
         }
       }
     } catch (translationError) {
@@ -377,9 +393,11 @@ async function generateFollowUpQuestions(req, res) {
       try {
         // Contabilizar caracteres previos a la traducción inversa
         reverseTranslationChars += questions.reduce((sum, q) => sum + (q ? q.length : 0), 0);
+        const revStart = Date.now();
         questions = await Promise.all(
           questions.map(question => translateInvertWithRetry(question, detectedLanguage))
         );
+        reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -410,6 +428,17 @@ async function generateFollowUpQuestions(req, res) {
     // Guardar cost tracking multi-etapa
     try {
       const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: detectDurationMs,
+          success: true
+        });
+      }
       if (translationChars > 0) {
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
@@ -417,7 +446,7 @@ async function generateFollowUpQuestions(req, res) {
           cost: translationCost,
           tokens: { input: translationChars, output: translationChars, total: translationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: forwardDurationMs,
           success: true
         });
       }
@@ -436,7 +465,7 @@ async function generateFollowUpQuestions(req, res) {
           cost: reverseCost,
           tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: reverseDurationMs,
           success: true
         });
       }
@@ -462,6 +491,23 @@ async function generateFollowUpQuestions(req, res) {
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
       });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => stages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS generateFollowUpQuestions:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);
     }
@@ -670,20 +716,32 @@ async function processFollowUpAnswers(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
     let detectedLanguage = lang;
     let englishAnswers = answers;
     try {
-      // Detección
-      translationChars += (description ? description.length : 0);
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
+      // Si viene detectado previamente, evitar re-detectar
+      const detectedHint = req.body.detectedLanguage || req.body.detectedLang;
+      if (detectedHint && typeof detectedHint === 'string') {
+        detectedLanguage = detectedHint.toLowerCase();
+      } else {
+        // Detección (Azure) — contar caracteres aparte
+        detectChars += (description ? description.length : 0);
+        const detStart = Date.now();
+        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        detectDurationMs = Date.now() - detStart;
+      }
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción de descripción y Q/A
         translationChars += (description ? description.length : 0);
+        const fwdStart1 = Date.now();
         englishDescription = await translateTextWithRetry(description, detectedLanguage);
+        forwardDurationMs += (Date.now() - fwdStart1);
         let qaChars = 0;
+        const fwdStart2 = Date.now();
         englishAnswers = await Promise.all(
           answers.map(async (item) => {
             qaChars += (item.question ? item.question.length : 0);
@@ -694,6 +752,7 @@ async function processFollowUpAnswers(req, res) {
             };
           })
         );
+        forwardDurationMs += (Date.now() - fwdStart2);
         translationChars += qaChars;
       }
     } catch (translationError) {
@@ -816,6 +875,17 @@ async function processFollowUpAnswers(req, res) {
 
     try {
       const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: detectDurationMs,
+          success: true
+        });
+      }
       if (translationChars > 0) {
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
@@ -823,7 +893,7 @@ async function processFollowUpAnswers(req, res) {
           cost: translationCost,
           tokens: { input: translationChars, output: translationChars, total: translationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: forwardDurationMs,
           success: true
         });
       }
@@ -873,7 +943,9 @@ async function processFollowUpAnswers(req, res) {
     if (detectedLanguage !== 'en') {
       try {
         reverseTranslationChars = (updatedDescription ? updatedDescription.length : 0);
+        const revStart = Date.now();
         updatedDescription = await translateInvertWithRetry(updatedDescription, detectedLanguage);
+        var reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -910,7 +982,7 @@ async function processFollowUpAnswers(req, res) {
           cost: reverseCost,
           tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: reverseDurationMs || 0,
           success: true
         });
       }
@@ -936,6 +1008,23 @@ async function processFollowUpAnswers(req, res) {
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
       });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => followUpStages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS processFollowUpAnswers:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error saving final cost tracking:', costError);
     }
@@ -1115,13 +1204,17 @@ async function generateERQuestions(req, res) {
     let englishDescription = description;
     let detectedLanguage = lang;
     try {
-      // Detección
-      translationChars += (description ? description.length : 0);
+      // Detección (Azure) — contar caracteres aparte
+      detectChars += (description ? description.length : 0);
+      const detStart = Date.now();
       detectedLanguage = await detectLanguageWithRetry(description, lang);
+      detectDurationMs = Date.now() - detStart;
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Traducción a inglés
-        translationChars += (description ? description.length : 0);
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
+      // Traducción a inglés
+      translationChars += (description ? description.length : 0);
+      const fwdStart = Date.now();
+      englishDescription = await translateTextWithRetry(description, detectedLanguage);
+      forwardDurationMs = Date.now() - fwdStart;
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
@@ -1258,6 +1351,17 @@ async function generateERQuestions(req, res) {
     // Guardar cost tracking multi-etapa
     try {
       const stages = [];
+      if (detectChars > 0) {
+        const detectCost = (detectChars / 1000000) * 10;
+        stages.push({
+          name: 'detect_language',
+          cost: detectCost,
+          tokens: { input: detectChars, output: detectChars, total: detectChars },
+          model: 'translation_service',
+          duration: detectDurationMs,
+          success: true
+        });
+      }
       if (translationChars > 0) {
         const translationCost = (translationChars / 1000000) * 10;
         stages.push({
@@ -1265,7 +1369,7 @@ async function generateERQuestions(req, res) {
           cost: translationCost,
           tokens: { input: translationChars, output: translationChars, total: translationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: forwardDurationMs,
           success: true
         });
       }
@@ -1349,9 +1453,11 @@ async function generateERQuestions(req, res) {
     if (detectedLanguage !== 'en') {
       try {
         reverseTranslationChars = questions.reduce((sum, q) => sum + (q ? q.length : 0), 0);
+        const revStart = Date.now();
         questions = await Promise.all(
           questions.map(question => translateInvertWithRetry(question, detectedLanguage))
         );
+        reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -1386,7 +1492,7 @@ async function generateERQuestions(req, res) {
           cost: reverseCost,
           tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
           model: 'translation_service',
-          duration: 0,
+          duration: reverseDurationMs,
           success: true
         });
       }
@@ -1412,6 +1518,23 @@ async function generateERQuestions(req, res) {
         iframeParams: costTrackingData.iframeParams,
         operationData: { }
       });
+      // Resumen de costes
+      const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
+      const group = (name, modelFilter) => erStages.filter(s => s.name === name && (!modelFilter || modelFilter(s.model)));
+      const toSummary = (arr) => ({
+        cost: sumBy(arr, 'cost'),
+        tokens: arr.reduce((s, x) => s + (x?.tokens?.total || 0), 0),
+        duration: sumBy(arr, 'duration')
+      });
+      const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
+      const transAzure = toSummary(group('translation', m => m === 'translation_service'));
+      const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const aiCall = toSummary(group('ai_call'));
+      console.log(`\n💰 RESUMEN DE COSTOS generateERQuestions:`);
+      console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
+      console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
+      console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking (final):', costError);
     }

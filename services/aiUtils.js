@@ -71,7 +71,7 @@ const endpointsMap = {
       `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt4o`, // Suiza: 428 calls/min
+      `${API_MANAGEMENT_BASE}/eu1/call/gpt4o`, // Sweden: 428 calls/min
       `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
     ],
     northamerica: [
@@ -97,32 +97,32 @@ const endpointsMap = {
   },
   o3: {
     asia: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2
+      `${API_MANAGEMENT_BASE}/as1/call/o3`, // Sweden
+      `${API_MANAGEMENT_BASE}/as2/call/o3`  // EastUS2
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Sweden
+      `${API_MANAGEMENT_BASE}/us1/call/o3`  // EastUS2 como backup
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
+      `${API_MANAGEMENT_BASE}/us1/call/o3`, // EastUS2
+      `${API_MANAGEMENT_BASE}/us2/call/o3`  // Sweden como backup
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
+      `${API_MANAGEMENT_BASE}/us1/call/o3`, // EastUS2
+      `${API_MANAGEMENT_BASE}/us2/call/o3`  // Sweden como backup
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+      `${API_MANAGEMENT_BASE}/us1/call/o3`, // Sweden
+      `${API_MANAGEMENT_BASE}/as2/call/o3`  // EastUS2 como backup
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/us2/call/o3`, // EastUS2
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`  // Suiza como backup
+      `${API_MANAGEMENT_BASE}/as2/call/o3`, // EastUS2
+      `${API_MANAGEMENT_BASE}/us1/call/o3`  // Sweden como backup
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Suiza
-      `${API_MANAGEMENT_BASE}/us2/call/o3`  // EastUS2 como backup
+      `${API_MANAGEMENT_BASE}/us1/call/o3`, // Sweden
+      `${API_MANAGEMENT_BASE}/as2/call/o3`  // EastUS2 como backup
     ]
   },
   gpt5nano: {
@@ -157,8 +157,8 @@ const endpointsMap = {
   },
   gpt5mini: {
     asia: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+      `${API_MANAGEMENT_BASE}/as1/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`
     ],
     europe: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
@@ -174,51 +174,21 @@ const endpointsMap = {
     ],
     africa: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`,
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
     ],
     other: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
-    ]
-  },
-  gpt4omini: {
-    europe: [
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
-    ],
-    northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`
-    ],
-    asia: [
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
-    ],
-    southamerica: [
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
-    ],
-    africa: [
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
-    ],
-    oceania: [
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
-    ],
-    other: [
-      `${API_MANAGEMENT_BASE}/eu1/gpt-4o-mini`,
-      `${API_MANAGEMENT_BASE}/us2/gpt-4o-mini`
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`
     ]
   },
   gpt5: {
     asia: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
+      `${API_MANAGEMENT_BASE}/as1/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`
     ],
     europe: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
@@ -234,20 +204,20 @@ const endpointsMap = {
     ],
     africa: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`,
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`,
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
     ],
     other: [
       `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
+      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`
     ]
   }
 };
 
-function getEndpointsByTimezone(timezone, model = 'gpt4o') {
+function getEndpointsByTimezone(timezone, model = 'gpt5mini') {
   const tz = timezone?.split('/')[0]?.toLowerCase();
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
@@ -262,7 +232,7 @@ function getEndpointsByTimezone(timezone, model = 'gpt4o') {
   return endpoints;
 }
 
-async function callAiWithFailover(requestBody, timezone, model = 'gpt4o', retryCount = 0, dataRequest = null) {
+async function callAiWithFailover(requestBody, timezone, model = 'gpt5mini', retryCount = 0, dataRequest = null) {
     const RETRY_DELAY = 1000;
   
     const endpoints = getEndpointsByTimezone(timezone, model);
