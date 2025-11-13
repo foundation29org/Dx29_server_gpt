@@ -151,10 +151,10 @@ async function generateFollowUpQuestions(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
   let detectDurationMs = 0;
   let forwardDurationMs = 0;
   let reverseDurationMs = 0;
-  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -717,6 +717,9 @@ async function processFollowUpAnswers(req, res) {
   let translationChars = 0;
   let reverseTranslationChars = 0;
   let detectChars = 0;
+  let detectDurationMs = 0;
+  let forwardDurationMs = 0;
+  let reverseDurationMs = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -945,7 +948,7 @@ async function processFollowUpAnswers(req, res) {
         reverseTranslationChars = (updatedDescription ? updatedDescription.length : 0);
         const revStart = Date.now();
         updatedDescription = await translateInvertWithRetry(updatedDescription, detectedLanguage);
-        var reverseDurationMs = Date.now() - revStart;
+        reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -1199,6 +1202,12 @@ async function generateERQuestions(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
+  let detectDurationMs = 0;
+  let forwardDurationMs = 0;
+  let reverseDurationMs = 0;
+
+  
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
