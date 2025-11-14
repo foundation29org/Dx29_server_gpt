@@ -150,7 +150,8 @@ async function opinion(req, res) {
       versionModel: sanitizedData.versionModel,
       fileNames: sanitizedData.fileNames,
       tenantId: tenantId,
-      subscriptionId: subscriptionId
+      subscriptionId: subscriptionId,
+      isBetaPage: sanitizedData.isBetaPage || false
     });
     await stats.save();
 

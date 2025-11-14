@@ -16,7 +16,8 @@ const {
   translateTextWithRetry,
   translateInvertWithRetry,
   sanitizeInput,
-  sanitizeAiData
+  sanitizeAiData,
+  parseJsonWithFixes
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
@@ -25,6 +26,15 @@ const defaultModel = 'gpt5mini';
 const modelIntencion = 'gpt5mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt5mini';//'gpt5mini'; //'gpt5nano';
+
+
+// Regenerar HTML desde texto con marcadores [ANON-N]
+const toAnonymizedHtml = (txt) => {
+ if (!txt || typeof txt !== 'string') return '';
+ return txt
+   .replace(/\[ANON-(\d+)\]/g, (m, p1) => `<span style="background-color: black; display: inline-block; width:${parseInt(p1, 10)}em;">&nbsp;</span>`)
+   .replace(/\n/g, '<br>');
+};
 
 // Función para llamar a Sonar (Perplexity API)
 async function callSonarAPI(prompt, timezone, modelType) {
@@ -608,12 +618,17 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         if (userId) {
           await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
         }
-
+        let hasPersonalInfo = false;
         const anonymStartGeneral = Date.now();
         const anonymizedMedicalAnswer = await anonymizeText(medicalAnswer, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
         const anonymElapsedGeneral = Date.now() - anonymStartGeneral;
+        let tempQuestion = null;
         if (anonymizedMedicalAnswer && anonymizedMedicalAnswer.hasPersonalInfo) {
           medicalAnswer = anonymizedMedicalAnswer.markdownText || anonymizedMedicalAnswer.anonymizedText;
+          tempQuestion = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
+          data.description = tempQuestion.anonymizedText;
+          englishDescription = tempQuestion.anonymizedText;
+          hasPersonalInfo = anonymizedMedicalAnswer.hasPersonalInfo;
         }
         if (anonymizedMedicalAnswer && anonymizedMedicalAnswer.usage) {
           const anonCostGeneral = calculatePrice(anonymizedMedicalAnswer.usage, modelAnonymization);
@@ -632,14 +647,31 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           costTracking.total.tokens.output += anonCostGeneral.outputTokens;
           costTracking.total.tokens.total += anonCostGeneral.totalTokens;
         }
+        if(tempQuestion && anonymizedMedicalAnswer.hasPersonalInfo && tempQuestion.usage){
+          const anonCostQuestion = calculatePrice(tempQuestion.usage, modelAnonymization);
+          costTracking.etapa2_anonimizacion = {
+            cost: anonCostQuestion.totalCost,
+            tokens: {
+              input: anonCostQuestion.inputTokens,
+              output: anonCostQuestion.outputTokens,
+              total: anonCostQuestion.totalTokens
+            },
+            model: modelAnonymization,
+            duration: anonymElapsedGeneral
+          };
+          costTracking.total.cost += anonCostQuestion.totalCost;
+          costTracking.total.tokens.input += anonCostQuestion.inputTokens;
+          costTracking.total.tokens.output += anonCostQuestion.outputTokens;
+          costTracking.total.tokens.total += anonCostQuestion.totalTokens;
+        }
         const result = {
           result: 'success',
           data: [], // Sin diagnósticos para consultas generales
           medicalAnswer: medicalAnswer, // Respuesta educativa generada
           sonarData: sonarData, // Información de citas (solo disponible con Sonar)
           anonymization: {
-            hasPersonalInfo: false,
-            anonymizedText: '',
+            hasPersonalInfo: hasPersonalInfo,
+            anonymizedText: englishDescription,
             anonymizedTextHtml: ''
           },
           detectedLang: detectedLanguage,
@@ -849,6 +881,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             processingTime: Date.now() - startTime,
             status: 'success'
           };
+          if(hasPersonalInfo){
+            questionData.question.anonymizedText = data.description;
+          }
 
           await DiagnoseSessionService.saveQuestion(questionData);
           console.log('✅ Sesión de diagnóstico guardada exitosamente');
@@ -1213,21 +1248,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let parsedResponse = [];
     let parsedResponseEnglish;
     try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      let cleanResponse = aiResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
-      cleanResponse = cleanResponse.replace(/^```\s*|\s*```$/g, '');
-
-      // Fix quirúrgico para paréntesis sobrantes después de comillas de cierre
-      // Solo aplicamos el fix si el JSON inicial es inválido
-      try {
-        parsedResponse = JSON.parse(cleanResponse);
-      } catch (initialError) {
-        // Solo si falla el parseo inicial, aplicamos el fix específico
-        if (initialError.message.includes('Unexpected token )')) {
-          cleanResponse = cleanResponse.replace(/\"\)\s*\",\s*/g, '",');
-        }
-        parsedResponse = JSON.parse(cleanResponse);
-      }
+      parsedResponse = parseJsonWithFixes(aiResponseText);
       parsedResponseEnglish = parsedResponse;
       if (!Array.isArray(parsedResponse)) {
         throw new Error('Response is not an array');
@@ -1341,8 +1362,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         costTracking.total.tokens.total += etapa3Cost.totalTokens;
         console.log(`💰 Etapa 2 - Anonimización: ${formatCost(etapa3Cost.totalCost)} (${etapa3Cost.totalTokens} tokens)`);
       }
-      console.log('hasPersonalInfo', hasPersonalInfo);
-      console.log('detectedLanguage', detectedLanguage);
       if (hasPersonalInfo && detectedLanguage !== 'en') {
         // Azure Translator únicamente para texto anonimizado
         const anonChars = (anonymizedDescription ? anonymizedDescription.length : 0);
@@ -1350,7 +1369,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         if (anonChars > 0) {
           try {
             const revAnonStart = Date.now();
-            anonymizedDescription = await translateInvertWithRetry(anonymizedDescription, detectedLanguage);
+            // Traducir texto taggeado con [ANON-N] y luego construir HTML y texto plano
+            const translatedTagged = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
+            anonymizedResult.htmlText = toAnonymizedHtml(translatedTagged);
+            anonymizedDescription = translatedTagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
             const revAnonElapsed = Date.now() - revAnonStart;
             const reverseCost = (anonChars / 1000000) * 10;
             costTracking.reverse_anonymization = {
@@ -1367,14 +1389,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             throw translationErrorAzure;
           }
         }
-        // Regenerar HTML desde el texto traducido
-        const toAnonymizedHtml = (txt) => {
-          if (!txt || typeof txt !== 'string') return '';
-          return txt
-            .replace(/\[ANON-(\d+)\]/g, (m, p1) => `<span style="background-color: black; display: inline-block; width:${parseInt(p1)}em;">&nbsp;</span>`)
-            .replace(/\n/g, '<br>');
-        };
-        anonymizedResult.htmlText = toAnonymizedHtml(anonymizedDescription);
+      }else if (hasPersonalInfo && detectedLanguage === 'en') {
+        // Generar HTML y texto plano a partir del texto taggeado sin traducir
+        const tagged = anonymizedResult.htmlText;
+        anonymizedResult.htmlText = toAnonymizedHtml(tagged);
+        anonymizedDescription = tagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
       }
     }
 

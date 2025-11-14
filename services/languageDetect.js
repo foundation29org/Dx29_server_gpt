@@ -34,25 +34,18 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   }
 
   // Medium / Long: LLM detect (cap input to 1000 chars to reduce cost)
-  const model = length <= 1000 ? 'gpt5mini' : 'gpt5nano';
+  //const model = length <= 1000 ? 'gpt5mini' : 'gpt5nano';
+  const model = 'gpt5nano';
   const llmText = length > 1000 ? content.slice(0, 1000) : content;
-  const body = model === 'gpt5mini'
-    ? {
-        model: 'gpt-5-mini',
-        messages: [
-          { role: 'user', content: `Detect the language of the following text. Return ONLY the ISO 639-1 or 2-letter code (e.g., en, es). Text:` },
-          { role: 'user', content: llmText }
-        ],
-        reasoning_effort: 'low'
-      }
-    : {
-        model: 'gpt-5-nano',
-        messages: [
-          { role: 'user', content: `Detect the language of the following text. Return ONLY the ISO 639-1 or 2-letter code (e.g., en, es). Text:` },
-          { role: 'user', content: llmText }
-        ],
-        reasoning_effort: 'low'
-      };
+
+  const body = {
+    model: "gpt-5-nano",
+    messages: [
+      { role: 'developer', content: `Detect the language of the following text. Return ONLY the ISO 639-1 or 2-letter code (e.g., en, es). Text:` },
+      { role: 'user', content: llmText }
+    ],
+    reasoning_effort: "low" //minimal, low, medium, high
+  };
   try {
     const start = Date.now();
     const resp = await callAiWithFailover(body, timezone, model, 0, dataRequest);

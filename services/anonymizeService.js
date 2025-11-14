@@ -151,14 +151,14 @@ Original text:
       return match ? '█'.repeat(parseInt(match[1])) : part;
     }).join('');
 
-    resultResponse.htmlText = parts.map(part => {
+    resultResponse.htmlText = response;
+    /*resultResponse.htmlText = parts.map(part => {
       const match = part.match(/\[ANON-(\d+)\]/);
       return match
         ? `<span style="background-color: black; display: inline-block; width:${parseInt(match[1])}em;">&nbsp;</span>`
         : part;
-    }).join('').replace(/\n/g, '<br>');
+    }).join('').replace(/\n/g, '<br>');*/
   }
-
   return resultResponse;
 }
 

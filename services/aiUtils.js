@@ -5,6 +5,7 @@ const ApiManagementKey = config.API_MANAGEMENT_KEY;
 const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const insights = require('./insights');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const { jsonrepair } = require('jsonrepair');
 
 
 
@@ -318,6 +319,135 @@ async function callAiWithFailover(requestBody, timezone, model = 'gpt5mini', ret
     }
   }
 
+/**
+ * Repara arrays que se cierran con } en lugar de ]
+ * Detecta cuando un array está abierto y se encuentra un } que debería ser un ]
+ * @param {string} jsonText - El texto JSON a reparar
+ * @returns {string} - El JSON reparado
+ */
+function safelyFixUnclosedArrays(jsonText) {
+  let result = '';
+  let i = 0;
+  let inString = false;
+  const stack = []; // pila de delimitadores: '[' o '{'
+
+  while (i < jsonText.length) {
+    const char = jsonText[i];
+
+    // Contar barras invertidas antes del carácter actual
+    let backslashCount = 0;
+    let j = i - 1;
+    while (j >= 0 && jsonText[j] === '\\') {
+      backslashCount++;
+      j--;
+    }
+    const isEscaped = (backslashCount % 2) === 1;
+
+    // Entrar/salir de string
+    if (char === '"' && !isEscaped) {
+      inString = !inString;
+      result += char;
+      i++;
+      continue;
+    }
+
+    // Dentro de string, copiar tal cual
+    if (inString) {
+      result += char;
+      i++;
+      continue;
+    }
+
+    // Fuera de string: gestionar delimitadores
+    if (char === '[') {
+      stack.push('[');
+      result += char;
+    } else if (char === '{') {
+      stack.push('{');
+      result += char;
+    } else if (char === ']') {
+      // Cierra array si la cima es '['
+      if (stack.length > 0 && stack[stack.length - 1] === '[') {
+        stack.pop();
+      }
+      result += char;
+    } else if (char === '}') {
+      const top = stack.length > 0 ? stack[stack.length - 1] : null;
+
+      if (top === '{') {
+        // Cierre normal de objeto
+        stack.pop();
+        result += char;
+      } else if (top === '[') {
+        // Aquí está el caso roto: hay un '[' abierto y aparece un '}'
+        // Primero cerramos el array
+        stack.pop();
+        result += ']';
+
+        // Ahora procesamos el '}' de nuevo:
+        // Miramos la nueva cima de la pila
+        const newTop = stack[stack.length - 1];
+        if (newTop === '{') {
+          stack.pop();
+        }
+        result += char;
+      } else {
+        // No coincide con nada esperable, lo dejamos pasar
+        result += char;
+      }
+    } else {
+      result += char;
+    }
+
+    i++;
+  }
+
+  // Si quedan corchetes sin cerrar, los cerramos al final
+  while (stack.length > 0 && stack[stack.length - 1] === '[') {
+    stack.pop();
+    result += ']';
+  }
+
+  return result;
+}
+
+/**
+ * Parsea un JSON con fixes automáticos para errores comunes usando jsonrepair
+ * Maneja errores como barras invertidas mal escapadas, strings sin comillas, paréntesis sobrantes, etc.
+ * @param {string} jsonText - El texto JSON a parsear
+ * @returns {any} - El objeto parseado
+ * @throws {Error} - Si el JSON no puede ser parseado después de todos los intentos
+ */
+function parseJsonWithFixes(jsonText) {
+  let cleanResponse = jsonText.trim()
+    .replace(/^```json\s*|\s*```$/g, '')
+    .replace(/^```\s*|\s*```$/g, '');
+
+  // 1) Intento directo
+  try {
+    return JSON.parse(cleanResponse);
+  } catch (initialError) {
+
+    // 2) Fix seguro de arrays mal cerrados
+    cleanResponse = safelyFixUnclosedArrays(cleanResponse);
+
+    // 3) Reintento
+    try {
+      return JSON.parse(cleanResponse);
+    } catch (fixError) {
+
+      // 4) jsonrepair como última capa
+      try {
+        const repaired = jsonrepair(cleanResponse);
+        return JSON.parse(repaired);
+      } catch (repairError) {
+        // Si nada funciona, re-lanzamos el error original
+        throw initialError;
+      }
+    }
+  }
+}
+
 module.exports = {
   sanitizeAiData,
   sanitizeInput,
@@ -325,5 +455,6 @@ module.exports = {
   callAiWithFailover,
   detectLanguageWithRetry,
   translateTextWithRetry,
-  translateInvertWithRetry
+  translateInvertWithRetry,
+  parseJsonWithFixes
 }; 

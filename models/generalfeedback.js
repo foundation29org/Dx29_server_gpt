@@ -15,7 +15,8 @@ const GeneralfeedbackSchema = new Schema({
   email: String,
   date: { type: Date, default: Date.now },
   tenantId: String,
-  subscriptionId: String
+  subscriptionId: String,
+  isBetaPage: Boolean,
 });
 
 module.exports = mongoose.model('Generalfeedback', GeneralfeedbackSchema);

@@ -1,4 +1,4 @@
-const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, callAiWithFailover } = require('./aiUtils');
+const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -151,10 +151,10 @@ async function generateFollowUpQuestions(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
   let detectDurationMs = 0;
   let forwardDurationMs = 0;
   let reverseDurationMs = 0;
-  let detectChars = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -341,10 +341,8 @@ async function generateFollowUpQuestions(req, res) {
     // 3. Procesar la respuesta
     let questions;
     try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = diagnoseResponse.data.choices[0].message.content.trim();
-      const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
-      questions = JSON.parse(jsonContent);
+      const content = diagnoseResponse.data.choices[0].message.content;
+      questions = parseJsonWithFixes(content);
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
@@ -717,6 +715,9 @@ async function processFollowUpAnswers(req, res) {
   let translationChars = 0;
   let reverseTranslationChars = 0;
   let detectChars = 0;
+  let detectDurationMs = 0;
+  let forwardDurationMs = 0;
+  let reverseDurationMs = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -945,7 +946,7 @@ async function processFollowUpAnswers(req, res) {
         reverseTranslationChars = (updatedDescription ? updatedDescription.length : 0);
         const revStart = Date.now();
         updatedDescription = await translateInvertWithRetry(updatedDescription, detectedLanguage);
-        var reverseDurationMs = Date.now() - revStart;
+        reverseDurationMs = Date.now() - revStart;
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -1199,6 +1200,12 @@ async function generateERQuestions(req, res) {
     };
   let translationChars = 0;
   let reverseTranslationChars = 0;
+  let detectChars = 0;
+  let detectDurationMs = 0;
+  let forwardDurationMs = 0;
+  let reverseDurationMs = 0;
+
+  
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -1402,10 +1409,8 @@ async function generateERQuestions(req, res) {
     // 3. Procesar la respuesta
     let questions;
     try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = diagnoseResponse.data.choices[0].message.content.trim();
-      const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
-      questions = JSON.parse(jsonContent);
+      const content = diagnoseResponse.data.choices[0].message.content;
+      questions = parseJsonWithFixes(content);
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');

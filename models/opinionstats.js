@@ -13,6 +13,7 @@ const OpinionStatsSchema = new Schema({
   version: String,
   tenantId: String,
   subscriptionId: String,
+  isBetaPage: Boolean,
   createdAt: { type: Date, default: Date.now }
 });
 
