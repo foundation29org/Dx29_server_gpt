@@ -150,7 +150,7 @@ function sendMailErrorGPTIP (lang, req, response, requestInfo){
   return decoded
 }
 
-function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionId, fileNames, model){
+function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionId, fileNames, model, isBetaPage){
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
       TRANSPORTER_OPTIONS.auth.user
@@ -180,7 +180,8 @@ function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionId, fileNa
         fileNames : fileNames,
         model : model,
         tenantId: tenantId,
-        subscriptionId: subscriptionId
+        subscriptionId: subscriptionId,
+        isBetaPage: isBetaPage
       }
     };
 

@@ -142,6 +142,7 @@ async function sendGeneralFeedback(req, res) {
 
     // Sanitizar los datos
     const sanitizedData = sanitizeGeneralFeedbackData(req.body);
+    let isBetaPage = sanitizedData.isBetaPage || false;
     const generalfeedback = new Generalfeedback({
       myuuid: sanitizedData.myuuid,
       pregunta1: sanitizedData.value.pregunta1,
@@ -154,12 +155,13 @@ async function sendGeneralFeedback(req, res) {
       fileNames: sanitizedData.fileNames,
       model: sanitizedData.model,
       tenantId: tenantId,
-      subscriptionId: subscriptionId
+      subscriptionId: subscriptionId,
+      isBetaPage: isBetaPage
     });
     sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionId)
     await generalfeedback.save();
     try {
-      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionId, sanitizedData.fileNames, sanitizedData.model);
+      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionId, sanitizedData.fileNames, sanitizedData.model, isBetaPage);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');

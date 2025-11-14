@@ -16,7 +16,8 @@ const {
   translateTextWithRetry,
   translateInvertWithRetry,
   sanitizeInput,
-  sanitizeAiData
+  sanitizeAiData,
+  parseJsonWithFixes
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
@@ -1247,21 +1248,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let parsedResponse = [];
     let parsedResponseEnglish;
     try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      let cleanResponse = aiResponseText.trim().replace(/^```json\s*|\s*```$/g, '');
-      cleanResponse = cleanResponse.replace(/^```\s*|\s*```$/g, '');
-
-      // Fix quirúrgico para paréntesis sobrantes después de comillas de cierre
-      // Solo aplicamos el fix si el JSON inicial es inválido
-      try {
-        parsedResponse = JSON.parse(cleanResponse);
-      } catch (initialError) {
-        // Solo si falla el parseo inicial, aplicamos el fix específico
-        if (initialError.message.includes('Unexpected token )')) {
-          cleanResponse = cleanResponse.replace(/\"\)\s*\",\s*/g, '",');
-        }
-        parsedResponse = JSON.parse(cleanResponse);
-      }
+      parsedResponse = parseJsonWithFixes(aiResponseText);
       parsedResponseEnglish = parsedResponse;
       if (!Array.isArray(parsedResponse)) {
         throw new Error('Response is not an array');

@@ -1,4 +1,4 @@
-const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, callAiWithFailover } = require('./aiUtils');
+const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -341,10 +341,8 @@ async function generateFollowUpQuestions(req, res) {
     // 3. Procesar la respuesta
     let questions;
     try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = diagnoseResponse.data.choices[0].message.content.trim();
-      const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
-      questions = JSON.parse(jsonContent);
+      const content = diagnoseResponse.data.choices[0].message.content;
+      questions = parseJsonWithFixes(content);
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
@@ -1411,10 +1409,8 @@ async function generateERQuestions(req, res) {
     // 3. Procesar la respuesta
     let questions;
     try {
-      // Limpiar la respuesta para asegurar que es un JSON válido
-      const content = diagnoseResponse.data.choices[0].message.content.trim();
-      const jsonContent = content.replace(/^```json\s*|\s*```$/g, '');
-      questions = JSON.parse(jsonContent);
+      const content = diagnoseResponse.data.choices[0].message.content;
+      questions = parseJsonWithFixes(content);
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
