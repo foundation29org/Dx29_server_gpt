@@ -116,10 +116,6 @@ const CostTrackingSchema = new Schema({
   },
   
   // Información adicional
-  description: {
-    type: String,
-    required: true
-  },
   descriptionLength: {
     type: Number,
     default: 0
@@ -181,8 +177,7 @@ CostTrackingSchema.statics.createCostRecord = function(data) {
     stages: data.stages || [],
     totalCost: data.totalCost || 0,
     totalTokens: data.totalTokens || { input: 0, output: 0, total: 0 },
-    description: data.description,
-    descriptionLength: data.description ? data.description.length : 0,
+    descriptionLength: data.descriptionLength || 0,
     status: data.status || 'success',
     error: data.error,
     iframeParams: data.iframeParams || {},

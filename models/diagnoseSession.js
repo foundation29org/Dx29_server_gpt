@@ -82,6 +82,10 @@ const DiagnoseSessionSchema = new Schema({
     type: Date,
     default: Date.now,
     index: true
+  },
+  betaPage: {
+    type: Boolean,
+    default: false
   }
 });
 

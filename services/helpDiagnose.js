@@ -362,6 +362,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           iframeParams: data.iframeParams || {}
         };
 
+        insights.error(infoErrorlang);
+
         await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionId);
 
         try {
@@ -577,6 +579,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     console.log('Query type detected:', queryType);
+
+    // Variable para controlar si debemos guardar después de la anonimización (caso del else)
+    let shouldSaveAfterAnonymization = false;
 
     // Si es una consulta general para tenants especiales
     // en dxgpt solo habilitar en página beta (betaPage === true)
@@ -879,7 +884,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             timezone: data.timezone,
             lang: data.lang || 'en',
             processingTime: Date.now() - startTime,
-            status: 'success'
+            status: 'success',
+            betaPage: data.betaPage || false
           };
           if(hasPersonalInfo){
             questionData.question.anonymizedText = data.description;
@@ -914,51 +920,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId
         });
-        const questionData = {
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId,
-          iframeParams: data.iframeParams || {},
-          question: {
-            originalText: data.description,
-            detectedLanguage: detectedLanguage,
-            translatedText: englishDescription
-          },
-          answer: {
-            medicalAnswer: '',
-            queryType: queryType,
-            model: modelType
-          },
-          timezone: data.timezone,
-          lang: data.lang || 'en',
-          processingTime: Date.now() - startTime,
-          status: 'error'
-        };
-        await DiagnoseSessionService.saveQuestion(questionData);
         throw generalMedicalError;
       }
     } else {
-      const questionData = {
-        myuuid: data.myuuid,
-        tenantId: data.tenantId,
-        subscriptionId: data.subscriptionId,
-        iframeParams: data.iframeParams || {},
-        question: {
-          originalText: data.description,
-          detectedLanguage: detectedLanguage,
-          translatedText: englishDescription
-        },
-        answer: {
-          medicalAnswer: '',
-          queryType: queryType,
-          model: model
-        },
-        timezone: data.timezone,
-        lang: data.lang || 'en',
-        processingTime: Date.now() - startTime,
-        status: 'unknown'
-      };
-      DiagnoseSessionService.saveQuestion(questionData);
+      // Marcar que debemos guardar después de la anonimización (que se hace más adelante)
+      shouldSaveAfterAnonymization = true;
     }
 
     // Si no es una consulta diagnóstica, devolver respuesta vacía
@@ -1248,7 +1214,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let parsedResponse = [];
     let parsedResponseEnglish;
     try {
-      parsedResponse = parseJsonWithFixes(aiResponseText);
+      parsedResponse = await parseJsonWithFixes(aiResponseText, 'diagnosis');
       parsedResponseEnglish = parsedResponse;
       if (!Array.isArray(parsedResponse)) {
         throw new Error('Response is not an array');
@@ -1362,6 +1328,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         costTracking.total.tokens.total += etapa3Cost.totalTokens;
         console.log(`💰 Etapa 2 - Anonimización: ${formatCost(etapa3Cost.totalCost)} (${etapa3Cost.totalTokens} tokens)`);
       }
+      
       if (hasPersonalInfo && detectedLanguage !== 'en') {
         // Azure Translator únicamente para texto anonimizado
         const anonChars = (anonymizedDescription ? anonymizedDescription.length : 0);
@@ -1394,6 +1361,49 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         const tagged = anonymizedResult.htmlText;
         anonymizedResult.htmlText = toAnonymizedHtml(tagged);
         anonymizedDescription = tagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
+      }
+      
+      // Guardar sesión si venimos del else (no entró en el if de consulta general)
+      // Se hace después de toda la anonimización y traducción inversa
+      if (shouldSaveAfterAnonymization) {
+        try {
+          const questionData = {
+            myuuid: data.myuuid,
+            tenantId: data.tenantId,
+            subscriptionId: data.subscriptionId,
+            iframeParams: data.iframeParams || {},
+            question: {
+              originalText: anonymizedDescription,
+              detectedLanguage: detectedLanguage,
+              translatedText: anonymizedDescriptionEnglish
+            },
+            answer: {
+              medicalAnswer: '',
+              queryType: queryType,
+              model: model
+            },
+            timezone: data.timezone,
+            lang: data.lang || 'en',
+            processingTime: Date.now() - startTime,
+            status: 'success',
+            betaPage: data.betaPage || false
+          };
+          if (hasPersonalInfo) {
+            questionData.question.anonymizedText = anonymizedDescription;
+          }
+          await DiagnoseSessionService.saveQuestion(questionData);
+          console.log('✅ Sesión de diagnóstico guardada exitosamente después de anonimización');
+        } catch (sessionError) {
+          console.error('❌ Error guardando sesión de diagnóstico después de anonimización:', sessionError.message);
+          insights.error({
+            message: 'Error guardando sesión de diagnóstico después de anonimización',
+            error: sessionError.message,
+            myuuid: data.myuuid,
+            tenantId: data.tenantId,
+            subscriptionId: data.subscriptionId
+          });
+          // No lanzamos el error para no afectar la respuesta al usuario
+        }
       }
     }
 
@@ -1473,11 +1483,22 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         subscriptionId: data.subscriptionId,
         usage: usage,
         costTracking: costTracking,
-        iframeParams: data.iframeParams || {}
+        iframeParams: data.iframeParams || {},
+        betaPage: data.betaPage || false
       };
       if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
         console.log('Saving to blob');
         if (parsedResponse.length == 0) {
+          insights.error({
+            message: 'No response from AI for diagnoses',
+            requestData: data,
+            model: model,
+            response: aiResponse,
+            operation: 'diagnosis-full',
+            myuuid: data.myuuid,
+            tenantId: data.tenantId,
+            subscriptionId: data.subscriptionId
+          });
           await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
         } else {
           if (model == 'gpt4o') {

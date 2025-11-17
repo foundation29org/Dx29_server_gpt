@@ -57,7 +57,7 @@ class CostTrackingService {
       stages: stages,
       totalCost: totalCost,
       totalTokens: totalTokens,
-      description: data.description,
+      descriptionLength: data.description ? data.description.length : 0, // Solo guardamos la longitud
       status: status,
       error: error,
       iframeParams: data.iframeParams || {},
@@ -103,7 +103,7 @@ class CostTrackingService {
       stages: stages,
       totalCost: totalCost,
       totalTokens: totalTokens,
-      description: data.description,
+      descriptionLength: data.description ? data.description.length : 0, // Solo guardamos la longitud
       status: status,
       error: error,
       iframeParams: data.iframeParams || {},
@@ -145,7 +145,7 @@ class CostTrackingService {
       stages: stages,
       totalCost: 0,
       totalTokens: { input: 0, output: 0, total: 0 },
-      description: data.description || 'Database operation',
+      descriptionLength: data.description ? data.description.length : 0, // Solo guardamos la longitud
       status: status,
       error: error,
       iframeParams: data.iframeParams || {},

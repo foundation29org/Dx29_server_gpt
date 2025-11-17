@@ -342,7 +342,7 @@ async function generateFollowUpQuestions(req, res) {
     let questions;
     try {
       const content = diagnoseResponse.data.choices[0].message.content;
-      questions = parseJsonWithFixes(content);
+      questions = await parseJsonWithFixes(content, 'questions');
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
@@ -1410,7 +1410,7 @@ async function generateERQuestions(req, res) {
     let questions;
     try {
       const content = diagnoseResponse.data.choices[0].message.content;
-      questions = parseJsonWithFixes(content);
+      questions = await parseJsonWithFixes(content, 'questions');
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
