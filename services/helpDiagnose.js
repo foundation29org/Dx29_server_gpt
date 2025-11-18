@@ -278,6 +278,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   // Hoist queryType to function scope so it's available in error paths
   let queryType = 'unknown';
   let modelTranslation = 'gpt5nano'; //'gpt5mini';
+  
+  // Variable para rastrear si se detectó información personal (PII)
+  let hasPersonalInfo = false;
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
   const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
@@ -623,7 +626,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         if (userId) {
           await pubsubService.sendProgress(userId, 'anonymization', 'Anonymizing personal information...', 80);
         }
-        let hasPersonalInfo = false;
         let hasPersonalInfoQuestion = false;
         const anonymStartGeneral = Date.now();
         const anonymizedMedicalAnswer = await anonymizeText(medicalAnswer, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
@@ -955,7 +957,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           try {
             console.log('Anonimizando datos antes de guardar (GDPR compliance)');
             // Anonimizar datos antes de guardar (GDPR compliance)
-            let hasPersonalInfo = false;
+            // Usar variable local para no afectar el scope de función (IIFE asíncrono)
+            let hasPersonalInfoLocal = false;
             let anonymizedDescription = data.description;
             let anonymizedEnglishDescription = '';
             try {
@@ -967,7 +970,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               const anonymElapsedDescription = Date.now() - anonymStartDescription;
               if (anonymizedDescriptionResult && anonymizedDescriptionResult.hasPersonalInfo) {
                 anonymizedDescription = anonymizedDescriptionResult.anonymizedText || anonymizedDescriptionResult.markdownText;
-                hasPersonalInfo = true;
+                hasPersonalInfoLocal = true;
               }
               // Registrar costos de anonimización de description
               if (anonymizedDescriptionResult && anonymizedDescriptionResult.usage) {
@@ -1013,7 +1016,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               status: 'unknown',
               betaPage: data.betaPage || false
             };
-            if (hasPersonalInfo) {
+            if (hasPersonalInfoLocal) {
               questionData.question.anonymizedText = anonymizedDescription;
             }
             await DiagnoseSessionService.saveQuestion(questionData);
@@ -1395,7 +1398,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     };
     let anonymizedDescription = '';
     let anonymizedDescriptionEnglish = '';
-    let hasPersonalInfo = false;
 
     if (parsedResponse.length > 0) {
       const anonymStartMs = Date.now();
