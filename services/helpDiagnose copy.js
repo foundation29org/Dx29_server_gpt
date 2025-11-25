@@ -268,7 +268,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let reverseTranslationChars = 0; // traducción inversa al idioma original
 
   // Definir tenants especiales que requieren verificación de tipo de consulta
-  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
+  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'iasalut-ajuda-dx-dev', 'iasalut-ajuda-dx-prod', 'iasalut-ajuda-dx-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
   const isDxgptTenant = !!data.tenantId && data.tenantId.startsWith('dxgpt-');
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
