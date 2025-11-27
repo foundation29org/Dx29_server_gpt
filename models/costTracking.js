@@ -39,7 +39,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence'],
+    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence'],
     index: true
   },
   
@@ -88,7 +88,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'gpt-4o-mini', 'azure_ai_studio', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt4omini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence']
+      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt5', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence']
     },
     duration: {
       type: Number,  // Duración en milisegundos
@@ -116,10 +116,6 @@ const CostTrackingSchema = new Schema({
   },
   
   // Información adicional
-  description: {
-    type: String,
-    required: true
-  },
   descriptionLength: {
     type: Number,
     default: 0
@@ -181,8 +177,7 @@ CostTrackingSchema.statics.createCostRecord = function(data) {
     stages: data.stages || [],
     totalCost: data.totalCost || 0,
     totalTokens: data.totalTokens || { input: 0, output: 0, total: 0 },
-    description: data.description,
-    descriptionLength: data.description ? data.description.length : 0,
+    descriptionLength: data.descriptionLength || 0,
     status: data.status || 'success',
     error: data.error,
     iframeParams: data.iframeParams || {},

@@ -185,7 +185,8 @@ class QueueService {
             'es',
             'Error in health check',
             error.message,
-            null
+            '',
+            ''
           );
         } catch (emailError) {
           console.log('Fail sending email');

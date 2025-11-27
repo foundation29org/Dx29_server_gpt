@@ -31,8 +31,7 @@ const DiagnoseSessionSchema = new Schema({
       required: true
     },
     translatedText: {
-      type: String,
-      required: true
+      type: String
     },
     anonymizedText: {
       type: String,
@@ -82,6 +81,10 @@ const DiagnoseSessionSchema = new Schema({
     type: Date,
     default: Date.now,
     index: true
+  },
+  betaPage: {
+    type: Boolean,
+    default: false
   }
 });
 

@@ -6,7 +6,7 @@ Este sistema permite rastrear y analizar los costos de las operaciones de IA en 
 
 - ✅ **Modelo flexible de etapas** que se adapta a cada operación
 - ✅ **Cálculo automático de costos** por etapa individual
-- ✅ **Compatibilidad con múltiples modelos** (gpt4o, gpt5-mini, gpt5, o3, gpt-4o-mini, azure_ai_studio)
+- ✅ **Compatibilidad con múltiples modelos** (gpt4o, gpt5-mini, gpt5, o3)
 - ✅ **Soporte para operaciones complejas y simples**
 - ✅ **Almacenamiento en base de datos** MongoDB con índices optimizados
 - ✅ **APIs para consulta** de estadísticas y costos
@@ -89,8 +89,7 @@ Proporciona métodos especializados:
 - **Método**: `saveSimpleOperationCost()`
 
 **Nota**: `/disease/info` tiene casos especiales:
-- **questionType 0-4**: Usa GPT-4o con diferentes prompts
-- **questionType 5**: Usa Azure AI Studio (asistente con archivos adjuntos y file search) que internamente usa gpt-4o-mini
+- **questionType 0-5**: Usa GPT-4o con diferentes prompts
 
 ### 3. **Operaciones Solo BD** (`/opinion`, `/generalfeedback`)
 - **Etapas**: Database Save
@@ -163,25 +162,7 @@ const costTrackingData = {
   iframeParams: req.body.iframeParams || {}
 };
 
-// Para questionType 5 (Azure AI Studio - asistente con file search)
-const inputText = `${sanitizedData.disease} ${sanitizedData.medicalDescription || ''}`;
-const outputText = JSON.stringify(genomicRecommendations);
-const azureCosts = calculateAzureAIStudioCost(inputText, outputText);
-
-stages.push({
-  name: 'ai_call',
-  cost: azureCosts.totalCost,
-  tokens: { 
-    input: azureCosts.inputTokens, 
-    output: azureCosts.outputTokens, 
-    total: azureCosts.totalTokens 
-  },
-  model: 'azure_ai_studio',
-  duration: aiEndTime - aiStartTime,
-  success: true
-});
-
-// Para questionType 0-4 (GPT-4o)
+// Para questionType 0-5 (GPT-4o)
 stages.push({
   name: 'ai_call',
   cost: calculatePrice(usage, 'gpt4o'),
@@ -428,52 +409,6 @@ if (costTracking.etapa1_diagnosticos.cost > 0) {
 }
 // ... más etapas
 await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
-```
-
-## Notas Importantes
-
-### Azure AI Studio (Asistente con File Search)
-- **questionType 5** usa Azure AI Studio que es un asistente con archivos adjuntos (PDF, JSON) y file search
-- **Internamente usa gpt-4o-mini-2024-07-18** para procesar las consultas
-- **Los costos se calculan** usando `encodingForModel` con `gpt-4o-mini-2024-07-18`
-- **Precios específicos para asistente con file search** (julio 2025):
-  - Input tokens: $0.50 / 1M tokens
-  - Output tokens: $1.50 / 1M tokens
-- **Cálculo automático** de tokens y costos basado en input/output reales
-- **Nota**: Estos precios son específicos para Azure AI Studio con file search, no para gpt-4o-mini directo
-
-### Corrección de Modelo Azure AI Studio
-
-**Problema**: Error `Unknown model` al usar `gpt-4o-mini` con `encodingForModel`.
-
-**Solución**: Actualizar la función `calculateTokens` para usar directamente el modelo en lugar de mapear a encodings manuales, y usar el modelo específico `gpt-4o-mini-2024-07-18` para Azure AI Studio.
-
-**Antes**:
-```javascript
-function calculateTokens(text, model = 'gpt4o') {
-  let encoding;
-  switch (model) {
-    case 'gpt-4o-mini':
-      encoding = 'o200k_base'; // ❌ Mapeo manual incorrecto
-      break;
-    // ...
-  }
-  const enc = encodingForModel(encoding);
-  return enc.encode(text).length;
-}
-```
-
-**Después**:
-```javascript
-function calculateTokens(text, model = 'gpt4o') {
-  // ✅ Usar directamente el modelo para obtener el encoding correcto
-  const enc = encodingForModel(model);
-  return enc.encode(text).length;
-}
-
-// En calculateAzureAIStudioCost:
-const inputTokens = calculateTokens(inputText, 'gpt-4o-mini-2024-07-18');
-const outputTokens = calculateTokens(outputText, 'gpt-4o-mini-2024-07-18');
 ```
 
 ## Próximos Pasos

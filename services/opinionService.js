@@ -1,7 +1,5 @@
 const insights = require('./insights');
 const OpinionStats = require('../models/opinionstats');
-const { shouldSaveToBlob } = require('../utils/blobPolicy');
-const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const serviceEmail = require('./email');
 
 function getHeader(req, name) {
@@ -118,6 +116,20 @@ async function opinion(req, res) {
     const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
 
+    // Validar que al menos uno de los dos headers esté presente
+    // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+    if (!tenantId && !subscriptionId) {
+      insights.error({
+        message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+        headers: req.headers,
+        endpoint: 'opinion'
+      });
+      return res.status(400).send({
+        result: "error",
+        message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+      });
+    }
+
     const validationErrors = validateOpinionData(req.body);
     if (validationErrors.length > 0) {
       insights.error({
@@ -155,10 +167,6 @@ async function opinion(req, res) {
     });
     await stats.save();
 
-    // Guardar en blob SOLO si la política lo permite
-    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
-      await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
-    }
     res.status(200).send({ send: true })
   } catch (e) {
     let infoError = {

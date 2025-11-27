@@ -97,7 +97,7 @@ function sendMailError (lang, req, response){
   return decoded
 }
 
-function sendMailErrorGPTIP (lang, req, response, requestInfo){
+function sendMailErrorGPTIP (lang, req, response, tenantId, subscriptionId){
   
   const decoded = new Promise((resolve, reject) => {
     var maillistbcc = [
@@ -105,20 +105,17 @@ function sendMailErrorGPTIP (lang, req, response, requestInfo){
     ];
 
     let subject = 'Mensaje para soporte de DxGPT - Error GPT';
-    if(requestInfo){
-      if(requestInfo.headers){
-        if(requestInfo.headers['x-tenant-id']){
-          let xSubscriptionId = requestInfo.headers['x-subscription-id'] || '';
-          let xTenantId = requestInfo.headers['x-tenant-id'] || '';
-          if (xTenantId) {
-            subject = `Mensaje para soporte de DxGPT - Error GPT (${xTenantId})`;
-          }
-          if (xSubscriptionId) {
-            subject += ' - ' + xSubscriptionId;
-          }
-        }
-      }
+    if (tenantId) {
+      subject = `Mensaje para soporte de DxGPT - Error GPT (${tenantId})`;
     }
+    if (subscriptionId) {
+      subject += ' - ' + subscriptionId;
+    }
+    
+    // Manejar caso donde req o response pueden ser strings
+    const infoString = typeof req === 'string' ? req : JSON.stringify(req);
+    const responseString = typeof response === 'string' ? response : JSON.stringify(response);
+    
     var mailOptions = {
       to: TRANSPORTER_OPTIONS.auth.user,
       from: TRANSPORTER_OPTIONS.auth.user,
@@ -127,9 +124,10 @@ function sendMailErrorGPTIP (lang, req, response, requestInfo){
       template: 'mail_error_gpt_ip/_es',
       context: {
         lang : lang,
-        info: JSON.stringify(req), 
-        response: JSON.stringify(response),
-        requestInfo: JSON.stringify(requestInfo),
+        info: infoString, 
+        response: responseString,
+        tenantId: tenantId || '',
+        subscriptionId: subscriptionId || ''
       }
     };
 
@@ -202,45 +200,10 @@ function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionId, fileNa
   return decoded
 }
 
-function sendMailControlCall (req){
-  const decoded = new Promise((resolve, reject) => {
-    var maillistbcc = [
-      TRANSPORTER_OPTIONS.auth.user
-    ];
-
-    var mailOptions = {
-      to: TRANSPORTER_OPTIONS.auth.user,
-      from: TRANSPORTER_OPTIONS.auth.user,
-      bcc: maillistbcc,
-      subject: 'Mensaje para soporte de DxGPT - ControlCall',
-      template: 'mail_error_control_call/_es',
-      context: {
-        info: JSON.stringify(req)
-      }
-    };
-
-    transporter.sendMail(mailOptions, function(error, info){
-      if (error) {
-        insights.error(error);
-        console.log(error);
-        reject({
-          status: 401,
-          message: 'Fail sending email'
-        })
-      } else {
-        resolve("ok")
-      }
-    });
-
-  });
-  return decoded
-}
-
 
 module.exports = {
   sendMailSupport,
   sendMailError,
   sendMailErrorGPTIP,
-  sendMailGeneralFeedback,
-  sendMailControlCall
+  sendMailGeneralFeedback
 }
