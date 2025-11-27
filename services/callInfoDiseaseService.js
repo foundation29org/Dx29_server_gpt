@@ -5,7 +5,6 @@ const serviceEmail = require('./email');
 const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
 const azureAIGenomicService = require('./azureAIGenomicService');
-const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const { encodingForModel } = require("js-tiktoken");
 
 // Asegúrate de copiar la función getHeader si es necesaria
@@ -243,25 +242,6 @@ async function callInfoDisease(req, res) {
             console.log(`💰 callInfoDisease - Azure AI Studio (file search): $${formatCost(azureCosts.totalCost)} (${azureCosts.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
             console.log(`   Input: ${azureCosts.inputTokens} tokens ($${formatCost(azureCosts.inputCost)})`);
             console.log(`   Output: ${azureCosts.outputTokens} tokens ($${formatCost(azureCosts.outputCost)})`);
-  
-            // Guardar información para seguimiento
-            /*if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
-              let infoTrack = {
-                value: sanitizedData.disease,
-                valueEnglish: sanitizedData.disease,
-                myuuid: sanitizedData.myuuid,
-                operation: 'nhs_genomic_tests',
-                lang: sanitizedData.detectedLang || 'en',
-                response: genomicRecommendations,
-                header_language: header_language,
-                timezone: sanitizedData.timezone,
-                model: 'azure_ai_studio',
-                tenantId: tenantId,
-                subscriptionId: subscriptionId,
-                iframeParams: sanitizedData.iframeParams || {}
-              };
-              await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'nhs_genomic');
-            }*/
   
             // Procesar la respuesta JSON y convertir a HTML
             let processedContent = '';

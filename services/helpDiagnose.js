@@ -5,7 +5,6 @@ const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
 const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
-const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
@@ -282,9 +281,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   // Variable para rastrear si se detectó información personal (PII)
   let hasPersonalInfo = false;
 
-  // Definir tenants especiales que requieren verificación de tipo de consulta
-  const specialTenants = ['salud-gpt-dev', 'salud-gpt-prod', 'salud-gpt-local', 'sermas-gpt-dev', 'sermas-gpt-prod', 'sermas-gpt-local', 'iasalut-ajuda-dx-dev', 'iasalut-ajuda-dx-prod', 'iasalut-ajuda-dx-local', 'dxgpt-dev', 'dxgpt-prod', 'dxgpt-local'];
+  // Verificar si es un tenant de DxGPT (requiere betaPage para funcionalidades especiales)
   const isDxgptTenant = !!data.tenantId && data.tenantId.startsWith('dxgpt-');
+  // Verificar si es self-hosted
+  const isSelfHosted = config.IS_SELF_HOSTED;
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -509,9 +509,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     if (clinicalScenarioResult === 'true') {
       queryType = 'diagnostic';
     } else {
-      // Si no es diagnóstico y es un tenant especial,
-      // en dxgpt solo habilitar en página beta (betaPage === true)
-      if (specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true)) {
+      // Si no es diagnóstico, verificar si es pregunta médica general
+      // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
+      if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true)) {
         console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
 
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
@@ -586,9 +586,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // Variable para controlar si debemos guardar después de la anonimización (caso del else)
     let shouldSaveAfterAnonymization = false;
 
-    // Si es una consulta general para tenants especiales
-    // en dxgpt solo habilitar en página beta (betaPage === true)
-    if (specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
+    // Si es una consulta general médica
+    // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
+    if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
 
       await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
       console.log('General medical question detected for special tenant, generating educational response');
@@ -964,7 +964,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             try {
               const anonymStartDescription = Date.now();
               let anonymizedDescriptionResult = null;
-              if(specialTenants.includes(data.tenantId) && (!isDxgptTenant || data.betaPage === true) && queryType !== 'diagnostic'){
+              // Anonimizar solo si no es diagnóstico
+              // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
+              if((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType !== 'diagnostic'){
                 anonymizedDescriptionResult = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
               }
               const anonymElapsedDescription = Date.now() - anonymStartDescription;
@@ -1567,32 +1569,30 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         iframeParams: data.iframeParams || {},
         betaPage: data.betaPage || false
       };
-      if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
-        console.log('Saving to blob');
-        if (parsedResponse.length == 0) {
-          insights.error({
-            message: 'No response from AI for diagnoses',
-            requestData: data,
-            model: model,
-            response: aiResponse,
-            operation: 'diagnosis-full',
-            myuuid: data.myuuid,
-            tenantId: data.tenantId,
-            subscriptionId: data.subscriptionId
-          });
-          await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
-        } else {
-          if (model == 'gpt4o') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-          } else if (model == 'o3') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
-          } else if (model == 'gpt5') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
-          } else if (model == 'gpt5mini') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
-          } else if (model == 'gpt5nano') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
-          }
+      console.log('Saving to blob');
+      if (parsedResponse.length == 0) {
+        insights.error({
+          message: 'No response from AI for diagnoses',
+          requestData: data,
+          model: model,
+          response: aiResponse,
+          operation: 'diagnosis-full',
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
+      } else {
+        if (model == 'gpt4o') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
+        } else if (model == 'o3') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
+        } else if (model == 'gpt5') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
+        } else if (model == 'gpt5mini') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
+        } else if (model == 'gpt5nano') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
         }
       }
     }
@@ -2104,31 +2104,37 @@ async function diagnose(req, res) {
     sanitizedData.subscriptionId = subscriptionId;
 
     // 1. Si la petición va a la cola, responde como siempre
-    const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone, model);
-    if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-      const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
-      if (!queueInfo || !queueInfo.ticketId) {
-        return res.status(500).send({
-          result: 'error',
-          message: 'Error adding request to queue'
+    // Nota: Sistema de colas desactivado para self-hosted
+    if (!config.IS_SELF_HOSTED) {
+      const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone, model);
+      if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
+        const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
+        if (!queueInfo || !queueInfo.ticketId) {
+          return res.status(500).send({
+            result: 'error',
+            message: 'Error adding request to queue'
+          });
+        }
+        return res.status(200).send({
+          result: 'queued',
+          queueInfo: {
+            ticketId: queueInfo.ticketId,
+            position: queueInfo.queuePosition,
+            estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
+            region: queueInfo.region,
+            model: queueInfo.model,
+            utilizationPercentage: queueProperties.utilizationPercentage
+          }
         });
       }
-      return res.status(200).send({
-        result: 'queued',
-        queueInfo: {
-          ticketId: queueInfo.ticketId,
-          position: queueInfo.queuePosition,
-          estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
-          region: queueInfo.region,
-          model: queueInfo.model,
-          utilizationPercentage: queueProperties.utilizationPercentage
-        }
-      });
     }
 
     // 2. Si es modelo largo, responde rápido y procesa en background
     const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini' || model === 'gpt5');
-    const { region, model: registeredModel, queueKey } = await queueService.registerActiveRequest(sanitizedData.timezone, model);
+    // Para self-hosted, no usar el sistema de colas
+    const { region, model: registeredModel, queueKey } = config.IS_SELF_HOSTED 
+      ? { region: null, model, queueKey: null }
+      : await queueService.registerActiveRequest(sanitizedData.timezone, model);
 
     // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos
     if (sanitizedData.response_mode === 'direct') {

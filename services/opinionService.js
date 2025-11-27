@@ -1,7 +1,5 @@
 const insights = require('./insights');
 const OpinionStats = require('../models/opinionstats');
-const { shouldSaveToBlob } = require('../utils/blobPolicy');
-const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const serviceEmail = require('./email');
 
 function getHeader(req, name) {
@@ -155,10 +153,6 @@ async function opinion(req, res) {
     });
     await stats.save();
 
-    // Guardar en blob SOLO si la política lo permite
-    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
-      await blobOpenDx29Ctrl.createBlobOpenVote(sanitizedData);
-    }
     res.status(200).send({ send: true })
   } catch (e) {
     let infoError = {

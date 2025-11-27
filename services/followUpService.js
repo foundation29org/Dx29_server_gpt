@@ -4,7 +4,6 @@ const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
-const { shouldSaveToBlob } = require('../utils/blobPolicy');
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -400,27 +399,6 @@ async function generateFollowUpQuestions(req, res) {
         console.error('Translation error:', translationError);
         throw translationError;
       }
-    }
-
-    // 5. Guardar información para seguimiento
-    let infoTrack = {
-      value: description,
-      valueEnglish: englishDescription,
-      myuuid: sanitizedData.myuuid,
-      operation: 'follow-up',
-      lang: sanitizedData.lang,
-      diseases: diseases,
-      diseasesEnglish: englishDiseases,
-      questions: questions,
-      header_language: header_language,
-      timezone: timezone,
-      model: 'follow-up',
-      tenantId: tenantId,
-      subscriptionId: subscriptionId
-    };
-
-    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
-      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'follow-up');
     }
 
     // Guardar cost tracking multi-etapa
@@ -953,27 +931,6 @@ async function processFollowUpAnswers(req, res) {
       }
     }
 
-    // 5. Guardar información para seguimiento
-    let infoTrack = {
-      originalDescription: description,
-      originalDescriptionEnglish: englishDescription,
-      myuuid: sanitizedData.myuuid,
-      operation: 'process-follow-up',
-      lang: sanitizedData.lang,
-      answers: answers,
-      answersEnglish: englishAnswers,
-      updatedDescription: updatedDescription,
-      header_language: header_language,
-      timezone: timezone,
-      model: 'process-follow-up',
-      tenantId: tenantId,
-      subscriptionId: subscriptionId
-    };
-
-    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
-      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'process-follow-up');
-    }
-
     // Añadir stage de reverse_translation y guardar definitivamente el cost tracking
     try {
       if (reverseTranslationChars > 0) {
@@ -1467,25 +1424,6 @@ async function generateERQuestions(req, res) {
         console.error('Translation error:', translationError);
         throw translationError;
       }
-    }
-
-    // 5. Guardar información para seguimiento
-    let infoTrack = {
-      value: description,
-      valueEnglish: englishDescription,
-      myuuid: sanitizedData.myuuid,
-      operation: 'er-questions',
-      lang: sanitizedData.lang,
-      questions: questions,
-      header_language: header_language,
-      timezone: timezone,
-      model: 'er-questions',
-      tenantId: tenantId,
-      subscriptionId: subscriptionId
-    };
-
-    if (await shouldSaveToBlob({ tenantId, subscriptionId })) {
-      blobOpenDx29Ctrl.createBlobQuestions(infoTrack, 'er-questions');
     }
 
     // Añadir reverse_translation y guardar definitivamente

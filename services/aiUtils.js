@@ -1,11 +1,78 @@
 const config = require('../config');
 const axios = require('axios');
 const translationCtrl = require('./translation');
-const ApiManagementKey = config.API_MANAGEMENT_KEY;
-const API_MANAGEMENT_BASE = config.API_MANAGEMENT_BASE;
 const insights = require('./insights');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const { jsonrepair } = require('jsonrepair');
+
+// Detectar si es deployment self-hosted (sin APIM)
+const isSelfHosted = config.IS_SELF_HOSTED || false;
+
+// Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
+const getRegionToAzureOpenAI = () => {
+  if (isSelfHosted && config.AZURE_OPENAI_SELFHOSTED?.primary?.baseUrl && config.AZURE_OPENAI_SELFHOSTED?.primary?.apiKey) {
+    // Self-hosted: usar PRIMARY y FALLBACK
+    return {
+      primary: config.AZURE_OPENAI_SELFHOSTED.primary,
+      fallback: config.AZURE_OPENAI_SELFHOSTED.fallback
+    };
+  }
+  // SaaS Multi-tenant: usar regiones específicas (as1, as2, eu1, us1, us2)
+  return config.AZURE_OPENAI_REGIONS;
+};
+
+const regionToAzureOpenAI = getRegionToAzureOpenAI();
+
+// Mapeo de modelos a deployments y api-versions
+const modelConfig = {
+  'gpt4o': {
+    apiVersion: '2024-02-15-preview',
+    path: '/openai/deployments/normalcalls/chat/completions'
+  },
+  'gpt-5': {
+    apiVersion: '2025-01-01-preview',
+    path: '/openai/deployments/gpt-5/chat/completions'
+  },
+  'gpt-5-mini': {
+    apiVersion: '2025-01-01-preview',
+    path: '/openai/deployments/gpt-5-mini/chat/completions'
+  },
+  'gpt-5-nano': {
+    apiVersion: '2025-01-01-preview',
+    path: '/openai/deployments/gpt-5-nano/chat/completions'
+  },
+  'o3': {
+    apiVersion: '2025-04-01-preview',
+    path: '/openai/responses'
+  }
+};
+
+/**
+ * Construye la URL completa de Azure OpenAI para un endpoint específico
+ * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
+ * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5-nano, o3)
+ * @returns {Object} - { url, apiKey } o null si no está configurado
+ */
+function buildAzureOpenAIEndpoint(region, model) {
+  const regionConfig = regionToAzureOpenAI[region];
+  if (!regionConfig || !regionConfig.baseUrl || !regionConfig.apiKey) {
+    console.warn(`⚠️ Región ${region} no configurada o sin API key`);
+    return null;
+  }
+
+  // Buscar directamente en modelConfig
+  const modelCfg = modelConfig[model];
+  if (!modelCfg) {
+    console.warn(`⚠️ Modelo ${model} no tiene configuración en modelConfig`);
+    return null;
+  }
+
+  const url = `${regionConfig.baseUrl}${modelCfg.path}?api-version=${modelCfg.apiVersion}`;
+  return {
+    url,
+    apiKey: regionConfig.apiKey
+  };
+}
 
 
 
@@ -64,161 +131,198 @@ const translatorEndpoints = [
   // Puedes agregar más si es necesario
 ];
 
-// Mapa de endpoints para IA
+/**
+ * Obtiene los endpoints simplificados para self-hosted (solo PRIMARY y FALLBACK)
+ */
+function getSelfHostedEndpoints(model) {
+  const endpoints = [];
+  
+  // PRIMARY siempre está disponible si está configurado
+  if (regionToAzureOpenAI.primary && regionToAzureOpenAI.primary.baseUrl && regionToAzureOpenAI.primary.apiKey) {
+    const primaryEndpoint = buildAzureOpenAIEndpoint('primary', model);
+    if (primaryEndpoint) {
+      endpoints.push(primaryEndpoint);
+    }
+  }
+  
+  // FALLBACK solo si está configurado
+  if (regionToAzureOpenAI.fallback && regionToAzureOpenAI.fallback.baseUrl && regionToAzureOpenAI.fallback.apiKey) {
+    const fallbackEndpoint = buildAzureOpenAIEndpoint('fallback', model);
+    if (fallbackEndpoint) {
+      endpoints.push(fallbackEndpoint);
+    }
+  }
+  
+  return endpoints;
+}
+
+// Mapa de endpoints para IA - ahora apunta directamente a Azure OpenAI
+// El formato es: { url: string, apiKey: string }
 const endpointsMap = {
   gpt4o: {
     asia: [
-      `${API_MANAGEMENT_BASE}/as1/call/gpt4o`, // India: 428 calls/min
-      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
+      buildAzureOpenAIEndpoint('as1', 'gpt4o'),
+      buildAzureOpenAIEndpoint('as2', 'gpt4o')
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt4o`, // Sweden: 428 calls/min
-      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+      buildAzureOpenAIEndpoint('eu1', 'gpt4o'),
+      buildAzureOpenAIEndpoint('us1', 'gpt4o')
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
+      buildAzureOpenAIEndpoint('us1', 'gpt4o'),
+      buildAzureOpenAIEndpoint('us2', 'gpt4o')
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `${API_MANAGEMENT_BASE}/us2/call/gpt4o`  // EastUS2: 420 calls/min
+      buildAzureOpenAIEndpoint('us1', 'gpt4o'),
+      buildAzureOpenAIEndpoint('us2', 'gpt4o')
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
+      buildAzureOpenAIEndpoint('us1', 'gpt4o'),
+      buildAzureOpenAIEndpoint('as2', 'gpt4o')
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`, // Japan: 300 calls/min
-      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`  // WestUS: 857 calls/min como backup
+      buildAzureOpenAIEndpoint('as2', 'gpt4o'),
+      buildAzureOpenAIEndpoint('us1', 'gpt4o')
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/us1/call/gpt4o`, // WestUS: 857 calls/min
-      `${API_MANAGEMENT_BASE}/as2/call/gpt4o`  // Japan: 300 calls/min
+      buildAzureOpenAIEndpoint('us1', 'gpt4o'),
+      buildAzureOpenAIEndpoint('as2', 'gpt4o')
     ]
   },
   o3: {
     asia: [
-      `${API_MANAGEMENT_BASE}/as1/call/o3`, // Sweden
-      `${API_MANAGEMENT_BASE}/as2/call/o3`  // EastUS2
+      buildAzureOpenAIEndpoint('as1', 'o3'),
+      buildAzureOpenAIEndpoint('as2', 'o3')
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/o3`, // Sweden
-      `${API_MANAGEMENT_BASE}/us1/call/o3`  // EastUS2 como backup
+      buildAzureOpenAIEndpoint('eu1', 'o3'),
+      buildAzureOpenAIEndpoint('us1', 'o3')
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us1/call/o3`, // EastUS2
-      `${API_MANAGEMENT_BASE}/us2/call/o3`  // Sweden como backup
+      buildAzureOpenAIEndpoint('us1', 'o3'),
+      buildAzureOpenAIEndpoint('us2', 'o3')
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/us1/call/o3`, // EastUS2
-      `${API_MANAGEMENT_BASE}/us2/call/o3`  // Sweden como backup
+      buildAzureOpenAIEndpoint('us1', 'o3'),
+      buildAzureOpenAIEndpoint('us2', 'o3')
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/us1/call/o3`, // Sweden
-      `${API_MANAGEMENT_BASE}/as2/call/o3`  // EastUS2 como backup
+      buildAzureOpenAIEndpoint('us1', 'o3'),
+      buildAzureOpenAIEndpoint('as2', 'o3')
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/as2/call/o3`, // EastUS2
-      `${API_MANAGEMENT_BASE}/us1/call/o3`  // Sweden como backup
+      buildAzureOpenAIEndpoint('as2', 'o3'),
+      buildAzureOpenAIEndpoint('us1', 'o3')
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/us1/call/o3`, // Sweden
-      `${API_MANAGEMENT_BASE}/as2/call/o3`  // EastUS2 como backup
+      buildAzureOpenAIEndpoint('us1', 'o3'),
+      buildAzureOpenAIEndpoint('as2', 'o3')
     ]
   },
   gpt5nano: {
     asia: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano')
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano')
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano')
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano')
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano')
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano')
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-nano`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-nano`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-nano')
     ]
   },
   gpt5mini: {
     asia: [
-      `${API_MANAGEMENT_BASE}/as1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('as1', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5-mini')
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-mini')
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-mini')
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-mini')
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5-mini')
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('as2', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-mini')
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5-mini`,
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5-mini`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5-mini'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5-mini')
     ]
   },
   gpt5: {
     asia: [
-      `${API_MANAGEMENT_BASE}/as1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`
+      buildAzureOpenAIEndpoint('as1', 'gpt-5'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5')
     ],
     europe: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5')
     ],
     northamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5')
     ],
     southamerica: [
-      `${API_MANAGEMENT_BASE}/us2/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
+      buildAzureOpenAIEndpoint('us2', 'gpt-5'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5')
     ],
     africa: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5')
     ],
     oceania: [
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`
+      buildAzureOpenAIEndpoint('as2', 'gpt-5'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5')
     ],
     other: [
-      `${API_MANAGEMENT_BASE}/eu1/call/gpt-5`,
-      `${API_MANAGEMENT_BASE}/as2/call/gpt-5`
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5')
     ]
   }
 };
 
 function getEndpointsByTimezone(timezone, model = 'gpt5mini') {
+  // Si es self-hosted, usar endpoints simplificados (PRIMARY y FALLBACK)
+  if (isSelfHosted && regionToAzureOpenAI.primary) {
+    const endpoints = getSelfHostedEndpoints(model);
+    if (endpoints.length > 0) {
+      return endpoints;
+    }
+    // Si no hay endpoints configurados para self-hosted, lanzar error
+    throw new Error('No hay endpoints de Azure OpenAI configurados para self-hosted. Configura AZURE_OPENAI_SELFHOSTED_PRIMARY_BASE_URL y AZURE_OPENAI_SELFHOSTED_PRIMARY_KEY');
+  }
+
+  // Para SaaS Multi-tenant, usar lógica de regiones geográficas
   const tz = timezone?.split('/')[0]?.toLowerCase();
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
@@ -234,35 +338,56 @@ function getEndpointsByTimezone(timezone, model = 'gpt5mini') {
 }
 
 async function callAiWithFailover(requestBody, timezone, model = 'gpt5mini', retryCount = 0, dataRequest = null) {
-    const RETRY_DELAY = 1000;
+  const RETRY_DELAY = 1000;
+
+  const endpoints = getEndpointsByTimezone(timezone, model);
+  const endpoint = endpoints[retryCount];
   
-    const endpoints = getEndpointsByTimezone(timezone, model);
-    try {
-      const response = await axios.post(endpoints[retryCount], requestBody, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': ApiManagementKey,
-        }
-      });
-      return response;
-    } catch (error) {
-      if (retryCount < endpoints.length - 1) {
-        console.warn(`❌ Error en ${endpoints[retryCount]} — Reintentando en ${RETRY_DELAY}ms...`);
-        insights.error({
-          message: `Fallo AI endpoint ${endpoints[retryCount]}`,
-          error: error.message,
-          retryCount,
-          requestBody,
-          timezone,
-          model,
-          dataRequest
-        });
-        await delay(RETRY_DELAY);
-        return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
-      }
-      throw error;
+  // Si el endpoint es null (no configurado), intentar el siguiente
+  if (!endpoint || !endpoint.url || !endpoint.apiKey) {
+    if (retryCount < endpoints.length - 1) {
+      return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
     }
+    throw new Error(`No hay endpoints configurados para modelo ${model} en región ${timezone}`);
   }
+
+  try {
+    // Preparar el body
+    // Para o3, el endpoint /openai/responses requiere el campo 'model' en el body
+    // Para otros modelos (chat completions), el modelo está en la URL, así que lo removemos
+    const requestBodyCopy = { ...requestBody };
+    const isO3Endpoint = endpoint.url.includes('/openai/responses');
+    
+    if (!isO3Endpoint && requestBodyCopy.model) {
+      // Solo remover 'model' si NO es el endpoint de o3
+      delete requestBodyCopy.model;
+    }
+
+    const response = await axios.post(endpoint.url, requestBodyCopy, {
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': endpoint.apiKey
+      }
+    });
+    return response;
+  } catch (error) {
+    if (retryCount < endpoints.length - 1) {
+      console.warn(`❌ Error en ${endpoint.url} — Reintentando en ${RETRY_DELAY}ms...`);
+      insights.error({
+        message: `Fallo AI endpoint ${endpoint.url}`,
+        error: error.message,
+        retryCount,
+        requestBody,
+        timezone,
+        model,
+        dataRequest
+      });
+      await delay(RETRY_DELAY);
+      return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
+    }
+    throw error;
+  }
+}
 
   async function detectLanguageWithRetry(text, lang, retries = 3, delay = 1000) {
     for (let i = 0; i < translatorEndpoints.length; i++) {

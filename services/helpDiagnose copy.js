@@ -5,7 +5,6 @@ const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
 const PROMPTS = require('../assets/prompts');
 const queueService = require('./queueService');
-const { shouldSaveToBlob } = require('../utils/blobPolicy');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
@@ -1576,24 +1575,24 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         costTracking: costTracking,
         iframeParams: data.iframeParams || {}
       };
-      if (await shouldSaveToBlob({ tenantId: data.tenantId, subscriptionId: data.subscriptionId })) {
-        console.log('Saving to blob');
-        if (parsedResponse.length == 0) {
-          await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
-        } else {
-          if (model == 'gpt4o') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-          } else if (model == 'o3') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
-          }else if (model == 'gpt5') {
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
-          }else if (model == 'gpt5mini'){
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
-          }else if (model == 'gpt5nano'){
-            await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
-          }
+
+      console.log('Saving to blob');
+      if (parsedResponse.length == 0) {
+        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
+      } else {
+        if (model == 'gpt4o') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
+        } else if (model == 'o3') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
+        }else if (model == 'gpt5') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
+        }else if (model == 'gpt5mini'){
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
+        }else if (model == 'gpt5nano'){
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
         }
       }
+      
     }
 
     // Convertir costTracking a array de etapas para guardar en DB

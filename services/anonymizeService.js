@@ -1,5 +1,4 @@
 const { getEndpointsByTimezone } = require('./aiUtils');
-const ApiManagementKey = require('../config').API_MANAGEMENT_KEY;
 const insights = require('./insights');
 const axios = require('axios');
 const { encodingForModel } = require("js-tiktoken");
@@ -84,14 +83,30 @@ Original text:
     };
   }
 
-  async function tryEndpoint(endpointUrl) {
+  async function tryEndpoint(endpoint) {
+    // El endpoint ahora es un objeto { url, apiKey }
+    if (!endpoint || !endpoint.url || !endpoint.apiKey) {
+      throw new Error('Endpoint no configurado o inválido');
+    }
+
+    // Preparar el body
+    // Para o3, el endpoint /openai/responses requiere el campo 'model' en el body
+    // Para otros modelos (chat completions), el modelo está en la URL, así que lo removemos
+    const requestBodyCopy = { ...requestBody };
+    const isO3Endpoint = endpoint.url.includes('/openai/responses');
+    
+    if (!isO3Endpoint && requestBodyCopy.model) {
+      // Solo remover 'model' si NO es el endpoint de o3
+      delete requestBodyCopy.model;
+    }
+
     const result = await axios.post(
-      endpointUrl,
-      requestBody,
+      endpoint.url,
+      requestBodyCopy,
       {
         headers: {
           'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': ApiManagementKey,
+          'api-key': endpoint.apiKey
         }
       }
     );
@@ -100,17 +115,19 @@ Original text:
 
   let result;
   for (let i = 0; i < endpoints.length; i++) {
+    const endpoint = endpoints[i];
     try {
-      result = await tryEndpoint(endpoints[i]);
+      result = await tryEndpoint(endpoint);
       break; // Si la llamada es exitosa, salimos del bucle
     } catch (error) {
       if (i === endpoints.length - 1) {
         // Si es el último endpoint, propagamos el error
         throw error;
       }
-      console.log(`Failed to call ${endpoints[i]}, retrying with next endpoint in ${RETRY_DELAY}ms...`);
+      const endpointUrl = endpoint?.url || '[endpoint no configurado]';
+      console.log(`Failed to call ${endpointUrl}, retrying with next endpoint in ${RETRY_DELAY}ms...`);
       insights.error({
-        message: `Failed to call anonymization endpoint ${endpoints[i]}`,
+        message: `Failed to call anonymization endpoint ${endpointUrl}`,
         error: error.message,
         retryCount: i,
         operation: 'anonymizeText',
