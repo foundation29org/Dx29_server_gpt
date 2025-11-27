@@ -223,13 +223,8 @@ async function callInfoDisease(req, res) {
           prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
           break;
         case 5:
-          // Caso para pruebas genéticas - genérico, adaptado a la región del usuario
-          // Pasar el timezone directamente al prompt para que el modelo determine el país/región
-          const regionContext = sanitizedData.timezone 
-            ? ` The patient's timezone is ${sanitizedData.timezone}, which indicates their geographic location.`
-            : '';
-          
-          prompt = `What genetic tests would be appropriate for ${sanitizedData.disease} given the following medical description: ${sanitizedData.medicalDescription}?${regionContext} Please consider the healthcare system and available genetic tests in the patient's region/country. ${answerFormat}`;
+          // Caso para pruebas genéticas - genérico
+          prompt = `What genetic tests would be appropriate for ${sanitizedData.disease} given the following medical description: ${sanitizedData.medicalDescription}? ${answerFormat}`;
           
           // Continuar con el flujo normal usando callAiWithFailover
           break;
