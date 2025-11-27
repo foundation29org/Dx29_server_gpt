@@ -366,15 +366,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         };
 
         insights.error(infoErrorlang);
-
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, data.tenantId, data.subscriptionId);
-
         try {
           await serviceEmail.sendMailErrorGPTIP(
             data.lang,
-            data.description,
-            infoErrorlang,
-            requestInfo
+            'Translation error in diagnose',
+            translationError.message,
+            data.tenantId,
+            data.subscriptionId
           );
         } catch (emailError) {
           console.log('Fail sending email');
@@ -477,22 +475,19 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         });
 
         let infoErrorClinicalScenario = {
-          body: data,
           error: error.message,
           type: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
           detectedLanguage: detectedLanguage || 'unknown',
           model: model,
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
+          myuuid: data.myuuid
         };
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorClinicalScenario, data.tenantId, data.subscriptionId);
         try {
           serviceEmail.sendMailErrorGPTIP(
             data.lang,
-            data.description,
+            'Clinical scenario check skipped due to ERR_BAD_REQUEST',
             infoErrorClinicalScenario,
-            requestInfo
+            data.tenantId,
+            data.subscriptionId
           );
         } catch (emailError) {
           console.log('Fail sending email');
@@ -1135,18 +1130,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId
         });
-        let infoErrorClinicalScenario = {
-          body: data,
-          error: clinicalScenarioResult,
-          type: 'NON_DIAGNOSTIC_QUERY',
-          detectedLanguage: detectedLanguage || 'unknown',
-          model: model,
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
-        };
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorClinicalScenario, data.tenantId, data.subscriptionId);
-
+        
         return {
           result: 'success',
           data: [],
@@ -1356,21 +1340,17 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         let infoError = {
           myuuid: data.myuuid,
           operation: 'diagnosis-full',
-          lang: data.lang,
-          description: data.description,
           error: parseError,
           model: model,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId,
           iframeParams: data.iframeParams || {}
         };
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, data.tenantId, data.subscriptionId);
         try {
           await serviceEmail.sendMailErrorGPTIP(
             data.lang,
-            data.description,
+            'Failed to parse diagnosis output',
             infoError,
-            requestInfo
+            data.tenantId,
+            data.subscriptionId
           );
         } catch (emailError) {
           console.log('Fail sending email');
@@ -1581,7 +1561,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId
         });
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoTrack, data.tenantId, data.subscriptionId);
       } else {
         if (model == 'gpt4o') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
@@ -2069,6 +2048,20 @@ async function diagnose(req, res) {
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
 
+  // Validar que al menos uno de los dos headers esté presente
+  // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+  if (!tenantId && !subscriptionId) {
+    insights.error({
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+      headers: req.headers,
+      endpoint: 'diagnose'
+    });
+    return res.status(400).send({
+      result: "error",
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+    });
+  }
+
   const requestInfo = {
     method: req.method,
     url: req.url,
@@ -2188,24 +2181,20 @@ async function diagnose(req, res) {
     });
 
     let infoError = {
-      body: req.body,
       error: error.message,
       model: model,
       myuuid: req.body.myuuid,
-      tenantId: tenantId,
-      subscriptionId: subscriptionId,
       iframeParams: req.body.iframeParams || {}
     };
-
-    await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
 
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        req.body.description,
+        'Error in diagnose',
         infoError,
-        requestInfo
+        tenantId,
+        subscriptionId
       );
     } catch (emailError) {
       console.log('Fail sending email');

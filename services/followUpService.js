@@ -2,7 +2,6 @@ const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetr
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
-const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
 
 function getHeader(req, name) {
@@ -103,6 +102,19 @@ async function generateFollowUpQuestions(req, res) {
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
 
+  // Validar que al menos uno de los dos headers esté presente
+  // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+  if (!tenantId && !subscriptionId) {
+    insights.error({
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+      headers: req.headers,
+      endpoint: 'generateFollowUpQuestions'
+    });
+    return res.status(400).send({
+      result: "error",
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+    });
+  }
 
   const requestInfo = {
     method: req.method,
@@ -188,24 +200,20 @@ async function generateFollowUpQuestions(req, res) {
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
       let infoErrorlang = {
-        body: req.body,
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
         model: 'follow-up',
-        myuuid: req.body.myuuid,
-        tenantId: tenantId,
-        subscriptionId: subscriptionId
+        myuuid: req.body.myuuid
       };
-
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
 
       try {
         await serviceEmail.sendMailErrorGPTIP(
           lang,
-          req.body.description,
+          'Translation error in generateFollowUpQuestions',
           infoErrorlang,
-          requestInfo
+          tenantId,
+          subscriptionId
         );
       } catch (emailError) {
         console.log('Fail sending email');
@@ -361,27 +369,22 @@ async function generateFollowUpQuestions(req, res) {
       let infoError = {
         myuuid: sanitizedData.myuuid,
         operation: 'follow-up',
-        lang: sanitizedData.lang,
-        description: description,
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
-        model: 'follow-up',
-        tenantId: tenantId,
-        subscriptionId: subscriptionId
+        model: 'follow-up'
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
           sanitizedData.lang,
-          req.body.description,
-          infoError,
-          requestInfo
+          'Failed to parse follow-up questions',
+          JSON.stringify(infoError),
+          tenantId,
+          subscriptionId
         );
       } catch (emailError) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
-
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error" });
     }
 
@@ -504,21 +507,18 @@ async function generateFollowUpQuestions(req, res) {
       body: req.body,
       error: error.message,
       model: 'follow-up',
-      myuuid: req.body.myuuid,
-      tenantId: tenantId,
-      subscriptionId: subscriptionId
+      myuuid: req.body.myuuid
     };
     insights.error(infoError);
-
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
 
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        req.body.description,
-        infoError,
-        requestInfo
+        'Error in processFollowUpAnswers',
+        error.message,
+        tenantId,
+        subscriptionId
       );
     } catch (emailError) {
       console.log('Fail sending email');
@@ -645,6 +645,19 @@ async function processFollowUpAnswers(req, res) {
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
 
+  // Validar que al menos uno de los dos headers esté presente
+  // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+  if (!tenantId && !subscriptionId) {
+    insights.error({
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+      headers: req.headers,
+      endpoint: 'processFollowUpAnswers'
+    });
+    return res.status(400).send({
+      result: "error",
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+    });
+  }
 
   const requestInfo = {
     method: req.method,
@@ -737,24 +750,20 @@ async function processFollowUpAnswers(req, res) {
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
       let infoErrorlang = {
-        body: req.body,
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
         model: 'process-follow-up',
-        myuuid: req.body.myuuid,
-        tenantId: tenantId,
-        subscriptionId: subscriptionId
+        myuuid: req.body.myuuid
       };
-
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
 
       try {
         await serviceEmail.sendMailErrorGPTIP(
           lang,
-          req.body.description,
+          'Translation error in processFollowUpAnswers',
           infoErrorlang,
-          requestInfo
+          tenantId,
+          subscriptionId
         );
       } catch (emailError) {
         console.log('Fail sending email');
@@ -1009,15 +1018,15 @@ async function processFollowUpAnswers(req, res) {
     };
 
     insights.error(infoError);
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
 
     let lang = req.body.lang ? req.body.lang : 'en';
     try {
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        req.body.description,
-        infoError,
-        requestInfo
+        'Error in processFollowUpAnswers',
+        error.message,
+        tenantId,
+        subscriptionId
       );
     } catch (emailError) {
       console.log('Fail sending email');
@@ -1110,6 +1119,19 @@ async function generateERQuestions(req, res) {
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
 
+  // Validar que al menos uno de los dos headers esté presente
+  // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+  if (!tenantId && !subscriptionId) {
+    insights.error({
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+      headers: req.headers,
+      endpoint: 'generateERQuestions'
+    });
+    return res.status(400).send({
+      result: "error",
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+    });
+  }
 
   const requestInfo = {
     method: req.method,
@@ -1183,24 +1205,20 @@ async function generateERQuestions(req, res) {
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
       let infoErrorlang = {
-        body: req.body,
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
         detectedLanguage: detectedLanguage || 'unknown',
         model: 'follow-up',
         myuuid: req.body.myuuid,
-        tenantId: tenantId,
-        subscriptionId: subscriptionId
       };
-
-      await blobOpenDx29Ctrl.createBlobErrorsDx29(infoErrorlang, tenantId, subscriptionId);
 
       try {
         await serviceEmail.sendMailErrorGPTIP(
           lang,
-          req.body.description,
+          'Translation error in generateERQuestions',
           infoErrorlang,
-          requestInfo
+          tenantId,
+          subscriptionId
         );
       } catch (emailError) {
         console.log('Fail sending email');
@@ -1387,27 +1405,23 @@ async function generateERQuestions(req, res) {
       let infoError = {
         myuuid: sanitizedData.myuuid,
         operation: 'er-questions',
-        lang: sanitizedData.lang,
-        description: description,
         error: parseError.message,
         rawResponse: diagnoseResponse.data.choices[0].message.content,
-        model: 'follow-up',
-        tenantId: tenantId,
-        subscriptionId: subscriptionId
+        model: 'follow-up'
       };
       try {
         await serviceEmail.sendMailErrorGPTIP(
           sanitizedData.lang,
-          req.body.description,
+          'Failed to parse follow-up questions',
           infoError,
-          requestInfo
+          tenantId,
+          subscriptionId
         );
       } catch (emailError) {
         console.log('Fail sending email');
         insights.error(emailError);
       }
 
-      blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
       return res.status(200).send({ result: "error" });
     }
 
@@ -1503,16 +1517,14 @@ async function generateERQuestions(req, res) {
     };
     insights.error(infoError);
 
-
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        req.body.description,
-        infoError,
-        requestInfo
+        'Error in processFollowUpAnswers',
+        error.message,
+        tenantId,
+        subscriptionId
       );
     } catch (emailError) {
       console.log('Fail sending email');

@@ -79,8 +79,6 @@ class CostTrackingService {
    * @param {String} status - Estado de la operación
    * @param {Object} error - Información de error (opcional)
    * 
-   * Nota: Para Azure AI Studio, los costos reales se calculan por el servicio
-   * y se reflejan en la facturación de Azure AI Studio (usa gpt-4o-mini por detrás)
    */
   static async saveSimpleOperationCost(data, operation, aiStage, status = 'success', error = null) {
     const stages = [aiStage];

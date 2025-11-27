@@ -5,7 +5,6 @@ const axios = require('axios');
 const summarizeCtrl = require('../../services/summarizeService')
 const blobFiles = require('../../services/blobFiles');
 const insights = require('../../services/insights');
-const blobOpenDx29Ctrl = require('../../services/blobOpenDx29');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
 const { calculatePrice, formatCost } = require('../../services/costUtils');
@@ -116,6 +115,20 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
 const processMultimodalInput = async (req, res) => {
     const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
+
+    // Validar que al menos uno de los dos headers esté presente
+    // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+    if (!tenantId && !subscriptionId) {
+        insights.error({
+            message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+            headers: req.headers,
+            endpoint: 'processMultimodalInput'
+        });
+        return res.status(400).send({
+            result: "error",
+            message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+        });
+    }
     
     const requestInfo = {
         method: req.method,
@@ -446,22 +459,18 @@ const processMultimodalInput = async (req, res) => {
         });
         
         let infoError = {
-            body: req.body,
             error: error.message,
-            myuuid: req.body.myuuid,
-            tenantId: tenantId,
-            subscriptionId: subscriptionId
+            myuuid: req.body.myuuid
         };
-        
-        await blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
         
         try {
             let lang = req.body.lang ? req.body.lang : 'en';
             await serviceEmail.sendMailErrorGPTIP(
                 lang,
-                req.body.text || 'Multimodal input error',
+                'Multimodal input error',
                 infoError,
-                requestInfo
+                tenantId,
+                subscriptionId
             );
         } catch (emailError) {
             console.error('Error sending error email:', emailError);

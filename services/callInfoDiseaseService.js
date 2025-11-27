@@ -1,10 +1,8 @@
 const { translateInvertWithRetry, sanitizeInput, callAiWithFailover } = require('./aiUtils');
-const { calculatePrice, formatCost, calculateAzureAIStudioCost } = require('./costUtils');
+const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
-const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
-const azureAIGenomicService = require('./azureAIGenomicService');
 const { encodingForModel } = require("js-tiktoken");
 
 // Asegúrate de copiar la función getHeader si es necesaria
@@ -134,6 +132,20 @@ async function callInfoDisease(req, res) {
     const header_language = req.headers['accept-language'];
     const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
+
+    // Validar que al menos uno de los dos headers esté presente
+    // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+    if (!tenantId && !subscriptionId) {
+        insights.error({
+            message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+            headers: req.headers,
+            endpoint: 'callInfoDisease'
+        });
+        return res.status(400).send({
+            result: "error",
+            message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+        });
+    }
   
     const requestInfo = {
       method: req.method,
@@ -211,322 +223,16 @@ async function callInfoDisease(req, res) {
           prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
           break;
         case 5:
-          // Caso especial para pruebas genéticas del NHS - usar Azure AI Studio
-          try {
-            aiStartTime = Date.now();
-            const genomicRecommendations = await azureAIGenomicService.generateGenomicTestRecommendations(
-              sanitizedData.disease, 
-              sanitizedData.medicalDescription
-            );
-            aiEndTime = Date.now();
-            
-            // Calcular tokens y costos para Azure AI Studio (asistente con file search)
-            const inputText = `${sanitizedData.disease} ${sanitizedData.medicalDescription || ''}`;
-            const outputText = JSON.stringify(genomicRecommendations);
-            const azureCosts = calculateAzureAIStudioCost(inputText, outputText);
-            
-            // Agregar etapa de IA para Azure AI Studio (asistente con file search)
-            stages.push({
-              name: 'ai_call',
-              cost: azureCosts.totalCost,
-              tokens: { 
-                input: azureCosts.inputTokens, 
-                output: azureCosts.outputTokens, 
-                total: azureCosts.totalTokens 
-              },
-              model: 'azure_ai_studio',
-              duration: aiEndTime - aiStartTime,
-              success: true
-            });
-            
-            console.log(`💰 callInfoDisease - Azure AI Studio (file search): $${formatCost(azureCosts.totalCost)} (${azureCosts.totalTokens} tokens, ${aiEndTime - aiStartTime}ms)`);
-            console.log(`   Input: ${azureCosts.inputTokens} tokens ($${formatCost(azureCosts.inputCost)})`);
-            console.log(`   Output: ${azureCosts.outputTokens} tokens ($${formatCost(azureCosts.outputCost)})`);
-  
-            // Procesar la respuesta JSON y convertir a HTML
-            let processedContent = '';
-            
-            // Definir sectionTitles fuera del bloque if/else para que esté disponible en ambos casos
-            let sectionTitles = {
-              source: 'Source:'
-            };
-            
-            if (genomicRecommendations.hasRecommendations && genomicRecommendations.recommendations) {
-              const data = genomicRecommendations.recommendations;
-              
-              // Verificar si no se encontraron pruebas
-              const noTestsFound = data.noTestsFound === true || 
-                                  (data.recommendedTests && data.recommendedTests.length === 0);
-              
-              if (noTestsFound) {
-                // Caso: No hay pruebas genéticas disponibles
-                let noTestsLabels = {
-                  consultationResult: 'CONSULTATION RESULT:',
-                  noTestsFound: 'No specific genetic tests were found in the NHS directory for this condition.',
-                  reason: 'Reason:',
-                  alternativeRecommendations: 'ALTERNATIVE RECOMMENDATIONS:',
-                  suggestedNextSteps: 'SUGGESTED NEXT STEPS:',
-                  applicationProcess: 'Application process:',
-                  specialConsiderations: 'Special considerations:',
-                  consultGeneticist: 'Consult with a clinical geneticist for individualized assessment',
-                  considerPathways: 'Consider whether the condition might qualify for testing through other pathways',
-                  evaluateResearch: 'Evaluate if research or commercial tests are available',
-                  reviewCriteria: 'Review if there are special eligibility criteria that might apply'
-                };
-                
-                // Traducir etiquetas si es necesario
-                if (sanitizedData.detectedLang !== 'en') {
-                  try {
-                    reverseTranslationStartTime = Date.now();
-                    const labelsToTranslate = Object.values(noTestsLabels).concat([sectionTitles.source]);
-                    const labelsChars = labelsToTranslate.reduce((sum, s) => sum + (s ? s.length : 0), 0);
-                    reverseTranslationChars += labelsChars;
-                    const translatedLabels = await Promise.all(
-                      labelsToTranslate.map(label => translateInvertWithRetry(label, sanitizedData.detectedLang))
-                    );
-                    reverseTranslationEndTime = Date.now();
-                    
-                    // Actualizar las etiquetas traducidas
-                    Object.keys(noTestsLabels).forEach((key, index) => {
-                      noTestsLabels[key] = translatedLabels[index];
-                    });
-                    
-                    // Actualizar sectionTitles.source
-                    sectionTitles.source = translatedLabels[translatedLabels.length - 1];
-                    
-                  } catch (translationError) {
-                    console.error('Translation error for no-tests labels:', translationError);
-                    insights.error({
-                      message: 'Error traduciendo etiquetas de no-tests',
-                      error: translationError.message,
-                      disease: sanitizedData.disease,
-                      tenantId: tenantId,
-                      subscriptionId: subscriptionId
-                    });
-                  }
-                }
-                
-                processedContent = `<p><strong>${noTestsLabels.consultationResult}</strong></p>`;
-                processedContent += `<p><strong>${noTestsLabels.noTestsFound}</strong></p>`;
-                
-                if (data.reason) {
-                  processedContent += `<p><strong>${noTestsLabels.reason}</strong> ${data.reason}</p>`;
-                }
-                
-                processedContent += `<p><strong>${noTestsLabels.alternativeRecommendations}</strong></p>`;
-                if (data.additionalInformation) {
-                  processedContent += '<ul>';
-                  processedContent += `<li><strong>${noTestsLabels.applicationProcess}</strong> ${data.additionalInformation.applicationProcess}</li>`;
-                  processedContent += `<li><strong>${noTestsLabels.specialConsiderations}</strong> ${data.additionalInformation.specialConsiderations}</li>`;
-                  processedContent += '</ul>';
-                }
-                
-                processedContent += `<p><strong>${noTestsLabels.suggestedNextSteps}</strong></p>`;
-                processedContent += '<ul>';
-                processedContent += `<li>${noTestsLabels.consultGeneticist}</li>`;
-                processedContent += `<li>${noTestsLabels.considerPathways}</li>`;
-                processedContent += `<li>${noTestsLabels.evaluateResearch}</li>`;
-                processedContent += `<li>${noTestsLabels.reviewCriteria}</li>`;
-                processedContent += '</ul>';
-                
-              } else {
-                // Caso: Se encontraron pruebas genéticas
-                sectionTitles = {
-                  listTitle: 'LIST OF RECOMMENDED TESTS:',
-                  eligibilityTitle: 'ELIGIBILITY CRITERIA:',
-                  additionalTitle: 'ADDITIONAL INFORMATION:',
-                  source: 'Source:'
-                };
-                
-                let fieldLabels = {
-                  test: 'test:',
-                  testName: 'Test name:',
-                  targetGenes: 'Target genes:',
-                  testMethod: 'Test method:',
-                  category: 'Category:',
-                  documentSection: 'Section of the eligibility document:',
-                  nhsCriteria: 'NHS specific criteria:',
-                  specialties: 'Specialties that can request the test:',
-                  applicationProcess: 'Application process:',
-                  expectedResponseTimes: 'Expected response times:',
-                  specialConsiderations: 'Special considerations:'
-                };
-                
-                
-                processedContent = `<p><strong>${sectionTitles.listTitle}</strong></p>`;
-                
-                if (data.recommendedTests && data.recommendedTests.length > 0) {
-                  processedContent += '<ul>';
-                  data.recommendedTests.forEach(test => {
-                    processedContent += `<li><strong>${fieldLabels.test}</strong> ${test.testCode}</li>`;
-                    processedContent += `<li><strong>${fieldLabels.testName}</strong> ${test.testName}</li>`;
-                    processedContent += `<li><strong>${fieldLabels.targetGenes}</strong> ${test.targetGenes}</li>`;
-                    processedContent += `<li><strong>${fieldLabels.testMethod}</strong> ${test.testMethod}</li>`;
-                    processedContent += `<li><strong>${fieldLabels.category}</strong> ${test.category}</li>`;
-                  });
-                  processedContent += '</ul>';
-                }
-                
-                processedContent += `<p><strong>${sectionTitles.eligibilityTitle}</strong></p>`;
-                if (data.eligibilityCriteria) {
-                  processedContent += '<ul>';
-                  processedContent += `<li><strong>${fieldLabels.documentSection}</strong> ${data.eligibilityCriteria.documentSection}</li>`;
-                  processedContent += `<li><strong>${fieldLabels.nhsCriteria}</strong> ${data.eligibilityCriteria.nhsCriteria}</li>`;
-                  if (data.eligibilityCriteria.specialties && data.eligibilityCriteria.specialties.length > 0) {
-                    processedContent += `<li><strong>${fieldLabels.specialties}</strong> ${data.eligibilityCriteria.specialties.join(', ')}</li>`;
-                  }
-                  processedContent += '</ul>';
-                }
-                
-                processedContent += `<p><strong>${sectionTitles.additionalTitle}</strong></p>`;
-                if (data.additionalInformation) {
-                  processedContent += '<ul>';
-                  processedContent += `<li><strong>${fieldLabels.applicationProcess}</strong> ${data.additionalInformation.applicationProcess}</li>`;
-                  processedContent += `<li><strong>${fieldLabels.expectedResponseTimes}</strong> ${data.additionalInformation.expectedResponseTimes}</li>`;
-                  processedContent += `<li><strong>${fieldLabels.specialConsiderations}</strong> ${data.additionalInformation.specialConsiderations}</li>`;
-                  processedContent += '</ul>';
-                }
-              }
-              
-              processedContent += `<p>${sectionTitles.source} ${data.source || 'NHS Genomic Test Directory'}</p>`;
-              processedContent += `<p><img src="assets/img/home/nhs.png" alt="NHS Logo" style="max-width: 200px; height: auto; margin-top: 10px;"></p>`;
-              
-              // Añadir mensaje informativo para todos los usuarios
-              let disclaimerMessage = 'NHS genomic test information is only applicable within the United Kingdom. Please consult with local medical services for equivalent options in your country.';
-              processedContent += `<p style="margin-top: 15px; padding: 10px; background-color: #f8f9fa; border-left: 4px solid #007bff; font-style: italic;">${disclaimerMessage}</p>`;
-              
-              // Traducir todo el contenido de una vez si es necesario
-              if (sanitizedData.detectedLang !== 'en') {
-                try {
-                  reverseTranslationStartTime = Date.now();
-                  reverseTranslationChars += (processedContent ? processedContent.length : 0);
-                  processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
-                  reverseTranslationEndTime = Date.now();
-                } catch (translationError) {
-                  console.error('Translation error for processed content:', translationError);
-                  insights.error({
-                    message: 'Error traduciendo contenido procesado',
-                    error: translationError.message,
-                    disease: sanitizedData.disease,
-                    tenantId: tenantId,
-                    subscriptionId: subscriptionId
-                  });
-                }
-              }
-            } else {
-              let errorMessage = 'Unable to generate recommendations at this time. Please consult with a clinical geneticist.';
-              
-              // Traducir si es necesario
-              if (sanitizedData.detectedLang !== 'en') {
-                try {
-                  errorMessage = await translateInvertWithRetry(errorMessage, sanitizedData.detectedLang);
-                } catch (translationError) {
-                  console.error('Translation error for error message:', translationError);
-                  insights.error({
-                    message: 'Error traduciendo mensaje de error',
-                    error: translationError.message,
-                    disease: sanitizedData.disease,
-                    tenantId: tenantId,
-                    subscriptionId: subscriptionId
-                  });
-                }
-              }
-              
-              let errorTitle = 'Error';
-              
-              // Traducir título si es necesario
-              if (sanitizedData.detectedLang !== 'en') {
-                try {
-                  errorTitle = await translateInvertWithRetry(errorTitle, sanitizedData.detectedLang);
-                } catch (translationError) {
-                  console.error('Translation error for error title:', translationError);
-                }
-              }
-              
-              processedContent = `<p><strong>${errorTitle}</strong></p><p>${genomicRecommendations.message || errorMessage}</p>`;
-            }
-  
-            // Guardar cost tracking (multi-etapa)
-            try {
-              // Añadir etapa de traducción inversa agregada si aplica
-              if (reverseTranslationChars > 0) {
-                const reverseCost = (reverseTranslationChars / 1000000) * 10;
-                stages.push({
-                  name: 'reverse_translation',
-                  cost: reverseCost,
-                  tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
-                  model: 'translation_service',
-                  duration: (reverseTranslationEndTime && reverseTranslationStartTime) ? (reverseTranslationEndTime - reverseTranslationStartTime) : 0,
-                  success: true
-                });
-              }
-              const totalCost = stages.reduce((sum, st) => sum + (st.cost || 0), 0);
-              const totalTokens = {
-                input: stages.reduce((sum, st) => sum + (st.tokens?.input || 0), 0),
-                output: stages.reduce((sum, st) => sum + (st.tokens?.output || 0), 0),
-                total: stages.reduce((sum, st) => sum + (st.tokens?.total || 0), 0)
-              };
-              await CostTrackingService.saveCostRecord({
-                myuuid: costTrackingData.myuuid,
-                tenantId: costTrackingData.tenantId,
-                subscriptionId: costTrackingData.subscriptionId,
-                operation: 'info_disease',
-                model: stages[0]?.model || 'azure_ai_studio',
-                lang: costTrackingData.lang,
-                timezone: costTrackingData.timezone,
-                stages,
-                totalCost,
-                totalTokens,
-                description: costTrackingData.description,
-                status: 'success',
-                iframeParams: costTrackingData.iframeParams,
-                operationData: { detectedLanguage: costTrackingData.lang }
-              });
-              // Desglose de costos en consola
-              console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (NHS Genomic):`);
-              stages.forEach((stage, index) => {
-                console.log(`   Etapa ${index + 1} - ${stage.name}: $${formatCost(stage.cost)} (${stage.tokens?.total || 0} tokens, ${stage.duration}ms, model=${stage.model})`);
-              });
-              console.log(`   ──────────────────────────`);
-              console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens.total} tokens)`);
-            } catch (costError) {
-              console.error('Error guardando cost tracking:', costError);
-              insights.error({
-                message: 'Error guardando cost tracking en callInfoDisease',
-                error: costError.message,
-                tenantId: tenantId,
-                subscriptionId: subscriptionId
-              });
-            }
-  
-            return res.status(200).send({
-              result: 'success',
-              data: {
-                type: 'general',
-                content: processedContent
-              }
-            });
-  
-          } catch (error) {
-            console.error('Error en Azure AI Genomic service:', error);
-            insights.error({
-              message: 'Error en Azure AI Genomic service',
-              error: error.message,
-              disease: sanitizedData.disease,
-              tenantId: tenantId,
-              subscriptionId: subscriptionId
-            });
-  
-            const errorMessage = "Unable to generate recommendations at this time. Please consult with a clinical geneticist.";
-  
-            return res.status(200).send({
-              result: 'success',
-              data: {
-                type: 'general',
-                content: `<p><strong>Error</strong></p><p>${errorMessage}</p>`
-              }
-            });
-          }
+          // Caso para pruebas genéticas - genérico, adaptado a la región del usuario
+          // Pasar el timezone directamente al prompt para que el modelo determine el país/región
+          const regionContext = sanitizedData.timezone 
+            ? ` The patient's timezone is ${sanitizedData.timezone}, which indicates their geographic location.`
+            : '';
+          
+          prompt = `What genetic tests would be appropriate for ${sanitizedData.disease} given the following medical description: ${sanitizedData.medicalDescription}?${regionContext} Please consider the healthcare system and available genetic tests in the patient's region/country. ${answerFormat}`;
+          
+          // Continuar con el flujo normal usando callAiWithFailover
+          break;
         default:
           return res.status(400).send({ result: "error", message: "Invalid question type" });
       }
@@ -623,7 +329,7 @@ async function callInfoDisease(req, res) {
       
       if (!result.data.choices[0].message.content) {
         try {
-          await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, req.body, result.data.choices, requestInfo);
+          await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, 'Fail callInfoDisease AI call', result.data.choices, tenantId, subscriptionId);
         } catch (emailError) {
           console.log('Fail sending email');
         }
@@ -637,7 +343,6 @@ async function callInfoDisease(req, res) {
           subscriptionId: subscriptionId
         }
         insights.error(infoError);
-        blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
         
         // Guardar cost tracking con error
         try {
@@ -918,21 +623,15 @@ async function callInfoDisease(req, res) {
         tenantId: tenantId,
         subscriptionId: subscriptionId
       });
-      blobOpenDx29Ctrl.createBlobErrorsDx29(errorDetails, tenantId, subscriptionId);
   
       if (e.response) {
-        console.log(e.response.status);
-        console.log(e.response.data);
-  
         try {
           await serviceEmail.sendMailErrorGPTIP(
             req.body?.detectedLang || 'en',
-            JSON.stringify({
-              error: '400 Bad Request',
-              details: errorDetails
-            }),
-            e,
-            requestInfo
+            'API Error in callInfoDisease',
+            JSON.stringify(e),
+            tenantId,
+            subscriptionId
           );
         } catch (emailError) {
           console.log('Failed sending error email:', emailError);
@@ -958,9 +657,10 @@ async function callInfoDisease(req, res) {
       try {
         await serviceEmail.sendMailErrorGPTIP(
           req.body?.detectedLang || 'en',
-          req.body,
-          e,
-          requestInfo
+          'Error in callInfoDisease',
+          JSON.stringify(e),
+          tenantId,
+          subscriptionId
         );
       } catch (emailError) {
         console.log('Failed sending error email:', emailError);

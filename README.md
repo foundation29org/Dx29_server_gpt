@@ -181,9 +181,7 @@ The cost tracking system allows calculating and storing the cost of AI operation
 - `gpt5mini` - LLM rápido y económico
 - `gpt5nano` - LLM de muy bajo coste para detección/traducción ligeras
 - `sonar` / `sonar-pro` / `sonar-reasoning-pro` - Perplexity con búsqueda web y citas
-- `azure_ai_studio` - Asistentes con File Search (NHS Genomics)
 
 Auxiliary services:
 - `translation_service` - Azure Translator (detection and translation)
 - `document_intelligence` - Azure Document Intelligence (Layout)
-- `azure_ai_studio` - Azure AI Studio with file search (specific pricing)

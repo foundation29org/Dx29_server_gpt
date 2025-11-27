@@ -129,6 +129,20 @@ async function sendGeneralFeedback(req, res) {
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
 
+  // Validar que al menos uno de los dos headers esté presente
+  // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+  if (!tenantId && !subscriptionId) {
+    insights.error({
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+      headers: req.headers,
+      endpoint: 'sendGeneralFeedback'
+    });
+    return res.status(400).send({
+      result: "error",
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+    });
+  }
+
   try {
     // Validar los datos de entrada
     const validationErrors = validateGeneralFeedbackData(req.body);

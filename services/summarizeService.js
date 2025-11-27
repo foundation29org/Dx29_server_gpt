@@ -2,7 +2,6 @@ const { translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sa
 const { detectLanguageSmart } = require('./languageDetect');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
-const blobOpenDx29Ctrl = require('./blobOpenDx29');
 const insights = require('./insights');
 const { calculatePrice, formatCost } = require('./costUtils');
 const modelTranslation = 'gpt5mini';
@@ -77,6 +76,19 @@ async function summarize(req, res) {
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
 
+  // Validar que al menos uno de los dos headers esté presente
+  // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
+  if (!tenantId && !subscriptionId) {
+    insights.error({
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+      headers: req.headers,
+      endpoint: 'summarize'
+    });
+    return res.status(400).send({
+      result: "error",
+      message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+    });
+  }
 
   const requestInfo = {
     method: req.method,
@@ -482,15 +494,14 @@ async function summarize(req, res) {
     };
     insights.error(infoError);
 
-    blobOpenDx29Ctrl.createBlobErrorsDx29(infoError, tenantId, subscriptionId);
-
     try {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        req.body.description,
-        infoError,
-        requestInfo
+        'Error in summarize',
+        error.message,
+        tenantId,
+        subscriptionId
       );
     } catch (emailError) {
       console.log('Fail sending email');

@@ -11,14 +11,6 @@ const PRICING = {
     input: 0.002,     // $2 per 1M tokens  
     output: 0.008      // $8 per 1M tokens
   },
-  'gpt-4o-mini': {
-    input: 0.0005,      // $0.50 per 1M tokens (Azure AI Studio con file search)
-    output: 0.0015      // $1.50 per 1M tokens (Azure AI Studio con file search)
-  },
-  gpt4omini: {
-    input: 0.0005,      // $0.50 per 1M tokens (Azure AI Studio con file search)
-    output: 0.0015      // $1.50 per 1M tokens (Azure AI Studio con file search)
-  },
   sonar: {
     input: 0.001,     // $1 per 1M tokens
     output: 0.001,    // $1 per 1M tokens
@@ -84,30 +76,8 @@ function calculateTokens(text, model = 'gpt4o') {
     return enc.encode(text).length;
   }
 
-  function calculateAzureAIStudioCost(inputText, outputText) {
-    const inputTokens = calculateTokens(inputText, 'gpt-4o-mini-2024-07-18');
-    const outputTokens = calculateTokens(outputText, 'gpt-4o-mini-2024-07-18');
-    const totalTokens = inputTokens + outputTokens;
-    
-    // Calcular costos usando precios de Azure AI Studio (asistente con archivos adjuntos)
-    const inputCost = (inputTokens / 1000) * PRICING['gpt4omini'].input;
-    const outputCost = (outputTokens / 1000) * PRICING['gpt4omini'].output;
-    const totalCost = inputCost + outputCost;
-    
-    return {
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      inputCost: parseFloat(inputCost.toFixed(6)),
-      outputCost: parseFloat(outputCost.toFixed(6)),
-      totalCost: parseFloat(totalCost.toFixed(6)),
-      model: 'azure_ai_studio'
-    };
-  }
-
 module.exports = {
   calculatePrice,
   formatCost,
-  calculateTokens,
-  calculateAzureAIStudioCost
+  calculateTokens
 }; 
