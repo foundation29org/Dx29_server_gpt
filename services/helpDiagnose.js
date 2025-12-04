@@ -1249,11 +1249,37 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // Procesar la respuesta según el modelo
     let aiResponseText;
     if (model === 'o3') {
-      usage = aiResponse.data.usage;
+      usage = aiResponse.data?.usage;
+      // Validar que la respuesta tiene el formato esperado para o3
+      if (!aiResponse.data?.output || !Array.isArray(aiResponse.data.output)) {
+        console.error('❌ Invalid o3 AI response format:', JSON.stringify(aiResponse.data));
+        insights.error({
+          message: 'Invalid o3 AI response format - no output array',
+          response: JSON.stringify(aiResponse.data),
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          timezone: data.timezone
+        });
+        throw new Error('Invalid o3 AI response format - no output returned from OpenAI');
+      }
       aiResponseText = aiResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
     } else {
-      usage = aiResponse.data.usage;
-      aiResponseText = aiResponse.data.choices[0].message.content;
+      usage = aiResponse.data?.usage;
+      // Validar que la respuesta tiene el formato esperado
+      if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
+        console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
+        insights.error({
+          message: 'Invalid AI response format - no choices array',
+          response: JSON.stringify(aiResponse.data),
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          timezone: data.timezone
+        });
+        throw new Error('Invalid AI response format - no choices returned from OpenAI');
+      }
+      aiResponseText = aiResponse.data.choices[0].message?.content;
     }
 
     console.log('usage', aiResponse.data.usage);
