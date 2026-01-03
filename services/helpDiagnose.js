@@ -1982,7 +1982,10 @@ function validateDiagnoseRequest(data) {
   }
 
   if (data.lang !== undefined) {
-    if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
+    // Rechazar explícitamente la cadena literal "undefined" que puede venir del cliente
+    if (data.lang === 'undefined' || data.lang === 'null') {
+      errors.push({ field: 'lang', reason: 'Invalid language code: cannot be the string "undefined" or "null"' });
+    } else if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
       errors.push({ field: 'lang', reason: 'Must be a valid language code (2-8 characters)' });
     }
   }
@@ -2073,15 +2076,40 @@ async function diagnose(req, res) {
   const model = req.body.model || 'gpt5mini';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
+  const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
+
+  // SECURITY: Registrar información de autenticación para auditoría
+  const hasAuthToken = !!authToken;
+  const authTokenLength = authToken ? authToken.length : 0;
+  const authTokenPrefix = authToken ? authToken.substring(0, 20) + '...' : 'none';
 
   // Validar que al menos uno de los dos headers esté presente
   // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
   if (!tenantId && !subscriptionId) {
+    const requestId = getHeader(req, 'x-request-id') || 
+                     getHeader(req, 'request-id') ||
+                     req.headers['x-ms-request-id'];
+    
     insights.error({
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
       headers: req.headers,
-      endpoint: 'diagnose'
+      endpoint: 'diagnose',
+      requestId: requestId,
+      userAgent: req.headers['user-agent'],
+      origin: req.get('origin'),
+      ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      hasAuthToken: hasAuthToken,
+      authTokenLength: authTokenLength
+    }, {
+      endpoint: 'diagnose',
+      requestId: requestId,
+      userAgent: req.headers['user-agent'],
+      origin: req.get('origin'),
+      ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      hasAuthToken: hasAuthToken,
+      authTokenLength: authTokenLength
     });
+    
     return res.status(400).send({
       result: "error",
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
@@ -2104,13 +2132,96 @@ async function diagnose(req, res) {
   try {
     const validationErrors = validateDiagnoseRequest(req.body);
     if (validationErrors.length > 0) {
+      // Obtener información adicional de headers que puedan ayudar a identificar la subscription key
+      const apimSubscriptionName = getHeader(req, 'x-subscription-name') || 
+                                   getHeader(req, 'x-apim-subscription-name') || 
+                                   getHeader(req, 'ocp-apim-subscription-name') ||
+                                   subscriptionId; // Usar subscriptionId como fallback
+      const productName = getHeader(req, 'x-product-name') || 'unknown';
+      const productId = getHeader(req, 'x-product-id') || 'unknown';
+      const requestId = getHeader(req, 'x-request-id') || 
+                       getHeader(req, 'request-id') ||
+                       req.headers['x-ms-request-id'];
+      const authToken = getHeader(req, 'X-MS-AUTH-TOKEN');
+      
+      // SECURITY: Información crítica para auditoría de seguridad
+      // Identificar si viene del producto Freemium (no requiere JWT) o producto SWA (sí requiere JWT)
+      const isFreemiumProduct = productName && (
+        productName.toLowerCase().includes('freemium') || 
+        productName.toLowerCase().includes('api')
+      );
+      const isSwaProduct = productName && (
+        productName.toLowerCase().includes('static web apps') ||
+        productName.toLowerCase().includes('swa')
+      );
+      
+      const securityInfo = {
+        hasAuthToken: !!authToken,
+        authTokenLength: authToken ? authToken.length : 0,
+        authTokenPrefix: authToken ? authToken.substring(0, 20) + '...' : 'none',
+        // Verificar si viene de APIM (debería tener x-subscription-id si viene de APIM)
+        comesFromApim: !!subscriptionId,
+        // Verificar si viene directamente (sin APIM)
+        directAccess: !subscriptionId && !!tenantId,
+        // Información del producto para identificar el origen
+        productName: productName,
+        productId: productId,
+        isFreemiumProduct: isFreemiumProduct,
+        isSwaProduct: isSwaProduct,
+        // Alerta de seguridad: Si es producto SWA pero no tiene token, es un problema
+        securityAlert: isSwaProduct && !authToken ? 'SWA product without JWT token!' : null
+      };
+      
       insights.error({
         message: "Invalid request format or content",
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionId: subscriptionId
+        subscriptionId: subscriptionId,
+        subscriptionName: apimSubscriptionName,
+        requestId: requestId,
+        endpoint: 'diagnose',
+        userAgent: req.headers['user-agent'],
+        origin: req.get('origin'),
+        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+        security: securityInfo
       });
+      
+      // También registrar como evento para facilitar búsquedas en Application Insights
+      insights.trackEvent('DiagnoseValidationError', {
+        subscriptionId: subscriptionId,
+        subscriptionName: apimSubscriptionName,
+        tenantId: tenantId,
+        requestId: requestId,
+        errors: JSON.stringify(validationErrors),
+        endpoint: 'diagnose',
+        userAgent: req.headers['user-agent'],
+        origin: req.get('origin'),
+        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+        hasAuthToken: securityInfo.hasAuthToken,
+        authTokenLength: securityInfo.authTokenLength,
+        comesFromApim: securityInfo.comesFromApim,
+        directAccess: securityInfo.directAccess,
+        productName: securityInfo.productName,
+        productId: securityInfo.productId,
+        isFreemiumProduct: securityInfo.isFreemiumProduct,
+        isSwaProduct: securityInfo.isSwaProduct,
+        securityAlert: securityInfo.securityAlert
+      });
+      
+      // Si hay una alerta de seguridad, registrar un evento adicional
+      if (securityInfo.securityAlert) {
+        insights.trackEvent('SecurityAlert', {
+          alert: securityInfo.securityAlert,
+          subscriptionId: subscriptionId,
+          productName: productName,
+          endpoint: 'diagnose',
+          hasAuthToken: false,
+          origin: req.get('origin'),
+          ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress
+        });
+      }
+      
       return res.status(400).send({
         result: "error",
         message: "Invalid request format",

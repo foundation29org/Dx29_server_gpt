@@ -200,7 +200,16 @@ async function translateInvert(text, targetLang, endpoint) {
     return text;
   }
 
-  const jsonText = [{ "Text": text }];
+  // Proteger tags [ANON-N] antes de la traducción
+  // Azure Translator puede traducir "ANON" a "ANÓNIMO" u otras variantes
+  const anonTags = [];
+  const protectedText = text.replace(/\[ANON-(\d+)\]/g, (match, num) => {
+    const placeholder = `[[ANONPH_${anonTags.length}]]`;
+    anonTags.push(match); // Guardar el tag original
+    return placeholder;
+  });
+
+  const jsonText = [{ "Text": protectedText }];
   const headers = {
     'Content-Type': 'application/json',
     'Ocp-Apim-Subscription-Key': endpoint.key
@@ -229,7 +238,15 @@ async function translateInvert(text, targetLang, endpoint) {
       throw new Error('Invalid response from translation service');
     }
 
-    return response.data[0].translations[0].text;
+    let translatedText = response.data[0].translations[0].text;
+
+    // Restaurar los tags [ANON-N] originales
+    translatedText = translatedText.replace(/\[\[ANONPH_(\d+)\]\]/g, (match, idx) => {
+      const index = parseInt(idx, 10);
+      return anonTags[index] || match;
+    });
+
+    return translatedText;
 
   } catch (error) {
     const infoError = {
