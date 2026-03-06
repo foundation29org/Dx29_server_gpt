@@ -8,6 +8,7 @@ const queueService = require('./queueService');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
+const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profileInferenceService');
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   callAiWithFailover,
@@ -25,6 +26,24 @@ const defaultModel = 'gpt5mini';
 const modelIntencion = 'gpt5mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt5mini';//'gpt5mini'; //'gpt5nano';
+const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
+const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
+  ? config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD
+  : 0.7;
+const profileInferenceTenants = new Set(
+  String(config.PROFILE_INFERENCE_TENANTS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+);
+
+function shouldRunProfileInference(data = {}) {
+  if (!profileInferenceEnabled) return false;
+  if (profileInferenceTenants.size === 0) return true;
+  if (data.tenantId && profileInferenceTenants.has(data.tenantId)) return true;
+  if (data.subscriptionId && profileInferenceTenants.has(`sub:${data.subscriptionId}`)) return true;
+  return false;
+}
 
 
 // Regenerar HTML desde texto con marcadores [ANON-N]
@@ -261,6 +280,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     translation: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     reverse_translation: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     reverse_diseases: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    profile_inference: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_medical_response: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_diagnosticos: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
@@ -276,6 +296,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let reverseTranslationChars = 0; // traducción inversa al idioma original
   // Hoist queryType to function scope so it's available in error paths
   let queryType = 'unknown';
+  let inferredProfile = getDefaultInferredProfile(profileInferenceConfidenceThreshold);
   let modelTranslation = 'gpt5nano'; //'gpt5mini';
   
   // Variable para rastrear si se detectó información personal (PII)
@@ -702,6 +723,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: modelType,
           queryType: queryType,
+          inferredProfile: inferredProfile,
           question: data.description
         };
 
@@ -1142,6 +1164,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: model,
           queryType: queryType,
+          inferredProfile: inferredProfile,
           costTracking: costTracking
         };
       }else{
@@ -1249,11 +1272,37 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // Procesar la respuesta según el modelo
     let aiResponseText;
     if (model === 'o3') {
-      usage = aiResponse.data.usage;
+      usage = aiResponse.data?.usage;
+      // Validar que la respuesta tiene el formato esperado para o3
+      if (!aiResponse.data?.output || !Array.isArray(aiResponse.data.output)) {
+        console.error('❌ Invalid o3 AI response format:', JSON.stringify(aiResponse.data));
+        insights.error({
+          message: 'Invalid o3 AI response format - no output array',
+          response: JSON.stringify(aiResponse.data),
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          timezone: data.timezone
+        });
+        throw new Error('Invalid o3 AI response format - no output returned from OpenAI');
+      }
       aiResponseText = aiResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
     } else {
-      usage = aiResponse.data.usage;
-      aiResponseText = aiResponse.data.choices[0].message.content;
+      usage = aiResponse.data?.usage;
+      // Validar que la respuesta tiene el formato esperado
+      if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
+        console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
+        insights.error({
+          message: 'Invalid AI response format - no choices array',
+          response: JSON.stringify(aiResponse.data),
+          model: model,
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          timezone: data.timezone
+        });
+        throw new Error('Invalid AI response format - no choices returned from OpenAI');
+      }
+      aiResponseText = aiResponse.data.choices[0].message?.content;
     }
 
     console.log('usage', aiResponse.data.usage);
@@ -1368,6 +1417,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         },
         detectedLang: detectedLanguage,
         model: model,
+        inferredProfile: inferredProfile,
         costTracking: costTracking
       };
     }
@@ -1526,6 +1576,60 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
     }
 
+    try {
+      if (shouldRunProfileInference(data) && parsedResponseEnglish && parsedResponseEnglish.length > 0) {
+        const diagnosesForInference = parsedResponseEnglish
+          .map((item) => item && item.diagnosis ? item.diagnosis : '')
+          .filter(Boolean);
+
+        const profileInferenceResult = await inferProfileAndSpecialty({
+          description: anonymizedDescriptionEnglish || englishDescription || '',
+          diseasesList: diagnosesForInference.join(', '),
+          timezone: data.timezone,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId,
+          myuuid: data.myuuid,
+          dataRequest,
+          confidenceThreshold: profileInferenceConfidenceThreshold
+        });
+
+        inferredProfile = {
+          userType: profileInferenceResult.userType,
+          topSpecialties: profileInferenceResult.topSpecialties,
+          confidence: profileInferenceResult.confidence,
+          confidenceThreshold: profileInferenceResult.confidenceThreshold,
+          feedbackAutofillRecommended: profileInferenceResult.feedbackAutofillRecommended
+        };
+
+        if (profileInferenceResult.usage) {
+          const profileInferenceCost = calculatePrice(profileInferenceResult.usage, profileInferenceResult.model || 'gpt5mini');
+          costTracking.profile_inference = {
+            cost: profileInferenceCost.totalCost,
+            tokens: {
+              input: profileInferenceCost.inputTokens,
+              output: profileInferenceCost.outputTokens,
+              total: profileInferenceCost.totalTokens
+            },
+            model: profileInferenceResult.model || 'gpt5mini',
+            duration: profileInferenceResult.durationMs || 0,
+            success: true
+          };
+          costTracking.total.cost += profileInferenceCost.totalCost;
+          costTracking.total.tokens.input += profileInferenceCost.inputTokens;
+          costTracking.total.tokens.output += profileInferenceCost.outputTokens;
+          costTracking.total.tokens.total += profileInferenceCost.totalTokens;
+        }
+      }
+    } catch (profileInferenceError) {
+      insights.error({
+        message: 'Error in profile inference step',
+        error: profileInferenceError.message || String(profileInferenceError),
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId
+      });
+    }
+
     // Guardar información de seguimiento si es una llamada directa
     if (requestInfo) {
       let infoTrack = {
@@ -1537,6 +1641,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         detectedLanguage: detectedLanguage,
         response: parsedResponse,
         responseEnglish: parsedResponseEnglish,
+        inferredProfile: inferredProfile,
         topRelatedConditions: data.diseases_list,
         topRelatedConditionsEnglish: englishDiseasesList,
         header_language: requestInfo.header_language,
@@ -1712,6 +1817,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         success: true
       });
     }
+    if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
+      stages.push({
+        name: 'profile_inference',
+        cost: costTracking.profile_inference.cost,
+        tokens: costTracking.profile_inference.tokens,
+        model: costTracking.profile_inference.model || 'gpt5mini',
+        duration: costTracking.profile_inference.duration || 0,
+        success: true
+      });
+    }
     // Mostrar resumen final de costos
     console.log(`\n💰 RESUMEN DE COSTOS:`);
     if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
@@ -1741,6 +1856,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
     if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
       console.log(`   Etapa 7 - Reverse Diseases: ${formatCost(costTracking.reverse_diseases.cost)}`);
+    }
+    if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
+      console.log(`   Etapa 8 - Profile Inference: ${formatCost(costTracking.profile_inference.cost)}`);
     }
     // Desglose específico Azure para Reverse Diseases
     try {
@@ -1791,6 +1909,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       detectedLang: detectedLanguage,
       model: model,
       queryType: queryType, // Agregar el tipo de consulta detectado
+      inferredProfile: inferredProfile,
       //costTracking: costTracking
     };
     return result;
@@ -1896,6 +2015,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             success: false
           });
         }
+        if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
+          stages.push({
+            name: 'profile_inference',
+            cost: costTracking.profile_inference.cost,
+            tokens: costTracking.profile_inference.tokens,
+            model: costTracking.profile_inference.model || 'gpt5mini',
+            duration: costTracking.profile_inference.duration || 0,
+            success: false
+          });
+        }
 
         await CostTrackingService.saveDiagnoseCost(data, stages, 'error', {
           message: error.message,
@@ -1956,7 +2085,10 @@ function validateDiagnoseRequest(data) {
   }
 
   if (data.lang !== undefined) {
-    if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
+    // Rechazar explícitamente la cadena literal "undefined" que puede venir del cliente
+    if (data.lang === 'undefined' || data.lang === 'null') {
+      errors.push({ field: 'lang', reason: 'Invalid language code: cannot be the string "undefined" or "null"' });
+    } else if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
       errors.push({ field: 'lang', reason: 'Must be a valid language code (2-8 characters)' });
     }
   }
@@ -2047,15 +2179,40 @@ async function diagnose(req, res) {
   const model = req.body.model || 'gpt5mini';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
+  const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
+
+  // SECURITY: Registrar información de autenticación para auditoría
+  const hasAuthToken = !!authToken;
+  const authTokenLength = authToken ? authToken.length : 0;
+  const authTokenPrefix = authToken ? authToken.substring(0, 20) + '...' : 'none';
 
   // Validar que al menos uno de los dos headers esté presente
   // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
   if (!tenantId && !subscriptionId) {
+    const requestId = getHeader(req, 'x-request-id') || 
+                     getHeader(req, 'request-id') ||
+                     req.headers['x-ms-request-id'];
+    
     insights.error({
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
       headers: req.headers,
-      endpoint: 'diagnose'
+      endpoint: 'diagnose',
+      requestId: requestId,
+      userAgent: req.headers['user-agent'],
+      origin: req.get('origin'),
+      ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      hasAuthToken: hasAuthToken,
+      authTokenLength: authTokenLength
+    }, {
+      endpoint: 'diagnose',
+      requestId: requestId,
+      userAgent: req.headers['user-agent'],
+      origin: req.get('origin'),
+      ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      hasAuthToken: hasAuthToken,
+      authTokenLength: authTokenLength
     });
+    
     return res.status(400).send({
       result: "error",
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
@@ -2078,13 +2235,96 @@ async function diagnose(req, res) {
   try {
     const validationErrors = validateDiagnoseRequest(req.body);
     if (validationErrors.length > 0) {
+      // Obtener información adicional de headers que puedan ayudar a identificar la subscription key
+      const apimSubscriptionName = getHeader(req, 'x-subscription-name') || 
+                                   getHeader(req, 'x-apim-subscription-name') || 
+                                   getHeader(req, 'ocp-apim-subscription-name') ||
+                                   subscriptionId; // Usar subscriptionId como fallback
+      const productName = getHeader(req, 'x-product-name') || 'unknown';
+      const productId = getHeader(req, 'x-product-id') || 'unknown';
+      const requestId = getHeader(req, 'x-request-id') || 
+                       getHeader(req, 'request-id') ||
+                       req.headers['x-ms-request-id'];
+      const authToken = getHeader(req, 'X-MS-AUTH-TOKEN');
+      
+      // SECURITY: Información crítica para auditoría de seguridad
+      // Identificar si viene del producto Freemium (no requiere JWT) o producto SWA (sí requiere JWT)
+      const isFreemiumProduct = productName && (
+        productName.toLowerCase().includes('freemium') || 
+        productName.toLowerCase().includes('api')
+      );
+      const isSwaProduct = productName && (
+        productName.toLowerCase().includes('static web apps') ||
+        productName.toLowerCase().includes('swa')
+      );
+      
+      const securityInfo = {
+        hasAuthToken: !!authToken,
+        authTokenLength: authToken ? authToken.length : 0,
+        authTokenPrefix: authToken ? authToken.substring(0, 20) + '...' : 'none',
+        // Verificar si viene de APIM (debería tener x-subscription-id si viene de APIM)
+        comesFromApim: !!subscriptionId,
+        // Verificar si viene directamente (sin APIM)
+        directAccess: !subscriptionId && !!tenantId,
+        // Información del producto para identificar el origen
+        productName: productName,
+        productId: productId,
+        isFreemiumProduct: isFreemiumProduct,
+        isSwaProduct: isSwaProduct,
+        // Alerta de seguridad: Si es producto SWA pero no tiene token, es un problema
+        securityAlert: isSwaProduct && !authToken ? 'SWA product without JWT token!' : null
+      };
+      
       insights.error({
         message: "Invalid request format or content",
         request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
-        subscriptionId: subscriptionId
+        subscriptionId: subscriptionId,
+        subscriptionName: apimSubscriptionName,
+        requestId: requestId,
+        endpoint: 'diagnose',
+        userAgent: req.headers['user-agent'],
+        origin: req.get('origin'),
+        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+        security: securityInfo
       });
+      
+      // También registrar como evento para facilitar búsquedas en Application Insights
+      insights.trackEvent('DiagnoseValidationError', {
+        subscriptionId: subscriptionId,
+        subscriptionName: apimSubscriptionName,
+        tenantId: tenantId,
+        requestId: requestId,
+        errors: JSON.stringify(validationErrors),
+        endpoint: 'diagnose',
+        userAgent: req.headers['user-agent'],
+        origin: req.get('origin'),
+        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+        hasAuthToken: securityInfo.hasAuthToken,
+        authTokenLength: securityInfo.authTokenLength,
+        comesFromApim: securityInfo.comesFromApim,
+        directAccess: securityInfo.directAccess,
+        productName: securityInfo.productName,
+        productId: securityInfo.productId,
+        isFreemiumProduct: securityInfo.isFreemiumProduct,
+        isSwaProduct: securityInfo.isSwaProduct,
+        securityAlert: securityInfo.securityAlert
+      });
+      
+      // Si hay una alerta de seguridad, registrar un evento adicional
+      if (securityInfo.securityAlert) {
+        insights.trackEvent('SecurityAlert', {
+          alert: securityInfo.securityAlert,
+          subscriptionId: subscriptionId,
+          productName: productName,
+          endpoint: 'diagnose',
+          hasAuthToken: false,
+          origin: req.get('origin'),
+          ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress
+        });
+      }
+      
       return res.status(400).send({
         result: "error",
         message: "Invalid request format",

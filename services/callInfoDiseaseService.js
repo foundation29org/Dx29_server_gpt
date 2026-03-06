@@ -292,9 +292,29 @@ async function callInfoDisease(req, res) {
       aiStartTime = Date.now();
       const result = await callAiWithFailover(requestBody, sanitizedData.timezone, model, 0, dataRequest);
       aiEndTime = Date.now();
-      // Calcular costos y tokens para la llamada AI
-      const usage = result.data.usage;
-      const costData = calculatePrice(usage, model);
+      
+      // Validar que la respuesta tiene el formato esperado
+      if (!result.data?.choices || !result.data.choices.length) {
+        console.error('❌ Invalid AI response format in callInfoDisease:', JSON.stringify(result.data));
+        insights.error({
+          message: 'Invalid AI response format - no choices array',
+          response: JSON.stringify(result.data),
+          model: model,
+          myuuid: sanitizedData.myuuid,
+          tenantId: tenantId,
+          questionType: questionType
+        });
+        throw new Error('Invalid AI response format - no choices returned from OpenAI');
+      }
+      
+      // Calcular costos y tokens para la llamada AI (solo si usage está disponible)
+      const usage = result.data?.usage;
+      let costData = { totalCost: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      if (usage) {
+        costData = calculatePrice(usage, model);
+      } else {
+        console.warn('⚠️ No usage data in AI response for callInfoDisease');
+      }
       
       // Agregar etapa de IA
       stages.push({
@@ -322,7 +342,7 @@ async function callInfoDisease(req, res) {
         console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens} tokens, ${totalDuration}ms)`);
       }
       
-      if (!result.data.choices[0].message.content) {
+      if (!result.data.choices[0].message?.content) {
         try {
           await serviceEmail.sendMailErrorGPTIP(sanitizedData.detectedLang, 'Fail callInfoDisease AI call', result.data.choices, tenantId, subscriptionId);
         } catch (emailError) {

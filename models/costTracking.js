@@ -71,6 +71,7 @@ const CostTrackingSchema = new Schema({
         'translation', // Traducción a inglés
         'reverse_translation', // Traducción inversa
         'reverse_diseases', // Traducción inversa de diagnósticos
+        'profile_inference', // Inferencia de perfil/especialidad para feedback
         'medical_question_check', // Verificación de pregunta médica
         'general_medical_response', // Verificación de escenario clínico
         'emergency_questions', // Verificación de escenario clínico

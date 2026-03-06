@@ -172,6 +172,8 @@ function sendMailGeneralFeedback (info, myuuid, tenantId, subscriptionId, fileNa
         pregunta1 : info.pregunta1,
         pregunta2 : info.pregunta2,
         userType : info.userType,
+        healthcareSpecialty: info.healthcareSpecialty,
+        providedHealthcareSpecialty: info.providedHealthcareSpecialty,
         moreFunct : info.moreFunct,
         freeText : info.freeText,
         email : info.email,
