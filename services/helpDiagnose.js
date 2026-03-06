@@ -1576,20 +1576,11 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
     }
 
-    let profileInferenceSignals = {
-      anonymizedDescriptionEnglish: anonymizedDescriptionEnglish || '',
-      diagnosesEnglish: []
-    };
     try {
       if (shouldRunProfileInference(data) && parsedResponseEnglish && parsedResponseEnglish.length > 0) {
         const diagnosesForInference = parsedResponseEnglish
           .map((item) => item && item.diagnosis ? item.diagnosis : '')
           .filter(Boolean);
-
-        profileInferenceSignals = {
-          anonymizedDescriptionEnglish: anonymizedDescriptionEnglish || '',
-          diagnosesEnglish: diagnosesForInference
-        };
 
         const profileInferenceResult = await inferProfileAndSpecialty({
           description: anonymizedDescriptionEnglish || englishDescription || '',
@@ -1651,7 +1642,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         response: parsedResponse,
         responseEnglish: parsedResponseEnglish,
         inferredProfile: inferredProfile,
-        profileInferenceSignals: profileInferenceSignals,
         topRelatedConditions: data.diseases_list,
         topRelatedConditionsEnglish: englishDiseasesList,
         header_language: requestInfo.header_language,
