@@ -54,7 +54,13 @@ function validateGeneralFeedbackData(data) {
         errors.push({ field: 'lang', reason: 'Must be a valid language code (2-8 characters)' });
       }
     }
-  
+
+    if (data.healthcareSpecialty !== undefined) {
+      if (typeof data.healthcareSpecialty !== 'string' || data.healthcareSpecialty.length > 200) {
+        errors.push({ field: 'healthcareSpecialty', reason: 'Must be a string with a maximum of 200 characters' });
+      }
+    }
+
     return errors;
   }
 
@@ -68,10 +74,16 @@ function sanitizeGeneralFeedbackData(data) {
       .trim();
   };
 
+  const healthcareSpecialty = sanitizeText(data.healthcareSpecialty || '');
+  const hasHealthcareSpecialty = healthcareSpecialty.length > 0;
+  const providedHealthcareSpecialty = hasHealthcareSpecialty;
+
   return {
     ...data,
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
+    healthcareSpecialty: healthcareSpecialty,
+    providedHealthcareSpecialty: providedHealthcareSpecialty,
     value: {
       ...data.value,
       userType: sanitizeText(data.value.userType),
@@ -95,6 +107,8 @@ async function sendFlow(generalfeedback, lang, tenantId, subscriptionId) {
     freeText: generalfeedback.freeText,
     date: generalfeedback.date,
     email: generalfeedback.email,
+    healthcareSpecialty: generalfeedback.healthcareSpecialty,
+    providedHealthcareSpecialty: generalfeedback.providedHealthcareSpecialty,
     lang: lang,
     tenantId: tenantId,
     subscriptionId: subscriptionId
@@ -165,6 +179,8 @@ async function sendGeneralFeedback(req, res) {
       moreFunct: sanitizedData.value.moreFunct,
       freeText: sanitizedData.value.freeText,
       email: sanitizedData.value.email,
+      healthcareSpecialty: sanitizedData.healthcareSpecialty,
+      providedHealthcareSpecialty: sanitizedData.providedHealthcareSpecialty,
       date: new Date(Date.now()).toString(),
       fileNames: sanitizedData.fileNames,
       model: sanitizedData.model,
@@ -175,7 +191,12 @@ async function sendGeneralFeedback(req, res) {
     sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionId)
     await generalfeedback.save();
     try {
-      await serviceEmail.sendMailGeneralFeedback(sanitizedData.value, sanitizedData.myuuid, tenantId, subscriptionId, sanitizedData.fileNames, sanitizedData.model, isBetaPage);
+      const mailPayload = {
+        ...sanitizedData.value,
+        healthcareSpecialty: sanitizedData.healthcareSpecialty,
+        providedHealthcareSpecialty: sanitizedData.providedHealthcareSpecialty
+      };
+      await serviceEmail.sendMailGeneralFeedback(mailPayload, sanitizedData.myuuid, tenantId, subscriptionId, sanitizedData.fileNames, sanitizedData.model, isBetaPage);
     } catch (emailError) {
       insights.error(emailError);
       console.log('Fail sending email');

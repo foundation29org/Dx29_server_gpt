@@ -13,6 +13,8 @@ const GeneralfeedbackSchema = new Schema({
   moreFunct: String,
   freeText: String,
   email: String,
+  healthcareSpecialty: String,
+  providedHealthcareSpecialty: Boolean,
   date: { type: Date, default: Date.now },
   tenantId: String,
   subscriptionId: String,
