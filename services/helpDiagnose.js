@@ -8,6 +8,7 @@ const queueService = require('./queueService');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
+const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profileInferenceService');
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   callAiWithFailover,
@@ -25,6 +26,24 @@ const defaultModel = 'gpt5mini';
 const modelIntencion = 'gpt5mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt5mini';//'gpt5mini'; //'gpt5nano';
+const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
+const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
+  ? config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD
+  : 0.7;
+const profileInferenceTenants = new Set(
+  String(config.PROFILE_INFERENCE_TENANTS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+);
+
+function shouldRunProfileInference(data = {}) {
+  if (!profileInferenceEnabled) return false;
+  if (profileInferenceTenants.size === 0) return true;
+  if (data.tenantId && profileInferenceTenants.has(data.tenantId)) return true;
+  if (data.subscriptionId && profileInferenceTenants.has(`sub:${data.subscriptionId}`)) return true;
+  return false;
+}
 
 
 // Regenerar HTML desde texto con marcadores [ANON-N]
@@ -261,6 +280,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     translation: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     reverse_translation: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     reverse_diseases: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+    profile_inference: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_medical_response: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa1_diagnosticos: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa2_anonimizacion: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
@@ -276,6 +296,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let reverseTranslationChars = 0; // traducción inversa al idioma original
   // Hoist queryType to function scope so it's available in error paths
   let queryType = 'unknown';
+  let inferredProfile = getDefaultInferredProfile(profileInferenceConfidenceThreshold);
   let modelTranslation = 'gpt5nano'; //'gpt5mini';
   
   // Variable para rastrear si se detectó información personal (PII)
@@ -702,6 +723,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: modelType,
           queryType: queryType,
+          inferredProfile: inferredProfile,
           question: data.description
         };
 
@@ -1142,6 +1164,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: model,
           queryType: queryType,
+          inferredProfile: inferredProfile,
           costTracking: costTracking
         };
       }else{
@@ -1394,6 +1417,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         },
         detectedLang: detectedLanguage,
         model: model,
+        inferredProfile: inferredProfile,
         costTracking: costTracking
       };
     }
@@ -1552,6 +1576,60 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
     }
 
+    try {
+      if (shouldRunProfileInference(data) && parsedResponseEnglish && parsedResponseEnglish.length > 0) {
+        const diagnosesForInference = parsedResponseEnglish
+          .map((item) => item && item.diagnosis ? item.diagnosis : '')
+          .filter(Boolean);
+
+        const profileInferenceResult = await inferProfileAndSpecialty({
+          description: anonymizedDescriptionEnglish || englishDescription || '',
+          diseasesList: diagnosesForInference.join(', '),
+          timezone: data.timezone,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId,
+          myuuid: data.myuuid,
+          dataRequest,
+          confidenceThreshold: profileInferenceConfidenceThreshold
+        });
+
+        inferredProfile = {
+          userType: profileInferenceResult.userType,
+          topSpecialties: profileInferenceResult.topSpecialties,
+          confidence: profileInferenceResult.confidence,
+          confidenceThreshold: profileInferenceResult.confidenceThreshold,
+          feedbackAutofillRecommended: profileInferenceResult.feedbackAutofillRecommended
+        };
+
+        if (profileInferenceResult.usage) {
+          const profileInferenceCost = calculatePrice(profileInferenceResult.usage, profileInferenceResult.model || 'gpt5mini');
+          costTracking.profile_inference = {
+            cost: profileInferenceCost.totalCost,
+            tokens: {
+              input: profileInferenceCost.inputTokens,
+              output: profileInferenceCost.outputTokens,
+              total: profileInferenceCost.totalTokens
+            },
+            model: profileInferenceResult.model || 'gpt5mini',
+            duration: profileInferenceResult.durationMs || 0,
+            success: true
+          };
+          costTracking.total.cost += profileInferenceCost.totalCost;
+          costTracking.total.tokens.input += profileInferenceCost.inputTokens;
+          costTracking.total.tokens.output += profileInferenceCost.outputTokens;
+          costTracking.total.tokens.total += profileInferenceCost.totalTokens;
+        }
+      }
+    } catch (profileInferenceError) {
+      insights.error({
+        message: 'Error in profile inference step',
+        error: profileInferenceError.message || String(profileInferenceError),
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        subscriptionId: data.subscriptionId
+      });
+    }
+
     // Guardar información de seguimiento si es una llamada directa
     if (requestInfo) {
       let infoTrack = {
@@ -1563,6 +1641,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         detectedLanguage: detectedLanguage,
         response: parsedResponse,
         responseEnglish: parsedResponseEnglish,
+        inferredProfile: inferredProfile,
         topRelatedConditions: data.diseases_list,
         topRelatedConditionsEnglish: englishDiseasesList,
         header_language: requestInfo.header_language,
@@ -1738,6 +1817,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         success: true
       });
     }
+    if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
+      stages.push({
+        name: 'profile_inference',
+        cost: costTracking.profile_inference.cost,
+        tokens: costTracking.profile_inference.tokens,
+        model: costTracking.profile_inference.model || 'gpt5mini',
+        duration: costTracking.profile_inference.duration || 0,
+        success: true
+      });
+    }
     // Mostrar resumen final de costos
     console.log(`\n💰 RESUMEN DE COSTOS:`);
     if (costTracking.detect_language && costTracking.detect_language.cost > 0) {
@@ -1767,6 +1856,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
     if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
       console.log(`   Etapa 7 - Reverse Diseases: ${formatCost(costTracking.reverse_diseases.cost)}`);
+    }
+    if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
+      console.log(`   Etapa 8 - Profile Inference: ${formatCost(costTracking.profile_inference.cost)}`);
     }
     // Desglose específico Azure para Reverse Diseases
     try {
@@ -1817,6 +1909,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       detectedLang: detectedLanguage,
       model: model,
       queryType: queryType, // Agregar el tipo de consulta detectado
+      inferredProfile: inferredProfile,
       //costTracking: costTracking
     };
     return result;
@@ -1919,6 +2012,16 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
             model: 'translation_service',
             duration: reverseTranslationDurationMs || 0,
+            success: false
+          });
+        }
+        if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
+          stages.push({
+            name: 'profile_inference',
+            cost: costTracking.profile_inference.cost,
+            tokens: costTracking.profile_inference.tokens,
+            model: costTracking.profile_inference.model || 'gpt5mini',
+            duration: costTracking.profile_inference.duration || 0,
             success: false
           });
         }
