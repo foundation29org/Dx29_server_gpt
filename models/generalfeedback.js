@@ -15,6 +15,7 @@ const GeneralfeedbackSchema = new Schema({
   email: String,
   healthcareSpecialty: String,
   providedHealthcareSpecialty: Boolean,
+  inferenceMeta: Schema.Types.Mixed,
   date: { type: Date, default: Date.now },
   tenantId: String,
   subscriptionId: String,

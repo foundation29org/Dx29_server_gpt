@@ -61,6 +61,17 @@ function validateGeneralFeedbackData(data) {
       }
     }
 
+    if (data.inferenceMeta !== undefined) {
+      if (!data.inferenceMeta || typeof data.inferenceMeta !== 'object' || Array.isArray(data.inferenceMeta)) {
+        errors.push({ field: 'inferenceMeta', reason: 'Must be an object' });
+      } else {
+        const serializedMeta = JSON.stringify(data.inferenceMeta);
+        if (serializedMeta.length > 10000) {
+          errors.push({ field: 'inferenceMeta', reason: 'Must not exceed 10000 characters once serialized' });
+        }
+      }
+    }
+
     return errors;
   }
 
@@ -73,6 +84,52 @@ function sanitizeGeneralFeedbackData(data) {
       .replace(/prompt:|system:|assistant:|user:/gi, '')
       .trim();
   };
+  const sanitizeOptionalText = (text, maxLength = 200) => {
+    if (text === undefined || text === null || text === '') return null;
+    const sanitized = sanitizeText(String(text));
+    return sanitized.length > maxLength ? sanitized.slice(0, maxLength) : sanitized;
+  };
+  const sanitizeOptionalBoolean = (value) => (typeof value === 'boolean' ? value : null);
+  const sanitizeOptionalNumber = (value, min = null, max = null) => {
+    if (value === undefined || value === null || value === '') return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    if (min !== null && numeric < min) return null;
+    if (max !== null && numeric > max) return null;
+    return numeric;
+  };
+
+  const rawInferenceMeta = data.inferenceMeta && typeof data.inferenceMeta === 'object' && !Array.isArray(data.inferenceMeta)
+    ? data.inferenceMeta
+    : null;
+
+  const sanitizedInferenceMeta = rawInferenceMeta
+    ? {
+      hasSuggestions: sanitizeOptionalBoolean(rawInferenceMeta.hasSuggestions),
+      suggestedUserType: sanitizeOptionalText(rawInferenceMeta.suggestedUserType, 100),
+      suggestedTopSpecialties: Array.isArray(rawInferenceMeta.suggestedTopSpecialties)
+        ? rawInferenceMeta.suggestedTopSpecialties
+          .map((item) => sanitizeOptionalText(item, 200))
+          .filter(Boolean)
+          .slice(0, 3)
+        : [],
+      feedbackAutofillRecommended: sanitizeOptionalBoolean(rawInferenceMeta.feedbackAutofillRecommended),
+      confidence: sanitizeOptionalNumber(rawInferenceMeta.confidence, 0, 1),
+      confidenceThreshold: sanitizeOptionalNumber(rawInferenceMeta.confidenceThreshold, 0, 1),
+      autofillApplied: sanitizeOptionalBoolean(rawInferenceMeta.autofillApplied),
+      autofilledUserType: sanitizeOptionalText(rawInferenceMeta.autofilledUserType, 100),
+      autofilledHealthcareSpecialty: sanitizeOptionalText(rawInferenceMeta.autofilledHealthcareSpecialty, 200),
+      finalUserType: sanitizeOptionalText(rawInferenceMeta.finalUserType, 100),
+      finalHealthcareSpecialty: sanitizeOptionalText(rawInferenceMeta.finalHealthcareSpecialty, 200),
+      changedUserType: sanitizeOptionalBoolean(rawInferenceMeta.changedUserType),
+      changedPrimarySpecialty: sanitizeOptionalBoolean(rawInferenceMeta.changedPrimarySpecialty),
+      changedAfterAutofill: sanitizeOptionalBoolean(rawInferenceMeta.changedAfterAutofill),
+      selectedFromTop3: sanitizeOptionalBoolean(rawInferenceMeta.selectedFromTop3),
+      selectedTop3Rank: sanitizeOptionalNumber(rawInferenceMeta.selectedTop3Rank, 1, 3),
+      selectedViaSuggestedPill: sanitizeOptionalBoolean(rawInferenceMeta.selectedViaSuggestedPill),
+      suggestedPillClicks: sanitizeOptionalNumber(rawInferenceMeta.suggestedPillClicks, 0, 1000)
+    }
+    : null;
 
   const healthcareSpecialty = sanitizeText(data.healthcareSpecialty || '');
   const hasHealthcareSpecialty = healthcareSpecialty.length > 0;
@@ -84,6 +141,7 @@ function sanitizeGeneralFeedbackData(data) {
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     healthcareSpecialty: healthcareSpecialty,
     providedHealthcareSpecialty: providedHealthcareSpecialty,
+    inferenceMeta: sanitizedInferenceMeta,
     value: {
       ...data.value,
       userType: sanitizeText(data.value.userType),
@@ -181,6 +239,7 @@ async function sendGeneralFeedback(req, res) {
       email: sanitizedData.value.email,
       healthcareSpecialty: sanitizedData.healthcareSpecialty,
       providedHealthcareSpecialty: sanitizedData.providedHealthcareSpecialty,
+      inferenceMeta: sanitizedData.inferenceMeta,
       date: new Date(Date.now()).toString(),
       fileNames: sanitizedData.fileNames,
       model: sanitizedData.model,
