@@ -77,6 +77,14 @@ function buildAzureOpenAIEndpoint(region, model) {
 
 
 function sanitizeAiData(data) {
+  const rawCountryName = typeof data.countryName === 'string' ? data.countryName : '';
+  const rawCountryCode = typeof data.countryCode === 'string' ? data.countryCode : '';
+  const sanitizedCountryName = typeof rawCountryName === 'string' ? sanitizeInput(rawCountryName).trim() : '';
+  const normalizedCountryCode = typeof rawCountryCode === 'string'
+    ? rawCountryCode.trim().toUpperCase().replace(/[^A-Z]/g, '')
+    : '';
+  const sanitizedCountryCode = /^[A-Z]{2}$/.test(normalizedCountryCode) ? normalizedCountryCode : '';
+
   return {
     ...data,
     description: sanitizeInput(data.description),
@@ -84,6 +92,8 @@ function sanitizeAiData(data) {
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
     timezone: data.timezone?.trim() || '', // Manejar caso donde timezone es undefined
+    countryName: sanitizedCountryName,
+    countryCode: sanitizedCountryCode,
     iframeParams: sanitizeIframeParams(data.iframeParams) // Sanitizar iframeParams
   };
 }

@@ -1646,6 +1646,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         topRelatedConditionsEnglish: englishDiseasesList,
         header_language: requestInfo.header_language,
         timezone: data.timezone,
+        countryName: data.countryName || '',
+        countryCode: data.countryCode || '',
         model: model,
         tenantId: data.tenantId,
         subscriptionId: data.subscriptionId,
@@ -2229,7 +2231,9 @@ async function diagnose(req, res) {
     params: req.params,
     query: req.query,
     header_language: req.headers['accept-language'],
-    timezone: req.body.timezone
+    timezone: req.body.timezone,
+    countryName: req.body.countryName || '',
+    countryCode: req.body.countryCode || ''
   };
 
   try {
@@ -2414,6 +2418,8 @@ async function diagnose(req, res) {
         origin: requestInfo.origin,
         ip: requestInfo.ip,
         timezone: requestInfo.timezone,
+        countryName: requestInfo.countryName,
+        countryCode: requestInfo.countryCode,
         header_language: requestInfo.header_language
       },
       requestData: req.body,
