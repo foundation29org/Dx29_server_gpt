@@ -39,6 +39,7 @@ const PROMPTS = {
             • When in doubt about diagnostic vs. treatment intent, return **true** only if the focus is on understanding the underlying condition
             • If the message contains multiple diagnoses/conditions that could represent a patient case, return **true**
             • If the message appears to be describing a patient's condition profile, return **true**
+            • If the message mentions a patient profile (e.g. age, occupation, gestational age) but the primary intent is asking about a general medical risk, safety threshold, guideline, or recommendation (not seeking a differential diagnosis), return **false**
 
             **Examples**
 
@@ -65,6 +66,9 @@ const PROMPTS = {
             - "Dosis de paracetamol en niños de 20 kg."  
             - "Woman 60 years old with high ferritin... Why is ferritin so high?"
             - "Patient with elevated liver enzymes... What causes this?"
+            - "24-week pregnant piano teacher, is there acoustic risk above a certain number of decibels?"
+            - "Pregnant woman 32 weeks, is it safe to take ibuprofen?"
+            - "Nurse working night shifts, what are the cardiovascular risks?"
 
             INPUT:  
             {{description}}`,
