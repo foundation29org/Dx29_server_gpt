@@ -31,7 +31,7 @@
     "jsonrepair": "^3.13.1",
     "mongoose": "^8.13.2",
     "multer": "^2.0.2",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^8.0.5",
     "nodemailer-express-handlebars": "^6.1.2",
     "openai": "^4.104.0",
     "swagger-ui-express": "^5.0.1"
