@@ -114,7 +114,7 @@ async function detectLanguage(text, lang, endpoint) {
       lang: lang,
       error: error.message,
       endpoint: endpoint
-    }
+    };
     insights.error(infoError);
     throw error;
   }

@@ -278,7 +278,6 @@ async function summarize(req, res) {
 
     // 4. Obtener el resumen
     let summary = summarizeResponse.data.choices[0].message.content.trim();
-    let summaryEnglish = summary;
 
     // 5. Traducir el resumen al idioma original si es necesario (LLM primero, fallback Azure)
     let reverseLLMUsed = false;

@@ -21,7 +21,6 @@ function calculateMaxTokens(jsonText) {
   
     // Extraer contenido relevante
     const patientDescription = extractContent('patient_description', jsonText);
-    const diseasesList = extractContent('diseases_list', jsonText);
   
     // Contar tokens en el contenido relevante
     const patientDescriptionTokens = enc.encode(patientDescription).length;
@@ -177,8 +176,6 @@ async function callInfoDisease(req, res) {
     };
     
     const stages = [];
-    let reverseTranslationChars = 0;
-    let translationStartTime, translationEndTime;
     let reverseTranslationStartTime, reverseTranslationEndTime;
     let aiStartTime, aiEndTime;
     try {
@@ -252,7 +249,7 @@ async function callInfoDisease(req, res) {
         tenantId: tenantId,
         subscriptionId: subscriptionId,
         myuuid: sanitizedData.myuuid
-      }
+      };
       
     let model = 'gpt4o';
     if(sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0){
@@ -356,7 +353,7 @@ async function callInfoDisease(req, res) {
           tenantId: tenantId,
           operation: 'callInfoDisease',
           subscriptionId: subscriptionId
-        }
+        };
         insights.error(infoError);
         
         // Guardar cost tracking con error
@@ -437,7 +434,7 @@ async function callInfoDisease(req, res) {
               tenantId: tenantId,
               operation: 'callInfoDisease',
               subscriptionId: subscriptionId
-            }
+            };
             insights.error(infoError);
           }
         }
@@ -550,7 +547,7 @@ async function callInfoDisease(req, res) {
               tenantId: tenantId,
               operation: 'callInfoDisease',
               subscriptionId: subscriptionId
-            }
+            };
             insights.error(infoError);
           }
         }

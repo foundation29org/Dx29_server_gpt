@@ -16,7 +16,6 @@ const systemStatusCtrl = require('../services/systemStatusService')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
 const permalinkCtrl = require('../controllers/all/permalink')
 const pubsubRoutes = require('./pubsub')
-const costTrackingRoutes = require('./costTracking')
 const reprocesarErrores = require('../scripts/reprocesar_errores')
 const api = express.Router()
 const { smartLimiter, healthLimiter } = require('../services/rateLimiter')
@@ -57,12 +56,6 @@ api.get('/internal/permalink/:id', smartLimiter, permalinkCtrl.getPermalink)
 
 // Rutas de Azure Web PubSub
 api.use('/pubsub', smartLimiter, pubsubRoutes)
-
-// Rutas de Cost Tracking
-//api.use('/cost-tracking', smartLimiter, costTrackingRoutes)
-
-// Rutas de reprocesar errores
-//api.get('/reprocesar-errores', reprocesarErrores)
 
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {

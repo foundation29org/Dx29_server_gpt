@@ -16,7 +16,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
       const containerClient = blobServiceOpenDx.getContainerClient(containerName);
       const content = data;
       const blockBlobClient = containerClient.getBlockBlobClient(fileNameToSave);
-      const uploadBlobResponse = await blockBlobClient.upload(content, content.length);
+      await blockBlobClient.upload(content, content.length);
     } catch (error) {
       insights.error(error);
     }
@@ -52,7 +52,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
       `${clientPrefix}datav3/${url}` : 
       `${clientPrefix}data/${url}`;
     
-    var result = await createBlob(tempUrl, info, fileNameNcr);
+    await createBlob(tempUrl, info, fileNameNcr);
   }
 
   async function createBlobOpenVote(body){
@@ -82,7 +82,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     
     var tempUrl = `${clientPrefix}vote/${url}`;
     
-    var result = await createBlob(tempUrl, info, fileNameNcr);
+    await createBlob(tempUrl, info, fileNameNcr);
   }
 
   async function createBlobErrorsDx29(body, tenantId, subscriptionId) {
@@ -112,7 +112,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     
     var tempUrl = `${clientPrefix}errors/${url}`;
     
-    var result = await createBlob(tempUrl, info, fileNameNcr);
+    await createBlob(tempUrl, info, fileNameNcr);
   }
 
   async function createBlobQuestions(body, operation){
@@ -142,7 +142,7 @@ const blobServiceOpenDx = new storage.BlobServiceClient(
     
     var tempUrl = `${clientPrefix}questions/${operation}/${url}`;
     
-    var result = await createBlob(tempUrl, info, fileNameNcr);
+    await createBlob(tempUrl, info, fileNameNcr);
   }
 
 module.exports = {

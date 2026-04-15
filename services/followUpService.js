@@ -312,7 +312,7 @@ async function generateFollowUpQuestions(req, res) {
       tenantId: tenantId,
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
-    }
+    };
     const aiStartTime = Date.now();
     let model = 'gpt5mini';
     if(model == 'gpt5mini'){
@@ -841,7 +841,7 @@ async function processFollowUpAnswers(req, res) {
       tenantId: tenantId,
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
-    }
+    };
     let model = 'gpt5mini';
     if(model == 'gpt5mini'){
       requestBody = {
@@ -897,15 +897,6 @@ async function processFollowUpAnswers(req, res) {
         duration: aiEndTime - aiStartTime,
         success: true
       });
-      // reverseTranslationChars se calculará más abajo cuando tengamos updatedDescription
-      // (añadimos el stage después del cálculo)
-      const totalCostBase = stages.reduce((s, st) => s + (st.cost || 0), 0);
-      let totalCost = totalCostBase;
-      let totalTokens = {
-        input: stages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
-        output: stages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
-        total: stages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
-      };
 
       // Guardaremos al final tras calcular reverseTranslationChars
       var followUpStages = stages;
@@ -1313,7 +1304,7 @@ async function generateERQuestions(req, res) {
       tenantId: tenantId,
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
-    }
+    };
     const aiStartTime = Date.now();
     let model = 'gpt5mini';
     if(model == 'gpt5mini'){

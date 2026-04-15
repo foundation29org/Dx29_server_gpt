@@ -1,4 +1,3 @@
-const express = require('express');
 const config = require('../config');
 const { processAIRequestInternal } = require('../services/helpDiagnose');
 const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');

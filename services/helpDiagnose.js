@@ -12,10 +12,8 @@ const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profi
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   callAiWithFailover,
-  detectLanguageWithRetry,
   translateTextWithRetry,
   translateInvertWithRetry,
-  sanitizeInput,
   sanitizeAiData,
   parseJsonWithFixes
 } = require('./aiUtils');
@@ -451,8 +449,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     let clinicalScenarioCost = null;
     const clinicalStartMs = Date.now();
 
-
-    let medicalQuestionResponse = null;
     let medicalQuestionResult = '';
     let medicalQuestionCost = null;
     try {
@@ -754,8 +750,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         // Agregar costos de la respuesta médica general
         if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
           const usage = generalMedicalResponse.data.usage;
-          console.log('usage', usage)
-          console.log('selectedModel', selectedModel)
           etapa1Cost = calculatePrice(usage, selectedModel);
           costTracking.etapa1_medical_response = {
             cost: etapa1Cost.totalCost,
@@ -2186,7 +2180,6 @@ async function diagnose(req, res) {
   // SECURITY: Registrar información de autenticación para auditoría
   const hasAuthToken = !!authToken;
   const authTokenLength = authToken ? authToken.length : 0;
-  const authTokenPrefix = authToken ? authToken.substring(0, 20) + '...' : 'none';
 
   // Validar que al menos uno de los dos headers esté presente
   // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id

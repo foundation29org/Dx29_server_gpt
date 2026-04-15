@@ -1,6 +1,6 @@
 'use strict'
 
-const { TRANSPORTER_OPTIONS, client_server } = require('../config')
+const { TRANSPORTER_OPTIONS } = require('../config')
 const insights = require('../services/insights')
 const nodemailer = require('nodemailer')
 var hbs = require('nodemailer-express-handlebars')
