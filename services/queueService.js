@@ -133,7 +133,7 @@ class QueueService {
   initializeQueuesByModel() {
     // Inicializar colas para cada modelo y región
     for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
-      for (const [region, capacity] of Object.entries(capacities)) {
+      for (const [region] of Object.entries(capacities)) {
         const queueKey = `${model}-${region}`;
         this.regionQueues.set(queueKey, { activeRequests: 0, queueLength: 0 });
         this.activeRequests[queueKey] = 0;
@@ -200,7 +200,7 @@ class QueueService {
     try {
       // Crear una cola para cada modelo y región si no existe
       for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
-        for (const [region, capacity] of Object.entries(capacities)) {
+        for (const [region] of Object.entries(capacities)) {
           const queueName = this.getQueueName(model, region);
           const queueExists = await this.adminClient.queueExists(queueName);
           
@@ -437,7 +437,7 @@ class QueueService {
       
       // Crear receivers para cada modelo y región
       for (const [model, capacities] of Object.entries(MODEL_CAPACITY)) {
-        for (const [region, capacity] of Object.entries(capacities)) {
+        for (const [region] of Object.entries(capacities)) {
           const queueName = this.getQueueName(model, region);
           const receiver = this.sbClient.createReceiver(queueName);
           const receiverKey = this.getQueueKey(model, region);

@@ -1,13 +1,11 @@
 const multer = require('multer');
 const { default: createDocumentIntelligenceClient, getLongRunningPoller, isUnexpected } = require("@azure-rest/ai-document-intelligence");
 const config = require('../../config');
-const axios = require('axios');
-const summarizeCtrl = require('../../services/summarizeService')
+const summarizeCtrl = require('../../services/summarizeService');
 const blobFiles = require('../../services/blobFiles');
 const insights = require('../../services/insights');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
-const { calculatePrice, formatCost } = require('../../services/costUtils');
 const pubsubService = require('../../services/pubsubService');
 
 // Configuración de multer para manejar archivos en memoria
@@ -429,7 +427,7 @@ const processMultimodalInput = async (req, res) => {
                 imageUrls: results.imageUrls || [],
                 isImageOnly: isImageOnly
             };
-            const diagnoseResult = await callDiagnoses(diagnoseData, requestInfo);
+            await callDiagnoses(diagnoseData, requestInfo);
             res.status(200).send({ result: 'processing', description: description, imageUrls: results.imageUrls || [], isImageOnly: isImageOnly });
             // Devolver resultado de diagnose
             /*return res.status(200).send({

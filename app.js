@@ -6,11 +6,9 @@
 const express = require('express');
 const compression = require('compression');
 const bodyParser = require('body-parser');
-const config = require('./config');
 const app = express();
 app.set('trust proxy', 1);
 app.use(compression());
-const serviceEmail = require('./services/email');
 const api = require('./routes');
 const cors = require('cors');
 

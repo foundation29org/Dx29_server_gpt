@@ -52,8 +52,6 @@ async function getSystemStatus(req, res) {
 async function getQueueStatus(req, res) {
   try {
     const ticketId = req.params.ticketId;
-    const timezone = req.body.timezone; // Opcional: obtener timezone de query params
-
     if (!ticketId) {
       return res.status(400).send({
         result: 'error',

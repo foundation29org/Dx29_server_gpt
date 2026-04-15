@@ -149,7 +149,7 @@ function isValidSupportData(data) {
 			type: e.code || 'SUPPORT_ERROR',
 			tenantId: tenantId,
 			subscriptionId: subscriptionId
-		}
+		};
 		insights.error(infoError);
 		return res.status(500).send({ message: 'Internal server error' });
 	}
@@ -187,7 +187,7 @@ async function sendFlow(support, lang, tenantId, subscriptionId){
 			type: error.code || 'SUPPORT_ERROR',
 			tenantId: tenantId,
 			subscriptionId: subscriptionId
-		}
+		};
 		insights.error(infoError);
     }
 
