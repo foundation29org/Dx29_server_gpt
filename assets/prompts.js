@@ -27,6 +27,7 @@ const PROMPTS = {
 
             Return **false** when the message …
             • asks mainly about treatment, management, drugs, follow-up, or prognosis for a known condition,  
+            • asks whether symptoms could be adverse effects, toxicity, or drug-drug interactions from a medication,
             • is a general theoretical question, a definition, or just the name of a disease/test ("Síndrome del cabello anágeno corto"),  
             • concerns lab techniques, guidelines, or population data without describing a concrete patient,  
             • is administrative / non-clinical, or
@@ -36,6 +37,7 @@ const PROMPTS = {
             **PRIORITY RULES**:
             • If the message asks about treatment/management for a known condition, return **false** regardless of patient context
             • If the message contains patient data but the primary intent is treatment advice, return **false**
+            • If the primary intent is medication safety (adverse effects, toxicity, interactions), return **false** even with patient context
             • When in doubt about diagnostic vs. treatment intent, return **true** only if the focus is on understanding the underlying condition
             • If the message contains multiple diagnoses/conditions that could represent a patient case, return **true**
             • If the message appears to be describing a patient's condition profile, return **true**
