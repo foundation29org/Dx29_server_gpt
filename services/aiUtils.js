@@ -381,17 +381,25 @@ async function callAiWithFailover(requestBody, timezone, model = 'gpt5mini', ret
     });
     return response;
   } catch (error) {
-    if (retryCount < endpoints.length - 1) {
+    const statusCode = error.response?.status;
+    const errorDetails = error.response?.data || null;
+    const shouldRetry = statusCode !== 400 && retryCount < endpoints.length - 1;
+
+    insights.error({
+      message: `Fallo AI endpoint ${endpoint.url}`,
+      error: error.message,
+      statusCode,
+      errorDetails,
+      retryCount,
+      willRetry: shouldRetry,
+      requestBody,
+      timezone,
+      model,
+      dataRequest
+    });
+
+    if (shouldRetry) {
       console.warn(`❌ Error en ${endpoint.url} — Reintentando en ${RETRY_DELAY}ms...`);
-      insights.error({
-        message: `Fallo AI endpoint ${endpoint.url}`,
-        error: error.message,
-        retryCount,
-        requestBody,
-        timezone,
-        model,
-        dataRequest
-      });
       await delay(RETRY_DELAY);
       return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
     }
