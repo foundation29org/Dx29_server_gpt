@@ -9,7 +9,8 @@
     "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
     "validate-openapi": "swagger-cli validate docs/dxgpt-api.yaml",
     "generate-openapi": "node scripts/generate-openapi.js",
-    "swagger-ui": "node scripts/serve-swagger-ui.js"
+    "swagger-ui": "node scripts/serve-swagger-ui.js",
+    "cost:daily-durations": "node scripts/daily-operation-durations.js"
   },
   "author": "LOA",
   "license": "MIT",
