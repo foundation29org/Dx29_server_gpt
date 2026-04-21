@@ -314,8 +314,14 @@ async function generateFollowUpQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     };
     const aiStartTime = Date.now();
-    let model = 'gpt5mini';
-    if(model == 'gpt5mini'){
+    let model = 'gpt54mini';
+    if(model == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],
@@ -842,8 +848,14 @@ async function processFollowUpAnswers(req, res) {
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     };
-    let model = 'gpt5mini';
-    if(model == 'gpt5mini'){
+    let model = 'gpt54mini';
+    if(model == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],
@@ -1306,8 +1318,14 @@ async function generateERQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     };
     const aiStartTime = Date.now();
-    let model = 'gpt5mini';
-    if(model == 'gpt5mini'){
+    let model = 'gpt54mini';
+    if(model == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],

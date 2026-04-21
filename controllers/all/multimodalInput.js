@@ -407,7 +407,7 @@ const processMultimodalInput = async (req, res) => {
             }
             
             // Llamar a diagnose con la descripción y URLs de imagen
-            let model = 'gpt5mini';
+            let model = 'gpt54mini';
             if(hasImage){
                 model = 'gpt5';
             }
@@ -489,7 +489,7 @@ async function callDiagnoses(data, requestInfo) {
             myuuid: data.myuuid,
             lang: data.lang,
             timezone: data.timezone || 'UTC',
-            model: data.model || 'gpt5mini',
+            model: data.model || 'gpt54mini',
             iframeParams: data.iframeParams || {},
             imageUrls: data.imageUrls || []
         },

@@ -34,19 +34,39 @@ const PRICING = {
     input: 0.00025,    // $0.25 per 1M tokens
     output: 0.0020,    // $2.00 per 1M tokens
   },
+  gpt54mini: {
+    input: 0.00025,    // Temporalmente alineado a gpt5mini hasta confirmar tarifa final
+    output: 0.0020,    // Temporalmente alineado a gpt5mini hasta confirmar tarifa final
+  },
   gpt5: {
     input: 0.0125,    // $1.25 per 1M tokens
     output: 0.0200,    // $10.00 per 1M tokens
+  },
+  'gemini-3-pro-preview': {
+    input: 0.002,      // Temporal: ajustar cuando se confirme tarifa final
+    output: 0.008      // Temporal: ajustar cuando se confirme tarifa final
+  },
+  'gemini-2.5-pro': {
+    input: 0.002,      // Temporal: ajustar cuando se confirme tarifa final
+    output: 0.008      // Temporal: ajustar cuando se confirme tarifa final
   }
 };
 
-function calculatePrice(usage, model = 'gpt4o') {
+const PRICING_ALIASES = {
+  'gpt-5-mini': 'gpt5mini',
+  'gpt-5.4-mini': 'gpt54mini',
+  'gpt-5-nano': 'gpt5nano',
+  'gpt-5': 'gpt5'
+};
+
+function calculatePrice(usage, model = 'gpt54mini') {
   // Compatibilidad con o3 y gpt-4o
   const promptTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
   const completionTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
   const totalTokens = usage.total_tokens ?? (promptTokens + completionTokens);
 
-  const pricing = PRICING[model] || PRICING.gpt4o;
+  const normalizedModel = PRICING_ALIASES[model] || model;
+  const pricing = PRICING[normalizedModel] || PRICING.gpt54mini;
   const inputCost = (promptTokens / 1000) * pricing.input;
   const outputCost = (completionTokens / 1000) * pricing.output;
   
@@ -62,7 +82,7 @@ function calculatePrice(usage, model = 'gpt4o') {
     outputCost: parseFloat(outputCost.toFixed(6)),
     requestFee: parseFloat(requestFee.toFixed(6)),
     totalCost: parseFloat(totalCost.toFixed(6)),
-    model: model
+    model: normalizedModel
   };
 }
 

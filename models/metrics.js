@@ -19,7 +19,7 @@ const MetricsSchema = new Schema({
     type: String,
     required: true,
     index: true,
-    enum: ['gpt4o', 'o3', 'gpt5nano', 'gpt5mini', 'gpt5']
+    enum: ['gpt4o', 'o3', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5']
   },
   period: {
     type: String,

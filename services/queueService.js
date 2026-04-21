@@ -30,6 +30,7 @@ const MODEL_PROCESSING_TIMES = {
   o3: 60,       // 1 minuto
   gpt5nano: 25, // 25 segundos
   gpt5mini: 40, // 40 segundos
+  gpt54mini: 40, // 40 segundos
   gpt5: 45, // 45 segundos
 };
 
@@ -69,7 +70,7 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     return 'Sweden';
   }
 
-  // Para gpt4o y o3, usar todas las regiones disponibles según continente
+  // Para gpt4o, o3 y gpt54mini, usar mapeo multi-región por continente
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
     if (tz?.includes('europe')) return 'europe';
@@ -79,8 +80,12 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     return 'EastUS';
   })();
 
- // Usar REGION_MAPPING para traducir a la región real
- return REGION_MAPPING[region] || Object.keys(availableRegions)[0];
+ // Usar REGION_MAPPING para traducir a la región real y validar que exista para el modelo
+ const mappedRegion = REGION_MAPPING[region] || Object.keys(availableRegions)[0];
+ if (Object.prototype.hasOwnProperty.call(availableRegions, mappedRegion)) {
+   return mappedRegion;
+ }
+ return Object.keys(availableRegions)[0];
 }
 
 const MODEL_CAPACITY = config.MODEL_CAPACITY;

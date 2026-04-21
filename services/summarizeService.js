@@ -4,8 +4,8 @@ const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
 const { calculatePrice, formatCost } = require('./costUtils');
-const modelTranslation = 'gpt5mini';
-const modelSummarize = 'gpt5mini';
+const modelTranslation = 'gpt54mini';
+const modelSummarize = 'gpt54mini';
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -258,6 +258,12 @@ async function summarize(req, res) {
     } else if(modelSummarize == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(modelSummarize == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
         messages: [{ role: "user", content: prompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
