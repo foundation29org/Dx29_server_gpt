@@ -35,8 +35,8 @@ const PRICING = {
     output: 0.0020,    // $2.00 per 1M tokens
   },
   gpt54mini: {
-    input: 0.00025,    // Temporalmente alineado a gpt5mini hasta confirmar tarifa final
-    output: 0.0020,    // Temporalmente alineado a gpt5mini hasta confirmar tarifa final
+    input: 0.00075,    // $0.75 per 1M tokens
+    output: 0.0045,    // $4.50 per 1M tokens
   },
   gpt5: {
     input: 0.0125,    // $1.25 per 1M tokens
