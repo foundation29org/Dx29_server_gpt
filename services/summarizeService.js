@@ -457,7 +457,7 @@ async function summarize(req, res) {
         total: stages.reduce((sum, s) => sum + (s.tokens?.total || 0), 0)
       };
 
-      await CostTrackingService.saveCostRecord({
+      const summarizeCostRecord = {
         myuuid: costTrackingData.myuuid,
         tenantId: costTrackingData.tenantId,
         subscriptionId: costTrackingData.subscriptionId,
@@ -472,6 +472,9 @@ async function summarize(req, res) {
         status: 'success',
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
+      };
+      void CostTrackingService.saveCostRecordBestEffort(summarizeCostRecord, {
+        context: 'summarize final save'
       });
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);

@@ -337,7 +337,7 @@ async function callInfoDisease(req, res) {
         try {
           stages[stages.length - 1].success = false;
           stages[stages.length - 1].error = { message: 'Empty AI response', code: 'EMPTY_RESPONSE' };
-          await CostTrackingService.saveSimpleOperationCost(
+          void CostTrackingService.saveSimpleOperationCostBestEffort(
             costTrackingData,
             'info_disease',
             stages[0],
@@ -457,7 +457,7 @@ async function callInfoDisease(req, res) {
           output: stages.reduce((sum, st) => sum + (st.tokens?.output || 0), 0),
           total: stages.reduce((sum, st) => sum + (st.tokens?.total || 0), 0)
         };
-        await CostTrackingService.saveCostRecord({
+        const infoDiseaseCostRecord = {
           myuuid: costTrackingData.myuuid,
           tenantId: costTrackingData.tenantId,
           subscriptionId: costTrackingData.subscriptionId,
@@ -472,6 +472,9 @@ async function callInfoDisease(req, res) {
           status: 'success',
           iframeParams: costTrackingData.iframeParams,
           operationData: { detectedLanguage: costTrackingData.lang }
+        };
+        void CostTrackingService.saveCostRecordBestEffort(infoDiseaseCostRecord, {
+          context: 'callInfoDisease differential save'
         });
         // Desglose de costos en consola
         console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (Differential):`);
@@ -531,7 +534,7 @@ async function callInfoDisease(req, res) {
   
         // Guardar cost tracking
         try {
-          await CostTrackingService.saveSimpleOperationCost(
+          void CostTrackingService.saveSimpleOperationCostBestEffort(
             costTrackingData,
             'info_disease',
             stages[0], // La etapa de IA
@@ -574,7 +577,7 @@ async function callInfoDisease(req, res) {
         if (stages.length > 0) {
           stages[stages.length - 1].success = false;
           stages[stages.length - 1].error = { message: e.message, code: e.name };
-          await CostTrackingService.saveSimpleOperationCost(
+          void CostTrackingService.saveSimpleOperationCostBestEffort(
             costTrackingData,
             'info_disease',
             stages[0],

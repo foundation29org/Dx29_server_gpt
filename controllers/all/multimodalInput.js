@@ -230,7 +230,7 @@ const processMultimodalInput = async (req, res) => {
                         // Tarifa S0 Web/Contenedor Lectura: $1.50 por 1000 páginas (<1M)
                         const diCost = (totalPagesProcessed / 1000) * 1.5;
                         try {
-                            await CostTrackingService.saveCostRecord({
+                            const documentIntelligenceCostRecord = {
                                 myuuid: req.body.myuuid || 'default-uuid',
                                 tenantId: tenantId,
                                 subscriptionId: subscriptionId,
@@ -252,6 +252,9 @@ const processMultimodalInput = async (req, res) => {
                                 status: 'success',
                                 iframeParams: req.body.iframeParams || {},
                                 operationData: { totalPages: totalPagesProcessed, documents: processedDocNames }
+                            };
+                            void CostTrackingService.saveCostRecordBestEffort(documentIntelligenceCostRecord, {
+                                context: 'multimodal document intelligence save'
                             });
                         } catch (ctErr) {
                             console.error('Error guardando coste de Document Intelligence:', ctErr.message);

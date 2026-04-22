@@ -1054,7 +1054,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
         console.log(`   ──────────────────────────`);
         try {
-          await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+          void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'success', null, {
             intent: 'medical_question',
             queryType: queryType
           });
@@ -1279,7 +1279,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   success: true
                 });
               }
-              await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+              void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'success', null, {
                 intent: 'non_diagnostic',
                 queryType: queryType
               });
@@ -2021,7 +2021,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     console.log(`   ──────────────────────────`);
     console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
     try {
-      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+      void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'success', null, {
         intent: 'diagnostic',
         queryType: queryType
       });
@@ -2175,7 +2175,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           });
         }
 
-        await CostTrackingService.saveDiagnoseCost(data, stages, 'error', {
+        void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'error', {
           message: error.message,
           code: error.code || 'UNKNOWN_ERROR',
           phase: error.phase || 'unknown',
