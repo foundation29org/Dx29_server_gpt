@@ -765,7 +765,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
     if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
 
-      await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
+      if (userId) {
+        await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
+      }
       console.log('General medical question detected for special tenant, generating educational response');
 
       // Llamar al modelo para contestar la pregunta médica general
@@ -1103,13 +1105,15 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           });
           // No lanzamos el error para no afectar la respuesta al usuario
         }
-        // Enviar progreso inicial
-        await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
-        // Enviar resultado final via WebPubSub
-        await pubsubService.sendResult(userId, result);
-        console.log('✅ Resultado final enviado via WebPubSub');
-        return { result: 'success', message: 'Sent via WebPubSub' };
-        //return result;
+        if (userId) {
+          // Enviar resultado final via WebPubSub cuando el flujo es asíncrono.
+          await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
+          await pubsubService.sendResult(userId, result);
+          console.log('✅ Resultado final enviado via WebPubSub');
+          return { result: 'success', message: 'Sent via WebPubSub' };
+        }
+
+        return result;
       } catch (generalMedicalError) {
         console.error('Error generating general medical response:', generalMedicalError);
         insights.error({
