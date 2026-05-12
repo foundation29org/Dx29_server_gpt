@@ -314,8 +314,14 @@ async function generateFollowUpQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     };
     const aiStartTime = Date.now();
-    let model = 'gpt5mini';
-    if(model == 'gpt5mini'){
+    let model = 'gpt54mini';
+    if(model == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],
@@ -454,7 +460,7 @@ async function generateFollowUpQuestions(req, res) {
         output: stages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
         total: stages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
       };
-      await CostTrackingService.saveCostRecord({
+      const followUpCostRecord = {
         myuuid: costTrackingData.myuuid,
         tenantId: costTrackingData.tenantId,
         subscriptionId: costTrackingData.subscriptionId,
@@ -469,6 +475,9 @@ async function generateFollowUpQuestions(req, res) {
         status: 'success',
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
+      };
+      void CostTrackingService.saveCostRecordBestEffort(followUpCostRecord, {
+        context: 'followUpQuestions final save'
       });
       // Resumen de costes
       const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
@@ -842,8 +851,14 @@ async function processFollowUpAnswers(req, res) {
       subscriptionId: subscriptionId,
       myuuid: sanitizedData.myuuid
     };
-    let model = 'gpt5mini';
-    if(model == 'gpt5mini'){
+    let model = 'gpt54mini';
+    if(model == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],
@@ -950,7 +965,7 @@ async function processFollowUpAnswers(req, res) {
         output: followUpStages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
         total: followUpStages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
       };
-      await CostTrackingService.saveCostRecord({
+      const finalCostRecord = {
         myuuid: costTrackingData.myuuid,
         tenantId: costTrackingData.tenantId,
         subscriptionId: costTrackingData.subscriptionId,
@@ -965,6 +980,10 @@ async function processFollowUpAnswers(req, res) {
         status: 'success',
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
+      };
+      // Cost tracking es observabilidad; no debe demorar la respuesta al usuario.
+      void CostTrackingService.saveCostRecordBestEffort(finalCostRecord, {
+        context: 'processFollowUpAnswers final save'
       });
       // Resumen de costes
       const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);
@@ -1306,8 +1325,14 @@ async function generateERQuestions(req, res) {
       myuuid: sanitizedData.myuuid
     };
     const aiStartTime = Date.now();
-    let model = 'gpt5mini';
-    if(model == 'gpt5mini'){
+    let model = 'gpt54mini';
+    if(model == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if(model == 'gpt5mini'){
       requestBody = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: prompt }],
@@ -1450,7 +1475,7 @@ async function generateERQuestions(req, res) {
         output: erStages.reduce((s, st) => s + (st.tokens?.output || 0), 0),
         total: erStages.reduce((s, st) => s + (st.tokens?.total || 0), 0)
       };
-      await CostTrackingService.saveCostRecord({
+      const emergencyQuestionsCostRecord = {
         myuuid: costTrackingData.myuuid,
         tenantId: costTrackingData.tenantId,
         subscriptionId: costTrackingData.subscriptionId,
@@ -1465,6 +1490,9 @@ async function generateERQuestions(req, res) {
         status: 'success',
         iframeParams: costTrackingData.iframeParams,
         operationData: { }
+      };
+      void CostTrackingService.saveCostRecordBestEffort(emergencyQuestionsCostRecord, {
+        context: 'emergencyQuestions final save'
       });
       // Resumen de costes
       const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);

@@ -11,7 +11,7 @@ function calculateMaxTokensAnon(jsonText) {
   return patientDescriptionTokens + 100;
 }
 
-async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt5mini') {
+async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, model = 'gpt54mini') {
   const RETRY_DELAY = 1000;
   const endpoints = getEndpointsByTimezone(timezone, model);
   const devInstruction = `
@@ -75,6 +75,15 @@ Original text:
   }else if(model=='gpt5mini'){
     requestBody = {
       model: "gpt-5-mini",
+      messages: [
+        { role: "developer", content: devInstruction },
+        { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
+      ],
+      reasoning_effort: "minimal" //minimal, low, medium, high
+    };
+  }else if(model=='gpt54mini'){
+    requestBody = {
+      model: "gpt-5.4-mini",
       messages: [
         { role: "developer", content: devInstruction },
         { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }

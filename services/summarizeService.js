@@ -4,8 +4,8 @@ const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
 const { calculatePrice, formatCost } = require('./costUtils');
-const modelTranslation = 'gpt5mini';
-const modelSummarize = 'gpt5mini';
+const modelTranslation = 'gpt54mini';
+const modelSummarize = 'gpt54mini';
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -261,6 +261,12 @@ async function summarize(req, res) {
         messages: [{ role: "user", content: prompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
+    } else if(modelSummarize == 'gpt54mini'){
+      requestBody = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: prompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
     }
     const summarizeResponse = await callAiWithFailover(requestBody, req.body.timezone, modelSummarize, 0, dataRequest);
     let aiEndTime = Date.now();
@@ -451,7 +457,7 @@ async function summarize(req, res) {
         total: stages.reduce((sum, s) => sum + (s.tokens?.total || 0), 0)
       };
 
-      await CostTrackingService.saveCostRecord({
+      const summarizeCostRecord = {
         myuuid: costTrackingData.myuuid,
         tenantId: costTrackingData.tenantId,
         subscriptionId: costTrackingData.subscriptionId,
@@ -466,6 +472,9 @@ async function summarize(req, res) {
         status: 'success',
         iframeParams: costTrackingData.iframeParams,
         operationData: { detectedLanguage }
+      };
+      void CostTrackingService.saveCostRecordBestEffort(summarizeCostRecord, {
+        context: 'summarize final save'
       });
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);

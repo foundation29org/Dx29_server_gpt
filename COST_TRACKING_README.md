@@ -419,3 +419,42 @@ await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
 - [ ] Exportación de reportes detallados
 - [ ] Análisis de tendencias por etapa
 - [ ] Optimización automática basada en costos 
+
+## Backlog de reevaluacion (coste/latencia)
+
+### Reevaluar traduccion con LLM (pospuesto)
+
+- **Estado actual**: no entra en el ambito de la evaluacion actual.
+- **Motivo**: en pruebas internas, traducir con LLM resulto mas barato en algunos casos, pero aumento la latencia total frente a Azure Translator.
+- **Decision vigente**: mantener Azure Translator en produccion hasta nueva evidencia.
+
+#### Datos de referencia (produccion real)
+
+- `ai_call` (`gpt5mini`): 19.6s, $0.001835
+- `reverse_diseases` (translation): 0.6s, $0.02197
+- Total pipeline: ~33s, $0.02564
+
+#### Lectura de coste actual
+
+- El cuello de coste principal esta en `reverse_diseases`, no en el `ai_call`.
+- El tiempo de `ai_call` depende del tamano del prompt (produccion corta vs dataset largo).
+
+#### Trigger para reabrir
+
+Reevaluar esta decision solo si se cumple al menos una condicion:
+
+- Se identifica un modelo de traduccion LLM rapido y estable con calidad clinica aceptable.
+- Cambian precios/cuotas de Azure Translator de forma relevante.
+- `reverse_diseases` mantiene sobrecoste material durante al menos 2 semanas.
+
+#### Criterio minimo para aprobar un cambio
+
+- Calidad de traduccion clinica igual o mejor.
+- Coste total por request menor (no solo por stage aislado).
+- Latencia p95 end-to-end igual o menor que el baseline actual.
+
+### Tarea prioritaria asociada: optimizar `reverse_diseases`
+
+- Auditar payload exacto que se traduce.
+- Medir tokens por idioma y por cantidad de enfermedades devueltas.
+- Evaluar cache/deduplicacion/traduccion selectiva de campos visibles.

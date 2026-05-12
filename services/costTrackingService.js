@@ -4,6 +4,29 @@ const CostTracking = require('../models/costTracking');
 const insights = require('./insights');
 
 class CostTrackingService {
+  static async createCostRecord(data) {
+    return CostTracking.createCostRecord(data);
+  }
+
+  static isTransientCostTrackingError(error) {
+    const message = `${error?.message || ''} ${error?.name || ''}`.toLowerCase();
+
+    return [
+      'requesttimeout',
+      'timed out',
+      'timeout',
+      'mongo network',
+      'mongonetwork',
+      'server selection',
+      'econnreset',
+      'socket',
+      'connection closed'
+    ].some(token => message.includes(token));
+  }
+
+  static delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
   
   /**
    * Guarda un registro de costo en la base de datos
@@ -12,7 +35,7 @@ class CostTrackingService {
    */
   static async saveCostRecord(data) {
     try {
-      const costRecord = await CostTracking.createCostRecord(data);
+      const costRecord = await this.createCostRecord(data);
       
       console.log(`💰 Costo guardado en DB: ${data.operation} - ${data.model} - $${data.totalCost.toFixed(6)}`);
       
@@ -26,6 +49,63 @@ class CostTrackingService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Guarda un registro de costo sin romper el flujo principal.
+   * Reintenta errores transitorios típicos de Cosmos/Mongo y nunca lanza excepción.
+   */
+  static async saveCostRecordBestEffort(data, options = {}) {
+    const {
+      context = 'cost-tracking',
+      maxAttempts = 2,
+      retryDelayMs = 250
+    } = options;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const costRecord = await this.createCostRecord(data);
+
+        console.log(`💰 Costo guardado en DB: ${data.operation} - ${data.model} - $${data.totalCost.toFixed(6)}`);
+
+        return {
+          success: true,
+          attempts: attempt,
+          costRecord
+        };
+      } catch (error) {
+        const isLastAttempt = attempt === maxAttempts;
+        const isTransient = this.isTransientCostTrackingError(error);
+
+        if (!isLastAttempt && isTransient) {
+          console.warn(`Retrying cost tracking save (${context}) attempt ${attempt}/${maxAttempts}: ${error.message}`);
+          await this.delay(retryDelayMs * attempt);
+          continue;
+        }
+
+        console.error(`Error guardando registro de costo (${context}):`, error);
+        insights.error({
+          message: 'Error guardando registro de costo',
+          context,
+          attempt,
+          transient: isTransient,
+          error: error.message,
+          data: data
+        });
+
+        return {
+          success: false,
+          attempts: attempt,
+          error
+        };
+      }
+    }
+
+    return {
+      success: false,
+      attempts: maxAttempts,
+      error: new Error('Unknown cost tracking save failure')
+    };
   }
   
   /**
@@ -69,6 +149,44 @@ class CostTrackingService {
     };
     
     return this.saveCostRecord(costData);
+  }
+
+  static async saveDiagnoseCostBestEffort(data, stages, status = 'success', error = null, options = {}) {
+    const totalCost = stages.reduce((sum, stage) => sum + (stage.cost || 0), 0);
+    const totalTokens = {
+      input: stages.reduce((sum, stage) => sum + (stage.tokens?.input || 0), 0),
+      output: stages.reduce((sum, stage) => sum + (stage.tokens?.output || 0), 0),
+      total: stages.reduce((sum, stage) => sum + (stage.tokens?.total || 0), 0)
+    };
+    const intent = options.intent || data.queryType || (error && error.queryType) || 'unknown';
+    const queryType = options.queryType || data.queryType || (error && error.queryType);
+
+    const costData = {
+      myuuid: data.myuuid,
+      tenantId: data.tenantId,
+      subscriptionId: data.subscriptionId,
+      operation: 'diagnose',
+      intent: intent,
+      model: data.model || 'gpt4o',
+      lang: data.lang,
+      timezone: data.timezone,
+      stages: stages,
+      totalCost: totalCost,
+      totalTokens: totalTokens,
+      descriptionLength: data.description ? data.description.length : 0,
+      status: status,
+      error: error,
+      iframeParams: data.iframeParams || {},
+      operationData: {
+        diseasesList: data.diseases_list,
+        detectedLanguage: data.detectedLanguage,
+        queryType: queryType
+      }
+    };
+
+    return this.saveCostRecordBestEffort(costData, {
+      context: `diagnose:${intent}`
+    });
   }
   
   /**
@@ -114,6 +232,43 @@ class CostTrackingService {
     
     return this.saveCostRecord(costData);
   }
+
+  static async saveSimpleOperationCostBestEffort(data, operation, aiStage, status = 'success', error = null) {
+    const stages = [aiStage];
+
+    const totalCost = stages.reduce((sum, stage) => sum + (stage.cost || 0), 0);
+    const totalTokens = {
+      input: stages.reduce((sum, stage) => sum + (stage.tokens?.input || 0), 0),
+      output: stages.reduce((sum, stage) => sum + (stage.tokens?.output || 0), 0),
+      total: stages.reduce((sum, stage) => sum + (stage.tokens?.total || 0), 0)
+    };
+
+    const costData = {
+      myuuid: data.myuuid,
+      tenantId: data.tenantId,
+      subscriptionId: data.subscriptionId,
+      operation: operation,
+      model: aiStage.model,
+      lang: data.lang,
+      timezone: data.timezone,
+      stages: stages,
+      totalCost: totalCost,
+      totalTokens: totalTokens,
+      descriptionLength: data.description ? data.description.length : 0,
+      status: status,
+      error: error,
+      iframeParams: data.iframeParams || {},
+      operationData: {
+        questionType: data.questionType,
+        disease: data.disease,
+        detectedLanguage: data.detectedLanguage
+      }
+    };
+
+    return this.saveCostRecordBestEffort(costData, {
+      context: `simple-operation:${operation}`
+    });
+  }
   
   /**
    * Crea un registro para operaciones sin IA (solo BD)
@@ -151,6 +306,39 @@ class CostTrackingService {
     };
     
     return this.saveCostRecord(costData);
+  }
+
+  static async saveDatabaseOnlyOperationBestEffort(data, operation, status = 'success', error = null) {
+    const stages = [{
+      name: 'database_save',
+      cost: 0,
+      tokens: { input: 0, output: 0, total: 0 },
+      model: 'database',
+      duration: data.saveDuration || 0,
+      success: status === 'success'
+    }];
+
+    const costData = {
+      myuuid: data.myuuid,
+      tenantId: data.tenantId,
+      subscriptionId: data.subscriptionId,
+      operation: operation,
+      model: 'database',
+      lang: data.lang,
+      timezone: data.timezone,
+      stages: stages,
+      totalCost: 0,
+      totalTokens: { input: 0, output: 0, total: 0 },
+      descriptionLength: data.description ? data.description.length : 0,
+      status: status,
+      error: error,
+      iframeParams: data.iframeParams || {},
+      operationData: data.operationData || {}
+    };
+
+    return this.saveCostRecordBestEffort(costData, {
+      context: `database-only:${operation}`
+    });
   }
   
   /**

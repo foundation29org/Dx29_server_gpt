@@ -7,6 +7,27 @@ const { jsonrepair } = require('jsonrepair');
 
 // Detectar si es deployment self-hosted (sin APIM)
 const isSelfHosted = config.IS_SELF_HOSTED || false;
+const DEFAULT_AI_MODEL = 'gpt54mini';
+const ROUTING_MODEL_ALIASES = {
+  gpt4o: 'gpt4o',
+  o3: 'o3',
+  gpt5nano: 'gpt5nano',
+  'gpt-5-nano': 'gpt5nano',
+  gpt5mini: 'gpt5mini',
+  'gpt-5-mini': 'gpt5mini',
+  gpt54mini: 'gpt54mini',
+  'gpt-5.4-mini': 'gpt54mini',
+  gpt5: 'gpt5',
+  'gpt-5': 'gpt5'
+};
+const ROUTING_TO_DEPLOYMENT_MODEL = {
+  gpt4o: 'gpt4o',
+  o3: 'o3',
+  gpt5nano: 'gpt-5-nano',
+  gpt5mini: 'gpt-5-mini',
+  gpt54mini: 'gpt-5.4-mini',
+  gpt5: 'gpt-5'
+};
 
 // Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
 const getRegionToAzureOpenAI = () => {
@@ -37,6 +58,10 @@ const modelConfig = {
     apiVersion: '2025-01-01-preview',
     path: '/openai/deployments/gpt-5-mini/chat/completions'
   },
+  'gpt-5.4-mini': {
+    apiVersion: '2025-04-01-preview',
+    path: '/openai/deployments/gpt-5.4-mini/chat/completions'
+  },
   'gpt-5-nano': {
     apiVersion: '2025-01-01-preview',
     path: '/openai/deployments/gpt-5-nano/chat/completions'
@@ -50,7 +75,7 @@ const modelConfig = {
 /**
  * Construye la URL completa de Azure OpenAI para un endpoint específico
  * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
- * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5-nano, o3)
+ * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, o3)
  * @returns {Object} - { url, apiKey } o null si no está configurado
  */
 function buildAzureOpenAIEndpoint(region, model) {
@@ -146,10 +171,11 @@ const translatorEndpoints = [
  */
 function getSelfHostedEndpoints(model) {
   const endpoints = [];
+  const deploymentModel = ROUTING_TO_DEPLOYMENT_MODEL[model] || ROUTING_TO_DEPLOYMENT_MODEL[DEFAULT_AI_MODEL];
   
   // PRIMARY siempre está disponible si está configurado
   if (regionToAzureOpenAI.primary && regionToAzureOpenAI.primary.baseUrl && regionToAzureOpenAI.primary.apiKey) {
-    const primaryEndpoint = buildAzureOpenAIEndpoint('primary', model);
+    const primaryEndpoint = buildAzureOpenAIEndpoint('primary', deploymentModel);
     if (primaryEndpoint) {
       endpoints.push(primaryEndpoint);
     }
@@ -157,7 +183,7 @@ function getSelfHostedEndpoints(model) {
   
   // FALLBACK solo si está configurado
   if (regionToAzureOpenAI.fallback && regionToAzureOpenAI.fallback.baseUrl && regionToAzureOpenAI.fallback.apiKey) {
-    const fallbackEndpoint = buildAzureOpenAIEndpoint('fallback', model);
+    const fallbackEndpoint = buildAzureOpenAIEndpoint('fallback', deploymentModel);
     if (fallbackEndpoint) {
       endpoints.push(fallbackEndpoint);
     }
@@ -289,6 +315,36 @@ const endpointsMap = {
       buildAzureOpenAIEndpoint('as2', 'gpt-5-mini')
     ]
   },
+  gpt54mini: {
+    asia: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5.4-mini')
+    ],
+    europe: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini')
+    ],
+    northamerica: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.4-mini')
+    ],
+    southamerica: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.4-mini')
+    ],
+    africa: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5-mini')
+    ],
+    oceania: [
+      buildAzureOpenAIEndpoint('as2', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini')
+    ],
+    other: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini'),
+      buildAzureOpenAIEndpoint('as2', 'gpt-5.4-mini')
+    ]
+  },
   gpt5: {
     asia: [
       buildAzureOpenAIEndpoint('as1', 'gpt-5'),
@@ -321,10 +377,17 @@ const endpointsMap = {
   }
 };
 
-function getEndpointsByTimezone(timezone, model = 'gpt5mini') {
+function normalizeRoutingModel(model) {
+  const normalized = ROUTING_MODEL_ALIASES[(model || '').toString().trim()];
+  return normalized || DEFAULT_AI_MODEL;
+}
+
+function getEndpointsByTimezone(timezone, model = DEFAULT_AI_MODEL) {
+  const normalizedModel = normalizeRoutingModel(model);
+
   // Si es self-hosted, usar endpoints simplificados (PRIMARY y FALLBACK)
   if (isSelfHosted && regionToAzureOpenAI.primary) {
-    const endpoints = getSelfHostedEndpoints(model);
+    const endpoints = getSelfHostedEndpoints(normalizedModel);
     if (endpoints.length > 0) {
       return endpoints;
     }
@@ -342,23 +405,28 @@ function getEndpointsByTimezone(timezone, model = 'gpt5mini') {
     if (tz?.includes('australia') || tz?.includes('pacific')) return 'oceania';
     return 'other';
   })();
-  console.log('model', model);
-  const endpoints = endpointsMap[model]?.[region] || endpointsMap[model].other;
+  const modelEndpoints = endpointsMap[normalizedModel] || endpointsMap[DEFAULT_AI_MODEL];
+  console.log('model', normalizedModel);
+  const endpoints = modelEndpoints?.[region] || modelEndpoints?.other || [];
+  if (!endpoints.length) {
+    throw new Error(`No hay endpoints configurados para modelo ${normalizedModel}`);
+  }
   return endpoints;
 }
 
-async function callAiWithFailover(requestBody, timezone, model = 'gpt5mini', retryCount = 0, dataRequest = null) {
+async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, dataRequest = null) {
   const RETRY_DELAY = 1000;
+  const normalizedModel = normalizeRoutingModel(model);
 
-  const endpoints = getEndpointsByTimezone(timezone, model);
+  const endpoints = getEndpointsByTimezone(timezone, normalizedModel);
   const endpoint = endpoints[retryCount];
   
   // Si el endpoint es null (no configurado), intentar el siguiente
   if (!endpoint || !endpoint.url || !endpoint.apiKey) {
     if (retryCount < endpoints.length - 1) {
-      return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
+      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, dataRequest);
     }
-    throw new Error(`No hay endpoints configurados para modelo ${model} en región ${timezone}`);
+    throw new Error(`No hay endpoints configurados para modelo ${normalizedModel} en región ${timezone}`);
   }
 
   try {
@@ -381,19 +449,27 @@ async function callAiWithFailover(requestBody, timezone, model = 'gpt5mini', ret
     });
     return response;
   } catch (error) {
-    if (retryCount < endpoints.length - 1) {
+    const statusCode = error.response?.status;
+    const errorDetails = error.response?.data || null;
+    const shouldRetry = statusCode !== 400 && retryCount < endpoints.length - 1;
+
+    insights.error({
+      message: `Fallo AI endpoint ${endpoint.url}`,
+      error: error.message,
+      statusCode,
+      errorDetails,
+      retryCount,
+      willRetry: shouldRetry,
+      requestBody,
+      timezone,
+      model: normalizedModel,
+      dataRequest
+    });
+
+    if (shouldRetry) {
       console.warn(`❌ Error en ${endpoint.url} — Reintentando en ${RETRY_DELAY}ms...`);
-      insights.error({
-        message: `Fallo AI endpoint ${endpoint.url}`,
-        error: error.message,
-        retryCount,
-        requestBody,
-        timezone,
-        model,
-        dataRequest
-      });
       await delay(RETRY_DELAY);
-      return callAiWithFailover(requestBody, timezone, model, retryCount + 1, dataRequest);
+      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, dataRequest);
     }
     throw error;
   }

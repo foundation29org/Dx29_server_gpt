@@ -1,7 +1,7 @@
 const insights = require('./insights');
 const { callAiWithFailover, parseJsonWithFixes, sanitizeInput } = require('./aiUtils');
 
-const profileInferenceModel = 'gpt5mini';
+const profileInferenceModel = 'gpt54mini';
 
 const USER_TYPES = {
   PROFESSIONAL: 'professional',
@@ -182,7 +182,7 @@ async function inferProfileAndSpecialty({
 
   const prompt = buildProfileInferencePrompt(safeDescription, safeDiseases);
   const requestBody = {
-    model: 'gpt-5-mini',
+    model: 'gpt-5.4-mini',
     messages: [{ role: 'user', content: prompt }],
     reasoning_effort: 'low'
   };

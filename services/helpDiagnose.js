@@ -20,10 +20,14 @@ const {
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
 
-const defaultModel = 'gpt5mini';
-const modelIntencion = 'gpt5mini'; //'gpt4o';
+const defaultModel = 'gpt54mini';
+const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
-const modelAnonymization = 'gpt5mini';//'gpt5mini'; //'gpt5nano';
+const modelAnonymization = 'gpt54mini';//'gpt5mini'; //'gpt5nano';
+const GeminiApiKey = config.GEMINI_API_KEY;
+const ADVANCED_GEMINI_PRIMARY = 'gemini-3-pro-preview';
+const ADVANCED_GEMINI_FALLBACK = 'gemini-2.5-pro';
+const GEMINI_THINKING_LEVEL = 'low';
 const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
 const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
   ? config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD
@@ -86,6 +90,142 @@ async function callSonarAPI(prompt, timezone, modelType) {
   return perplexityResponse;
 }
 
+function buildAzureO3Request(prompt) {
+  return {
+    model: "o3-dxgpt",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: prompt }
+        ]
+      }
+    ],
+    tools: [],
+    text: {
+      format: {
+        type: "text"
+      }
+    },
+    reasoning: {
+      effort: "high"
+    }
+  };
+}
+
+async function callGeminiModel(prompt, modelName) {
+  if (!GeminiApiKey) {
+    throw new Error('GEMINI_API_KEY not configured');
+  }
+
+  const axios = require('axios');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GeminiApiKey}`;
+  const requestBody = {
+    contents: [
+      {
+        parts: [{ text: prompt }]
+      }
+    ],
+    generationConfig: {
+      temperature: 0
+    }
+  };
+
+  // Mantener thinking_level bajo según evaluación del modelo avanzado.
+  requestBody.thinking_config = {
+    thinking_level: GEMINI_THINKING_LEVEL
+  };
+
+  let response;
+  try {
+    response = await axios.post(url, requestBody, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  } catch (error) {
+    const isBadRequest = error?.response?.status === 400;
+    if (!isBadRequest) {
+      throw error;
+    }
+
+    // Compatibilidad: reintentar sin thinking_config si alguna versión no soporta el campo.
+    const fallbackBody = { ...requestBody };
+    delete fallbackBody.thinking_config;
+    response = await axios.post(url, fallbackBody, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  const candidate = response?.data?.candidates?.[0];
+  if (!candidate) {
+    throw new Error(`Gemini ${modelName} returned no candidates`);
+  }
+
+  const finishReason = candidate?.finishReason;
+  if (finishReason && finishReason !== 'STOP' && finishReason !== 'MAX_TOKENS') {
+    throw new Error(`Gemini ${modelName} finished with reason: ${finishReason}`);
+  }
+
+  const text = candidate?.content?.parts
+    ?.map((part) => part?.text || '')
+    .join('')
+    ?.trim();
+
+  if (!text) {
+    throw new Error(`Gemini ${modelName} returned empty content`);
+  }
+
+  const usageMetadata = response?.data?.usageMetadata || {};
+  const promptTokens = usageMetadata.promptTokenCount ?? usageMetadata.inputTokenCount ?? 0;
+  const completionTokens = usageMetadata.candidatesTokenCount ?? usageMetadata.outputTokenCount ?? 0;
+  const totalTokens = usageMetadata.totalTokenCount ?? (promptTokens + completionTokens);
+
+  return {
+    data: {
+      choices: [
+        {
+          message: {
+            content: text
+          }
+        }
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens
+      }
+    }
+  };
+}
+
+async function callAdvancedModelChain(prompt, timezone, dataRequest) {
+  const tried = [];
+  const geminiCandidates = [ADVANCED_GEMINI_PRIMARY, ADVANCED_GEMINI_FALLBACK];
+
+  for (const geminiModel of geminiCandidates) {
+    try {
+      const response = await callGeminiModel(prompt, geminiModel);
+      return { response, provider: geminiModel };
+    } catch (error) {
+      tried.push({ model: geminiModel, error: error?.message || String(error) });
+    }
+  }
+
+  insights.trackEvent('AdvancedModelFallbackUsed', {
+    primary: ADVANCED_GEMINI_PRIMARY,
+    secondary: ADVANCED_GEMINI_FALLBACK,
+    tertiary: 'o3',
+    tried
+  });
+
+  const o3RequestBody = buildAzureO3Request(prompt);
+  const response = await callAiWithFailover(o3RequestBody, timezone, 'o3', 0, dataRequest);
+  return { response, provider: 'o3' };
+}
+
 // Función para llamar a modelos GPT
 async function callGPTAPI(prompt, timezone, dataRequest, model = defaultModel) {
 
@@ -108,6 +248,13 @@ async function callGPTAPI(prompt, timezone, dataRequest, model = defaultModel) {
 
     requestBody = {
       model: "gpt-5-mini",
+      messages: [{ role: "user", content: prompt }],
+      reasoning_effort: "low" //minimal, low, medium, high
+    };
+  } else if (model === 'gpt54mini') {
+
+    requestBody = {
+      model: "gpt-5.4-mini",
       messages: [{ role: "user", content: prompt }],
       reasoning_effort: "low" //minimal, low, medium, high
     };
@@ -196,6 +343,10 @@ async function getMedicalResponse(prompt, timezone, dataRequest, modelType = def
     case 'gpt5mini':
       response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt5mini');
       model = 'gpt5mini';
+      break;
+    case 'gpt54mini':
+      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt54mini');
+      model = 'gpt54mini';
       break;
     case 'gpt4o':
     default:
@@ -418,7 +569,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     //console.log('englishDescription', englishDescription)
     const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
     let clinicalScenarioRequest;
-    if (modelIntencion === 'gpt5mini') {
+    if (modelIntencion === 'gpt54mini') {
+      clinicalScenarioRequest = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "user", content: clinicalScenarioPrompt }],
+        reasoning_effort: "low"
+      };
+    } else if (modelIntencion === 'gpt5mini') {
       clinicalScenarioRequest = {
         model: "gpt-5-mini",
         messages: [{ role: "user", content: clinicalScenarioPrompt }],
@@ -528,7 +685,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
         let medicalQuestionRequest;
-        if (modelIntencion === 'gpt5mini') {
+        if (modelIntencion === 'gpt54mini') {
+          medicalQuestionRequest = {
+            model: "gpt-5.4-mini",
+            messages: [{ role: "user", content: medicalQuestionPrompt }],
+            reasoning_effort: "low"
+          };
+        } else if (modelIntencion === 'gpt5mini') {
           medicalQuestionRequest = {
             model: "gpt-5-mini",
             messages: [{ role: "user", content: medicalQuestionPrompt }],
@@ -602,7 +765,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
     if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
 
-      await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
+      if (userId) {
+        await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
+      }
       console.log('General medical question detected for special tenant, generating educational response');
 
       // Llamar al modelo para contestar la pregunta médica general
@@ -891,7 +1056,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
         console.log(`   ──────────────────────────`);
         try {
-          await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+          void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'success', null, {
             intent: 'medical_question',
             queryType: queryType
           });
@@ -940,13 +1105,15 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           });
           // No lanzamos el error para no afectar la respuesta al usuario
         }
-        // Enviar progreso inicial
-        await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
-        // Enviar resultado final via WebPubSub
-        await pubsubService.sendResult(userId, result);
-        console.log('✅ Resultado final enviado via WebPubSub');
-        return { result: 'success', message: 'Sent via WebPubSub' };
-        //return result;
+        if (userId) {
+          // Enviar resultado final via WebPubSub cuando el flujo es asíncrono.
+          await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing response...', 90);
+          await pubsubService.sendResult(userId, result);
+          console.log('✅ Resultado final enviado via WebPubSub');
+          return { result: 'success', message: 'Sent via WebPubSub' };
+        }
+
+        return result;
       } catch (generalMedicalError) {
         console.error('Error generating general medical response:', generalMedicalError);
         insights.error({
@@ -1116,7 +1283,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
                   success: true
                 });
               }
-              await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+              void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'success', null, {
                 intent: 'non_diagnostic',
                 queryType: queryType
               });
@@ -1177,28 +1344,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         .replace("{{description}}", englishDescription);
     console.log('Calling IA for full diagnoses');
     let requestBody;
-    if (model === 'o3') {
-      requestBody = {
-        model: "o3-dxgpt",
-        input: [
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: helpDiagnosePrompt }
-            ]
-          }
-        ],
-        tools: [],
-        text: {
-          format: {
-            type: "text"
-          }
-        },
-        reasoning: {
-          effort: "high"
-        }
-      };
-    } else if (model === 'gpt5nano') {
+    if (model === 'gpt5nano') {
       requestBody = {
         model: "gpt-5-nano",
         messages: [{ role: "user", content: helpDiagnosePrompt }],
@@ -1207,6 +1353,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     } else if (model === 'gpt5mini') {
       requestBody = {
         model: "gpt-5-mini",
+        messages: [{ role: "user", content: helpDiagnosePrompt }],
+        reasoning_effort: "low" //minimal, low, medium, high
+      };
+    } else if (model === 'gpt54mini') {
+      requestBody = {
+        model: "gpt-5.4-mini",
         messages: [{ role: "user", content: helpDiagnosePrompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
@@ -1254,7 +1406,23 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     const aiStartMs = Date.now();
-    const aiResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+    let aiResponse;
+    let diagnosticsModelUsed = model;
+    if (model === 'o3') {
+      const advancedResult = await callAdvancedModelChain(helpDiagnosePrompt, data.timezone, dataRequest);
+      aiResponse = advancedResult.response;
+      diagnosticsModelUsed = advancedResult.provider || model;
+      if (advancedResult.provider !== 'o3') {
+        insights.trackEvent('AdvancedModelChainUsed', {
+          provider: advancedResult.provider,
+          requestedModel: model,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        });
+      }
+    } else {
+      aiResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
+    }
     const aiElapsedMs = Date.now() - aiStartMs;
     let usage = null;
 
@@ -1265,21 +1433,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
     // Procesar la respuesta según el modelo
     let aiResponseText;
-    if (model === 'o3') {
+    if (model === 'o3' && aiResponse.data?.output && Array.isArray(aiResponse.data.output)) {
       usage = aiResponse.data?.usage;
-      // Validar que la respuesta tiene el formato esperado para o3
-      if (!aiResponse.data?.output || !Array.isArray(aiResponse.data.output)) {
-        console.error('❌ Invalid o3 AI response format:', JSON.stringify(aiResponse.data));
-        insights.error({
-          message: 'Invalid o3 AI response format - no output array',
-          response: JSON.stringify(aiResponse.data),
-          model: model,
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          timezone: data.timezone
-        });
-        throw new Error('Invalid o3 AI response format - no output returned from OpenAI');
-      }
       aiResponseText = aiResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
     } else {
       usage = aiResponse.data?.usage;
@@ -1304,7 +1459,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
     // Calcular costos de la Etapa 1: Diagnósticos completos
     if (usage) {
-      const etapa1Cost = calculatePrice(usage, model);
+      const etapa1Cost = calculatePrice(usage, diagnosticsModelUsed);
       costTracking.etapa1_diagnosticos = {
         cost: etapa1Cost.totalCost,
         tokens: {
@@ -1596,7 +1751,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         };
 
         if (profileInferenceResult.usage) {
-          const profileInferenceCost = calculatePrice(profileInferenceResult.usage, profileInferenceResult.model || 'gpt5mini');
+          const profileInferenceCost = calculatePrice(profileInferenceResult.usage, profileInferenceResult.model || 'gpt54mini');
           costTracking.profile_inference = {
             cost: profileInferenceCost.totalCost,
             tokens: {
@@ -1604,7 +1759,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               output: profileInferenceCost.outputTokens,
               total: profileInferenceCost.totalTokens
             },
-            model: profileInferenceResult.model || 'gpt5mini',
+            model: profileInferenceResult.model || 'gpt54mini',
             duration: profileInferenceResult.durationMs || 0,
             success: true
           };
@@ -1670,6 +1825,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         } else if (model == 'gpt5') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
         } else if (model == 'gpt5mini') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
+        } else if (model == 'gpt54mini') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
         } else if (model == 'gpt5nano') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5nano');
@@ -1818,7 +1975,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         name: 'profile_inference',
         cost: costTracking.profile_inference.cost,
         tokens: costTracking.profile_inference.tokens,
-        model: costTracking.profile_inference.model || 'gpt5mini',
+        model: costTracking.profile_inference.model || 'gpt54mini',
         duration: costTracking.profile_inference.duration || 0,
         success: true
       });
@@ -1868,7 +2025,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     console.log(`   ──────────────────────────`);
     console.log(`   TOTAL: ${formatCost(costTracking.total.cost)} (${costTracking.total.tokens.total} tokens)\n`);
     try {
-      await CostTrackingService.saveDiagnoseCost(data, stages, 'success', null, {
+      void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'success', null, {
         intent: 'diagnostic',
         queryType: queryType
       });
@@ -2016,13 +2173,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             name: 'profile_inference',
             cost: costTracking.profile_inference.cost,
             tokens: costTracking.profile_inference.tokens,
-            model: costTracking.profile_inference.model || 'gpt5mini',
+            model: costTracking.profile_inference.model || 'gpt54mini',
             duration: costTracking.profile_inference.duration || 0,
             success: false
           });
         }
 
-        await CostTrackingService.saveDiagnoseCost(data, stages, 'error', {
+        void CostTrackingService.saveDiagnoseCostBestEffort(data, stages, 'error', {
           message: error.message,
           code: error.code || 'UNKNOWN_ERROR',
           phase: error.phase || 'unknown',
@@ -2172,7 +2329,7 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
-  const model = req.body.model || 'gpt5mini';
+  const model = req.body.model || 'gpt54mini';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
@@ -2360,7 +2517,7 @@ async function diagnose(req, res) {
     }
 
     // 2. Si es modelo largo, responde rápido y procesa en background
-    const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini' || model === 'gpt5');
+    const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini' || model === 'gpt54mini' || model === 'gpt5');
     // Para self-hosted, no usar el sistema de colas
     const { region, model: registeredModel, queueKey } = config.IS_SELF_HOSTED 
       ? { region: null, model, queueKey: null }

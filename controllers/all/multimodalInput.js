@@ -230,7 +230,7 @@ const processMultimodalInput = async (req, res) => {
                         // Tarifa S0 Web/Contenedor Lectura: $1.50 por 1000 páginas (<1M)
                         const diCost = (totalPagesProcessed / 1000) * 1.5;
                         try {
-                            await CostTrackingService.saveCostRecord({
+                            const documentIntelligenceCostRecord = {
                                 myuuid: req.body.myuuid || 'default-uuid',
                                 tenantId: tenantId,
                                 subscriptionId: subscriptionId,
@@ -252,6 +252,9 @@ const processMultimodalInput = async (req, res) => {
                                 status: 'success',
                                 iframeParams: req.body.iframeParams || {},
                                 operationData: { totalPages: totalPagesProcessed, documents: processedDocNames }
+                            };
+                            void CostTrackingService.saveCostRecordBestEffort(documentIntelligenceCostRecord, {
+                                context: 'multimodal document intelligence save'
                             });
                         } catch (ctErr) {
                             console.error('Error guardando coste de Document Intelligence:', ctErr.message);
@@ -407,7 +410,7 @@ const processMultimodalInput = async (req, res) => {
             }
             
             // Llamar a diagnose con la descripción y URLs de imagen
-            let model = 'gpt5mini';
+            let model = 'gpt54mini';
             if(hasImage){
                 model = 'gpt5';
             }
@@ -489,7 +492,7 @@ async function callDiagnoses(data, requestInfo) {
             myuuid: data.myuuid,
             lang: data.lang,
             timezone: data.timezone || 'UTC',
-            model: data.model || 'gpt5mini',
+            model: data.model || 'gpt54mini',
             iframeParams: data.iframeParams || {},
             imageUrls: data.imageUrls || []
         },

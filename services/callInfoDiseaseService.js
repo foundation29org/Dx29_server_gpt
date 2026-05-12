@@ -3,32 +3,15 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
-const { encodingForModel } = require("js-tiktoken");
+
+const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
+const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
+const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5';
 
 // Asegúrate de copiar la función getHeader si es necesaria
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
 }
-
-function extractContent(tag, text) {
-    const regex = new RegExp(`<${tag}>(.*?)</${tag}>`, 's');
-    const match = text.match(regex);
-    return match ? match[1].trim() : '';
-  }
-
-function calculateMaxTokens(jsonText) {
-    const enc = encodingForModel("gpt-4o");
-  
-    // Extraer contenido relevante
-    const patientDescription = extractContent('patient_description', jsonText);
-  
-    // Contar tokens en el contenido relevante
-    const patientDescriptionTokens = enc.encode(patientDescription).length;
-    //  console.log('patientDescriptionTokens', patientDescriptionTokens);
-    let max_tokens = Math.round(patientDescriptionTokens * 6);
-    max_tokens += 500; // Add extra tokens for the prompt
-    return max_tokens;
-  }
 
 function validateQuestionRequest(data) {
     const errors = [];
@@ -229,20 +212,15 @@ async function callInfoDisease(req, res) {
           return res.status(400).send({ result: "error", message: "Invalid question type" });
       }
   
+      let model = CALL_INFO_DISEASE_MODEL;
       const messages = [{ role: "user", content: prompt }];
       let requestBody = {
         messages: messages,
         temperature: 0,
-        max_tokens: 1000,
         top_p: 1,
         frequency_penalty: 0,
         presence_penalty: 0,
       };
-  
-      let max_tokens = calculateMaxTokens(prompt);
-      if (max_tokens > 4000) {
-        requestBody.max_tokens = 4096;
-      }
   
       // Reemplazar la llamada directa a axios con nuestra función de failover
       let dataRequest = {
@@ -251,12 +229,11 @@ async function callInfoDisease(req, res) {
         myuuid: sanitizedData.myuuid
       };
       
-    let model = 'gpt4o';
     if(sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0){
-      model = 'gpt5';
+      model = CALL_INFO_DISEASE_IMAGE_MODEL;
 
       requestBody = {
-        model: "gpt-5",
+        model: CALL_INFO_DISEASE_IMAGE_API_MODEL,
         messages: [
           {
             role: "user",
@@ -360,7 +337,7 @@ async function callInfoDisease(req, res) {
         try {
           stages[stages.length - 1].success = false;
           stages[stages.length - 1].error = { message: 'Empty AI response', code: 'EMPTY_RESPONSE' };
-          await CostTrackingService.saveSimpleOperationCost(
+          void CostTrackingService.saveSimpleOperationCostBestEffort(
             costTrackingData,
             'info_disease',
             stages[0],
@@ -480,12 +457,12 @@ async function callInfoDisease(req, res) {
           output: stages.reduce((sum, st) => sum + (st.tokens?.output || 0), 0),
           total: stages.reduce((sum, st) => sum + (st.tokens?.total || 0), 0)
         };
-        await CostTrackingService.saveCostRecord({
+        const infoDiseaseCostRecord = {
           myuuid: costTrackingData.myuuid,
           tenantId: costTrackingData.tenantId,
           subscriptionId: costTrackingData.subscriptionId,
           operation: 'info_disease',
-          model: stages.find(s => s.name === 'ai_call')?.model || 'gpt4o',
+          model: stages.find(s => s.name === 'ai_call')?.model || CALL_INFO_DISEASE_MODEL,
           lang: costTrackingData.lang,
           timezone: costTrackingData.timezone,
           stages,
@@ -495,6 +472,9 @@ async function callInfoDisease(req, res) {
           status: 'success',
           iframeParams: costTrackingData.iframeParams,
           operationData: { detectedLanguage: costTrackingData.lang }
+        };
+        void CostTrackingService.saveCostRecordBestEffort(infoDiseaseCostRecord, {
+          context: 'callInfoDisease differential save'
         });
         // Desglose de costos en consola
         console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (Differential):`);
@@ -554,7 +534,7 @@ async function callInfoDisease(req, res) {
   
         // Guardar cost tracking
         try {
-          await CostTrackingService.saveSimpleOperationCost(
+          void CostTrackingService.saveSimpleOperationCostBestEffort(
             costTrackingData,
             'info_disease',
             stages[0], // La etapa de IA
@@ -597,7 +577,7 @@ async function callInfoDisease(req, res) {
         if (stages.length > 0) {
           stages[stages.length - 1].success = false;
           stages[stages.length - 1].error = { message: e.message, code: e.name };
-          await CostTrackingService.saveSimpleOperationCost(
+          void CostTrackingService.saveSimpleOperationCostBestEffort(
             costTrackingData,
             'info_disease',
             stages[0],
