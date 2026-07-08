@@ -15,7 +15,7 @@
   "author": "LOA",
   "license": "MIT",
   "dependencies": {
-    "@azure-rest/ai-document-intelligence": "1.0.0-alpha.20240209.1",
+    "@azure-rest/ai-document-intelligence": "^1.0.0",
     "@azure/service-bus": "^7.9.5",
     "@azure/storage-blob": "^12.16.0",
     "@azure/web-pubsub": "^1.2.0",

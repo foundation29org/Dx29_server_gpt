@@ -64,7 +64,8 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         // Crear el cliente dentro de la función, igual que en el otro proyecto
         const clientIntelligence = createDocumentIntelligenceClient(
             config.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT,
-            { key: config.AZURE_DOCUMENT_INTELLIGENCE_KEY }
+            { key: config.AZURE_DOCUMENT_INTELLIGENCE_KEY },
+            { apiVersion: "2024-11-30" }
         );
 
         console.log('Enviando solicitud a Azure Document Intelligence...');
