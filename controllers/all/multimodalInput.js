@@ -85,10 +85,11 @@ const processDocument = async (fileBuffer, originalName, blobUrl) => {
         }
 
         console.log('Iniciando polling...');
-        const poller = await getLongRunningPoller(clientIntelligence, initialResponse);
+        const poller = getLongRunningPoller(clientIntelligence, initialResponse);
         console.log('Poller creado, esperando resultado...');
-        
-        const result = (await poller.pollUntilDone()).body;
+
+        const flatResponse = await poller.pollUntilDone();
+        const result = flatResponse.body;
         const duration = Date.now() - startDi;
         console.log('Análisis completado');
 
