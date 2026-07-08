@@ -2043,6 +2043,17 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     if (userId) {
       await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 95);
     }
+    if (parsedResponse.length > 0 && queryType === 'diagnostic') {
+      const f29LiveEventService = require('./f29LiveEventService');
+      void f29LiveEventService.notifyDiagnosisFinished({
+        countryCode: data.countryCode || '',
+        countryName: data.countryName || '',
+        timezone: data.timezone || '',
+        tenantId: data.tenantId || '',
+      }).catch((err) => {
+        console.warn('F29 live event failed:', err.message || err);
+      });
+    }
     let diseasesList = [];
     if (parsedResponse.length > 0) {
       diseasesList = parsedResponse;
