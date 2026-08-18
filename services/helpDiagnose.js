@@ -1467,6 +1467,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           output: etapa1Cost.outputTokens,
           total: etapa1Cost.totalTokens
         },
+        model: diagnosticsModelUsed,
         duration: aiElapsedMs
       };
       costTracking.total.cost += etapa1Cost.totalCost;
@@ -1861,7 +1862,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         name: 'ai_call',
         cost: costTracking.etapa1_diagnosticos.cost,
         tokens: costTracking.etapa1_diagnosticos.tokens,
-        model: model,
+        model: costTracking.etapa1_diagnosticos.model || model,
         duration: costTracking.etapa1_diagnosticos.duration || 0,
         success: true
       });
@@ -2123,7 +2124,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             name: 'ai_call',
             cost: costTracking.etapa1_diagnosticos.cost,
             tokens: costTracking.etapa1_diagnosticos.tokens,
-            model: model,
+            model: costTracking.etapa1_diagnosticos.model || model,
             duration: costTracking.etapa1_diagnosticos.duration || 0,
             success: false
           });
