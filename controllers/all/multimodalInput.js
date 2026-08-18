@@ -332,7 +332,10 @@ const processMultimodalInput = async (req, res) => {
                 combinedInput = 'No content was provided to analyze.';
             }
 
-            // Crear un objeto request simulado para el servicio de summarize
+            const hasPatient = !!results.textInput?.trim();
+            const hasDoc = !!results.documentAnalysis?.trim();
+            const hasImage = results.imageUrls?.length > 0;
+
             const mockReq = {
                 body: {
                     description: combinedInput,
@@ -347,12 +350,7 @@ const processMultimodalInput = async (req, res) => {
                 query: req.query
             };
 
-            // Usar:
             let description = '';
-
-            const hasPatient = !!results.textInput?.trim();
-            const hasDoc = !!results.documentAnalysis?.trim();
-            const hasImage = results.imageUrls?.length > 0;
 
             let descriptionImage = '';
             if(hasImage){
