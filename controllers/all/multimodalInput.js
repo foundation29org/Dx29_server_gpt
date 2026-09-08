@@ -43,6 +43,21 @@ function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
 
+const PRODUCT_SUMMARY_MIN_CHARS = 1000;
+const EVAL_MODEL_OVERRIDE_TENANTS = /^(dxgpt-local|dxgpt-eval|dxgpt-dev)/i;
+
+function canOverrideModel(tenantId) {
+    return process.env.NODE_ENV === 'local' || EVAL_MODEL_OVERRIDE_TENANTS.test(String(tenantId || ''));
+}
+
+function resolveDiagnoseModel(requestedModel, hasImage, tenantId) {
+    const requested = String(requestedModel || '').trim();
+    if (requested && canOverrideModel(tenantId)) {
+        return requested;
+    }
+    return hasImage ? 'gpt5' : 'gpt54mini';
+}
+
 const processDocument = async (fileBuffer, originalName, blobUrl) => {
     try {
         console.log('Iniciando procesamiento de documento:', originalName);
@@ -374,7 +389,7 @@ const processMultimodalInput = async (req, res) => {
             if (hasPatient || hasDoc) {
                 // Verificar si el combinedInput es lo suficientemente largo para justificar un resumen
                 const combinedInputLength = combinedInput.trim().length;
-                const minLengthForSummary = 1000; // Ajusta según necesites
+                const minLengthForSummary = PRODUCT_SUMMARY_MIN_CHARS;
                 
                 if (combinedInputLength > minLengthForSummary) {
                     // Si hay texto/documento largo, resumir primero
@@ -409,11 +424,8 @@ const processMultimodalInput = async (req, res) => {
                 description = descriptionImage;
             }
             
-            // Llamar a diagnose con la descripción y URLs de imagen
-            let model = 'gpt54mini';
-            if(hasImage){
-                model = 'gpt5';
-            }
+            const summarized = (hasPatient || hasDoc) && combinedInput.trim().length > PRODUCT_SUMMARY_MIN_CHARS;
+            const model = resolveDiagnoseModel(req.body.model, hasImage, tenantId);
 
             let isImageOnly = false;
             if(!hasDoc && !hasPatient && hasImage){
@@ -431,7 +443,14 @@ const processMultimodalInput = async (req, res) => {
                 isImageOnly: isImageOnly
             };
             await callDiagnoses(diagnoseData, requestInfo);
-            res.status(200).send({ result: 'processing', description: description, imageUrls: results.imageUrls || [], isImageOnly: isImageOnly });
+            res.status(200).send({
+                result: 'processing',
+                description: description,
+                imageUrls: results.imageUrls || [],
+                isImageOnly: isImageOnly,
+                summarized: summarized,
+                model: model
+            });
             // Devolver resultado de diagnose
             /*return res.status(200).send({
                 result: 'success',
