@@ -20,15 +20,14 @@ const {
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
+const { callGeminiModel } = require('./geminiClient');
 
 const defaultModel = 'gpt54mini';
 const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt54mini';//'gpt5mini'; //'gpt5nano';
-const GeminiApiKey = config.GEMINI_API_KEY;
-const ADVANCED_GEMINI_PRIMARY = 'gemini-3-pro-preview';
+const ADVANCED_GEMINI_PRIMARY = 'gemini-3.5-flash';
 const ADVANCED_GEMINI_FALLBACK = 'gemini-2.5-pro';
-const GEMINI_THINKING_LEVEL = 'low';
 const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
 const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
   ? config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD
@@ -162,94 +161,6 @@ function buildAzureO3Request(prompt) {
     },
     reasoning: {
       effort: "high"
-    }
-  };
-}
-
-async function callGeminiModel(prompt, modelName) {
-  if (!GeminiApiKey) {
-    throw new Error('GEMINI_API_KEY not configured');
-  }
-
-  const axios = require('axios');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GeminiApiKey}`;
-  const requestBody = {
-    contents: [
-      {
-        parts: [{ text: prompt }]
-      }
-    ],
-    generationConfig: {
-      temperature: 0
-    }
-  };
-
-  // Mantener thinking_level bajo según evaluación del modelo avanzado.
-  requestBody.thinking_config = {
-    thinking_level: GEMINI_THINKING_LEVEL
-  };
-
-  let response;
-  try {
-    response = await axios.post(url, requestBody, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-  } catch (error) {
-    const isBadRequest = error?.response?.status === 400;
-    if (!isBadRequest) {
-      throw error;
-    }
-
-    // Compatibilidad: reintentar sin thinking_config si alguna versión no soporta el campo.
-    const fallbackBody = { ...requestBody };
-    delete fallbackBody.thinking_config;
-    response = await axios.post(url, fallbackBody, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-  }
-
-  const candidate = response?.data?.candidates?.[0];
-  if (!candidate) {
-    throw new Error(`Gemini ${modelName} returned no candidates`);
-  }
-
-  const finishReason = candidate?.finishReason;
-  if (finishReason && finishReason !== 'STOP' && finishReason !== 'MAX_TOKENS') {
-    throw new Error(`Gemini ${modelName} finished with reason: ${finishReason}`);
-  }
-
-  const text = candidate?.content?.parts
-    ?.map((part) => part?.text || '')
-    .join('')
-    ?.trim();
-
-  if (!text) {
-    throw new Error(`Gemini ${modelName} returned empty content`);
-  }
-
-  const usageMetadata = response?.data?.usageMetadata || {};
-  const promptTokens = usageMetadata.promptTokenCount ?? usageMetadata.inputTokenCount ?? 0;
-  const completionTokens = usageMetadata.candidatesTokenCount ?? usageMetadata.outputTokenCount ?? 0;
-  const totalTokens = usageMetadata.totalTokenCount ?? (promptTokens + completionTokens);
-
-  return {
-    data: {
-      choices: [
-        {
-          message: {
-            content: text
-          }
-        }
-      ],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens
-      }
     }
   };
 }

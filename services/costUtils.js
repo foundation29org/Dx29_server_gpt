@@ -50,6 +50,10 @@ const PRICING = {
     input: 0.002,      // Temporal: ajustar cuando se confirme tarifa final
     output: 0.008      // Temporal: ajustar cuando se confirme tarifa final
   },
+  'gemini-3.5-flash': {
+    input: 0.0005,     // $0.50 per 1M tokens
+    output: 0.003      // $3.00 per 1M tokens (including thinking)
+  },
   'gemini-2.5-pro': {
     input: 0.002,      // Temporal: ajustar cuando se confirme tarifa final
     output: 0.008      // Temporal: ajustar cuando se confirme tarifa final
