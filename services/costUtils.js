@@ -42,6 +42,10 @@ const PRICING = {
     input: 0.0125,    // $1.25 per 1M tokens
     output: 0.0200,    // $10.00 per 1M tokens
   },
+  gpt56terra: {
+    input: 0.002,     // $2.00 per 1M tokens
+    output: 0.012     // $12.00 per 1M tokens
+  },
   'gemini-3-pro-preview': {
     input: 0.002,      // Temporal: ajustar cuando se confirme tarifa final
     output: 0.008      // Temporal: ajustar cuando se confirme tarifa final
@@ -56,7 +60,9 @@ const PRICING_ALIASES = {
   'gpt-5-mini': 'gpt5mini',
   'gpt-5.4-mini': 'gpt54mini',
   'gpt-5-nano': 'gpt5nano',
-  'gpt-5': 'gpt5'
+  'gpt-5': 'gpt5',
+  gpt56terra: 'gpt56terra',
+  'gpt-5.6-terra': 'gpt56terra'
 };
 
 function calculatePrice(usage, model = 'gpt54mini') {

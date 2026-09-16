@@ -18,7 +18,9 @@ const ROUTING_MODEL_ALIASES = {
   gpt54mini: 'gpt54mini',
   'gpt-5.4-mini': 'gpt54mini',
   gpt5: 'gpt5',
-  'gpt-5': 'gpt5'
+  'gpt-5': 'gpt5',
+  gpt56terra: 'gpt56terra',
+  'gpt-5.6-terra': 'gpt56terra'
 };
 const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt4o: 'gpt4o',
@@ -26,7 +28,8 @@ const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt5nano: 'gpt-5-nano',
   gpt5mini: 'gpt-5-mini',
   gpt54mini: 'gpt-5.4-mini',
-  gpt5: 'gpt-5'
+  gpt5: 'gpt-5',
+  gpt56terra: 'gpt-5.6-terra'
 };
 
 // Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
@@ -66,6 +69,10 @@ const modelConfig = {
     apiVersion: '2025-01-01-preview',
     path: '/openai/deployments/gpt-5-nano/chat/completions'
   },
+  'gpt-5.6-terra': {
+    apiVersion: '2025-04-01-preview',
+    path: '/openai/deployments/gpt-5.6-terra/chat/completions'
+  },
   'o3': {
     apiVersion: '2025-04-01-preview',
     path: '/openai/responses'
@@ -76,7 +83,7 @@ const modelConfig = {
  * Construye la URL completa de Azure OpenAI para un endpoint específico
  * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
  * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, o3)
- * @returns {Object} - { url, apiKey } o null si no está configurado
+ * @returns {Object} - { url, apiKey, region, deployment } o null
  */
 function buildAzureOpenAIEndpoint(region, model) {
   const regionConfig = regionToAzureOpenAI[region];
@@ -95,7 +102,9 @@ function buildAzureOpenAIEndpoint(region, model) {
   const url = `${regionConfig.baseUrl}${modelCfg.path}?api-version=${modelCfg.apiVersion}`;
   return {
     url,
-    apiKey: regionConfig.apiKey
+    apiKey: regionConfig.apiKey,
+    region,
+    deployment: model
   };
 }
 
@@ -374,8 +383,43 @@ const endpointsMap = {
       buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
       buildAzureOpenAIEndpoint('as2', 'gpt-5')
     ]
+  },
+  gpt56terra: {
+    asia: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    europe: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra')
+    ],
+    northamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    southamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    africa: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra')
+    ],
+    oceania: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    other: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra')
+    ]
   }
 };
+
+function aliasRoutingModel(model) {
+  const key = String(model || '').trim();
+  return ROUTING_MODEL_ALIASES[key] || key;
+}
 
 function normalizeRoutingModel(model) {
   const normalized = ROUTING_MODEL_ALIASES[(model || '').toString().trim()];
@@ -414,19 +458,106 @@ function getEndpointsByTimezone(timezone, model = DEFAULT_AI_MODEL) {
   return endpoints;
 }
 
-async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, dataRequest = null) {
-  const RETRY_DELAY = 1000;
+function getResponseHeader(headers, name) {
+  if (!headers) return undefined;
+  if (typeof headers.get === 'function') return headers.get(name);
+  return headers[name] ?? headers[name.toLowerCase()];
+}
+
+function getRetryDelayMs(error, retryCount) {
+  const headers = error.response?.headers;
+  const retryAfterMs = Number(getResponseHeader(headers, 'retry-after-ms'));
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+    return Math.min(retryAfterMs, 10000);
+  }
+
+  const retryAfterSeconds = Number(getResponseHeader(headers, 'retry-after'));
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+    return Math.min(retryAfterSeconds * 1000, 10000);
+  }
+
+  return Math.min(1000 * (2 ** retryCount), 10000);
+}
+
+function isRetryableEndpointError(error) {
+  const statusCode = Number(error.response?.status);
+  if (!statusCode) return true;
+  return [401, 403, 404, 408, 409, 425, 429].includes(statusCode) ||
+    statusCode >= 500;
+}
+
+function getEndpointHost(endpoint) {
+  try {
+    return new URL(endpoint?.url).hostname;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function buildFailureTelemetry(
+  endpoint,
+  nextEndpoint,
+  error,
+  normalizedModel,
+  retryCount,
+  timeoutMs,
+  willRetry
+) {
+  return {
+    model: String(normalizedModel),
+    endpointRegion: String(endpoint?.region || 'unknown'),
+    endpointHost: getEndpointHost(endpoint),
+    nextEndpointRegion: String(nextEndpoint?.region || 'none'),
+    statusCode: String(error.response?.status || 'network'),
+    errorCode: String(error.code || error.name || 'unknown'),
+    retryCount: String(retryCount),
+    timeoutMs: String(timeoutMs),
+    willRetry: String(willRetry)
+  };
+}
+
+function safelyTrackEvent(name, properties) {
+  try {
+    insights.trackEvent(name, properties);
+  } catch (telemetryError) {
+    console.error(`No se pudo registrar el evento ${name}:`, telemetryError.message);
+  }
+}
+
+function safelyTrackError(message, properties) {
+  try {
+    insights.error(message, properties);
+  } catch (telemetryError) {
+    console.error('No se pudo registrar el error en Application Insights:', telemetryError.message);
+  }
+}
+
+async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, _dataRequest = null) {
   const normalizedModel = normalizeRoutingModel(model);
+  const timeoutMs = config.AZURE_OPENAI_TIMEOUT_MS || 180000;
 
   const endpoints = getEndpointsByTimezone(timezone, normalizedModel);
   const endpoint = endpoints[retryCount];
   
   // Si el endpoint es null (no configurado), intentar el siguiente
   if (!endpoint || !endpoint.url || !endpoint.apiKey) {
+    const hasNextEndpoint = retryCount < endpoints.length - 1;
+    const properties = {
+      model: String(normalizedModel),
+      endpointRegion: String(endpoint?.region || 'unknown'),
+      retryCount: String(retryCount),
+      willRetry: String(hasNextEndpoint)
+    };
+    safelyTrackEvent('AiEndpointConfigurationMissing', properties);
     if (retryCount < endpoints.length - 1) {
-      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, dataRequest);
+      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, _dataRequest);
     }
-    throw new Error(`No hay endpoints configurados para modelo ${normalizedModel} en región ${timezone}`);
+    const configurationError = new Error(
+      `No hay endpoints configurados para modelo ${normalizedModel} en región ${timezone}`
+    );
+    safelyTrackEvent('AiAllEndpointsFailed', properties);
+    safelyTrackError('All AI endpoints failed', properties);
+    throw configurationError;
   }
 
   try {
@@ -445,31 +576,53 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
       headers: {
         'Content-Type': 'application/json',
         'api-key': endpoint.apiKey
-      }
+      },
+      timeout: timeoutMs
     });
     return response;
   } catch (error) {
     const statusCode = error.response?.status;
-    const errorDetails = error.response?.data || null;
-    const shouldRetry = statusCode !== 400 && retryCount < endpoints.length - 1;
-
-    insights.error({
-      message: `Fallo AI endpoint ${endpoint.url}`,
-      error: error.message,
-      statusCode,
-      errorDetails,
+    const nextEndpoint = endpoints[retryCount + 1];
+    const retryableError = isRetryableEndpointError(error);
+    const shouldRetry = retryableError &&
+      retryCount < endpoints.length - 1;
+    const properties = buildFailureTelemetry(
+      endpoint,
+      nextEndpoint,
+      error,
+      normalizedModel,
       retryCount,
-      willRetry: shouldRetry,
-      requestBody,
-      timezone,
-      model: normalizedModel,
-      dataRequest
-    });
+      timeoutMs,
+      shouldRetry
+    );
 
     if (shouldRetry) {
-      console.warn(`❌ Error en ${endpoint.url} — Reintentando en ${RETRY_DELAY}ms...`);
-      await delay(RETRY_DELAY);
-      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, dataRequest);
+      const retryDelayMs = getRetryDelayMs(error, retryCount);
+      safelyTrackEvent('AiEndpointFallbackUsed', {
+        ...properties,
+        retryDelayMs: String(retryDelayMs)
+      });
+      console.warn(
+        `❌ Error ${statusCode || error.code || 'de red'} en ` +
+        `${endpoint.region}; fallback a ${nextEndpoint?.region || 'siguiente endpoint'} ` +
+        `en ${retryDelayMs}ms`
+      );
+      await delay(retryDelayMs);
+      return callAiWithFailover(
+        requestBody,
+        timezone,
+        normalizedModel,
+        retryCount + 1,
+        _dataRequest
+      );
+    }
+
+    if (retryableError) {
+      safelyTrackEvent('AiAllEndpointsFailed', properties);
+      safelyTrackError('All AI endpoints failed', properties);
+    } else {
+      safelyTrackEvent('AiRequestRejected', properties);
+      safelyTrackError('AI request rejected without fallback', properties);
     }
     throw error;
   }
@@ -1200,6 +1353,7 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
 module.exports = {
   sanitizeAiData,
   sanitizeInput,
+  aliasRoutingModel,
   getEndpointsByTimezone,
   callAiWithFailover,
   detectLanguageWithRetry,

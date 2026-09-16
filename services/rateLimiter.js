@@ -80,6 +80,13 @@ const externalLimiter = rateLimit({
 
 // Middleware inteligente que selecciona el rate limiter apropiado
 const smartLimiter = (req, res, next) => {
+    // Docker eval (NODE_ENV=local): una sola IP NAT, 2 HTTP por caso
+    // (negotiate + analyze) y a veces dos runners en paralelo. El tope
+    // de producto 100/15min no aplica a estas pruebas.
+    if (process.env.NODE_ENV === 'local') {
+        return next();
+    }
+
     const tenantId = getHeader(req, 'x-tenant-id');
     
     // Lista de tenant IDs internos de DxGPT
