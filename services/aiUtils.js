@@ -1112,6 +1112,34 @@ function parseFollowUpQuestions(raw) {
  * @returns {Promise<any>} - El JSON reparado y parseado
  * @throws {Error} - Si GPT no puede reparar el JSON
  */
+function extractJsonPayload(text, jsonType = 'generic') {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+
+  const preferArray = jsonType === 'diagnosis' || jsonType === 'questions';
+  const preferObject = jsonType === 'object';
+  const candidates = preferArray
+    ? ['[', '{']
+    : preferObject
+      ? ['{', '[']
+      : ['[', '{'];
+
+  for (const openChar of candidates) {
+    const start = text.indexOf(openChar);
+    if (start === -1) {
+      continue;
+    }
+    const closeChar = openChar === '[' ? ']' : '}';
+    const end = text.lastIndexOf(closeChar);
+    if (end > start) {
+      return text.slice(start, end + 1);
+    }
+  }
+
+  return text;
+}
+
 async function repairJsonWithGPT(brokenJson, jsonType = 'generic') {
   const timezone = 'Europe/Madrid';
   
@@ -1180,22 +1208,13 @@ ${instructions}
 
 Return the fixed JSON:`;
 
-  /*const requestBody = {
-    model: "gpt-5-mini",
-    messages: [{ role: "user", content: repairPrompt }],
-    reasoning_effort: "medium"
-  };*/
-
   const requestBody = {
     messages: [{ role: "user", content: repairPrompt }],
-    temperature: 0,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
+    reasoning_effort: 'low'
   };
 
   try {
-    const response = await callAiWithFailover(requestBody, timezone, 'gpt4o', 0, null);
+    const response = await callAiWithFailover(requestBody, timezone, 'gpt54mini', 0, null);
     const choice = response?.data?.choices?.[0];
     if (!choice || !choice.message || !choice.message.content) {
       throw new Error('GPT repair returned no content');
@@ -1205,6 +1224,7 @@ Return the fixed JSON:`;
     repairedText = repairedText
       .replace(/^```json\s*|\s*```$/g, '')
       .replace(/^```\s*|\s*```$/g, '');
+    repairedText = extractJsonPayload(repairedText, jsonType);
 
     return JSON.parse(repairedText);
   } catch (gptError) {
@@ -1224,7 +1244,8 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
   let cleanResponse = jsonText.trim()
     .replace(/^```json\s*|\s*```$/g, '')
     .replace(/^```\s*|\s*```$/g, '');
-    cleanResponse = stripComments(cleanResponse);
+  cleanResponse = extractJsonPayload(cleanResponse, jsonType);
+  cleanResponse = stripComments(cleanResponse);
   // 1) Intento directo
   try {
     return JSON.parse(cleanResponse);
