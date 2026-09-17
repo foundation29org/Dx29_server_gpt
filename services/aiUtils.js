@@ -7,7 +7,7 @@ const { jsonrepair } = require('jsonrepair');
 
 // Detectar si es deployment self-hosted (sin APIM)
 const isSelfHosted = config.IS_SELF_HOSTED || false;
-const DEFAULT_AI_MODEL = 'gpt54mini';
+const DEFAULT_AI_MODEL = 'gpt56terra';
 const ROUTING_MODEL_ALIASES = {
   gpt4o: 'gpt4o',
   o3: 'o3',
@@ -1351,6 +1351,7 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
 }
 
 module.exports = {
+  DEFAULT_AI_MODEL,
   sanitizeAiData,
   sanitizeInput,
   aliasRoutingModel,

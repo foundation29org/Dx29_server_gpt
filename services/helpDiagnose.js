@@ -11,6 +11,7 @@ const pubsubService = require('./pubsubService');
 const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profileInferenceService');
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
+  DEFAULT_AI_MODEL,
   callAiWithFailover,
   translateTextWithRetry,
   translateInvertWithRetry,
@@ -22,7 +23,7 @@ const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
 const { callGeminiModel } = require('./geminiClient');
 
-const defaultModel = 'gpt54mini';
+const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt54mini';//'gpt5mini'; //'gpt5nano';
@@ -2283,7 +2284,7 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
-  const model = aliasRoutingModel(req.body.model || 'gpt54mini');
+  const model = aliasRoutingModel(req.body.model || defaultModel);
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
@@ -2441,6 +2442,7 @@ async function diagnose(req, res) {
     }
 
     const sanitizedData = sanitizeAiData(req.body);
+    sanitizedData.model = model;
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;
 
