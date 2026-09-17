@@ -35,6 +35,7 @@ const specialtyCatalog = [
   'Urology',
   'Gynecology and Obstetrics',
   'Ophthalmology',
+  'Optometry',
   'Otolaryngology',
   'Radiology',
   'Emergency Medicine',
