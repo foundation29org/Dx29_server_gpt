@@ -15,7 +15,8 @@ const {
   translateTextWithRetry,
   translateInvertWithRetry,
   sanitizeAiData,
-  parseJsonWithFixes
+  parseJsonWithFixes,
+  aliasRoutingModel
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
@@ -44,6 +45,58 @@ function shouldRunProfileInference(data = {}) {
   if (data.tenantId && profileInferenceTenants.has(data.tenantId)) return true;
   if (data.subscriptionId && profileInferenceTenants.has(`sub:${data.subscriptionId}`)) return true;
   return false;
+}
+
+function buildVisionDiagnoseRequest(deploymentModel, prompt, imageUrls) {
+  const content = [
+    {
+      type: 'text',
+      text: prompt
+    }
+  ];
+  if (imageUrls && imageUrls.length > 0) {
+    for (const image of imageUrls) {
+      if (!image || !image.url) {
+        continue;
+      }
+      content.push({
+        type: 'image_url',
+        image_url: {
+          url: image.url
+        }
+      });
+    }
+  }
+  return {
+    model: deploymentModel,
+    messages: [
+      {
+        role: 'user',
+        content
+      }
+    ],
+    reasoning_effort: 'low'
+  };
+}
+
+const VISION_DEPLOYMENT_NAMES = {
+  gpt5: 'gpt-5',
+  gpt56terra: 'gpt-5.6-terra'
+};
+
+function isVisionDiagnoseModel(model) {
+  return Object.prototype.hasOwnProperty.call(VISION_DEPLOYMENT_NAMES, model);
+}
+
+function isLongDiagnoseModel(model) {
+  return (
+    model === 'o3' ||
+    model === 'gpt5nano' ||
+    model === 'gpt5mini' ||
+    model === 'gpt54mini' ||
+    model === 'gpt5' ||
+    model === 'gpt56terra'
+  );
 }
 
 
@@ -1273,36 +1326,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         messages: [{ role: "user", content: helpDiagnosePrompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
-    } else if (model === 'gpt5') {
-      requestBody = {
-        model: "gpt-5",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: helpDiagnosePrompt
-              }
-            ]
-          }
-        ],
-        reasoning_effort: "low"
-      };
-
-      if (data.imageUrls && data.imageUrls.length > 0) {
-        const imagePrompts = data.imageUrls.map((image, index) => {
-          return {
-            type: "image_url",
-            image_url: {
-              url: image.url
-            }
-          }
-        }
-        );
-        requestBody.messages[0].content.push(...imagePrompts);
-        //console.log('imagePrompts', imagePrompts);
-      }
+    } else if (isVisionDiagnoseModel(model)) {
+      requestBody = buildVisionDiagnoseRequest(
+        VISION_DEPLOYMENT_NAMES[model],
+        helpDiagnosePrompt,
+        data.imageUrls
+      );
     } else {
       const messages = [{ role: "user", content: helpDiagnosePrompt }];
       requestBody = {
@@ -1736,6 +1765,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
         } else if (model == 'gpt5') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
+        } else if (model == 'gpt56terra') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt56terra');
         } else if (model == 'gpt5mini') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
         } else if (model == 'gpt54mini') {
@@ -2252,7 +2283,7 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
-  const model = req.body.model || 'gpt54mini';
+  const model = aliasRoutingModel(req.body.model || 'gpt54mini');
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
@@ -2440,7 +2471,7 @@ async function diagnose(req, res) {
     }
 
     // 2. Si es modelo largo, responde rápido y procesa en background
-    const isLongModel = (model === 'o3' || model === 'gpt5nano' || model === 'gpt5mini' || model === 'gpt54mini' || model === 'gpt5');
+    const isLongModel = isLongDiagnoseModel(model);
     // Para self-hosted, no usar el sistema de colas
     const { region, model: registeredModel, queueKey } = config.IS_SELF_HOSTED 
       ? { region: null, model, queueKey: null }

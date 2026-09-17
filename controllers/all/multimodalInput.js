@@ -7,6 +7,7 @@ const insights = require('../../services/insights');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
 const pubsubService = require('../../services/pubsubService');
+const { aliasRoutingModel } = require('../../services/aiUtils');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -51,7 +52,7 @@ function canOverrideModel(tenantId) {
 }
 
 function resolveDiagnoseModel(requestedModel, hasImage, tenantId) {
-    const requested = String(requestedModel || '').trim();
+    const requested = aliasRoutingModel(requestedModel);
     if (requested && canOverrideModel(tenantId)) {
         return requested;
     }
@@ -387,10 +388,9 @@ const processMultimodalInput = async (req, res) => {
             }
 
             if (hasPatient || hasDoc) {
-                // Verificar si el combinedInput es lo suficientemente largo para justificar un resumen
                 const combinedInputLength = combinedInput.trim().length;
                 const minLengthForSummary = PRODUCT_SUMMARY_MIN_CHARS;
-                
+
                 if (combinedInputLength > minLengthForSummary) {
                     // Si hay texto/documento largo, resumir primero
                     let summaryResult = null;
