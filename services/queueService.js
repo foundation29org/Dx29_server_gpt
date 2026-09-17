@@ -27,7 +27,6 @@ const REGION_MAPPING = {
 // Configuración de tiempos de procesamiento por modelo (en segundos)
 const MODEL_PROCESSING_TIMES = {
   gpt4o: 15,    // 15 segundos 
-  o3: 60,       // 1 minuto
   gpt5nano: 25, // 25 segundos
   gpt5mini: 40, // 40 segundos
   gpt54mini: 40, // 40 segundos
@@ -89,7 +88,7 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     return 'Sweden';
   }
 
-  // Para gpt4o, o3 y gpt54mini, usar mapeo multi-región por continente
+  // Para gpt4o y gpt54mini, usar mapeo multi-región por continente
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
     if (tz?.includes('europe')) return 'europe';

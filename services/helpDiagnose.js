@@ -17,18 +17,15 @@ const {
   translateInvertWithRetry,
   sanitizeAiData,
   parseJsonWithFixes,
-  aliasRoutingModel
+  resolveDiagnoseModel
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
-const { callGeminiModel } = require('./geminiClient');
 
 const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt54mini';//'gpt5mini'; //'gpt5nano';
-const ADVANCED_GEMINI_PRIMARY = 'gemini-3.5-flash';
-const ADVANCED_GEMINI_FALLBACK = 'gemini-2.5-pro';
 const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
 const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
   ? config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD
@@ -91,7 +88,6 @@ function isVisionDiagnoseModel(model) {
 
 function isLongDiagnoseModel(model) {
   return (
-    model === 'o3' ||
     model === 'gpt5nano' ||
     model === 'gpt5mini' ||
     model === 'gpt54mini' ||
@@ -141,54 +137,6 @@ async function callSonarAPI(prompt, timezone, modelType) {
   });
 
   return perplexityResponse;
-}
-
-function buildAzureO3Request(prompt) {
-  return {
-    model: "o3-dxgpt",
-    input: [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: prompt }
-        ]
-      }
-    ],
-    tools: [],
-    text: {
-      format: {
-        type: "text"
-      }
-    },
-    reasoning: {
-      effort: "high"
-    }
-  };
-}
-
-async function callAdvancedModelChain(prompt, timezone, dataRequest) {
-  const tried = [];
-  const geminiCandidates = [ADVANCED_GEMINI_PRIMARY, ADVANCED_GEMINI_FALLBACK];
-
-  for (const geminiModel of geminiCandidates) {
-    try {
-      const response = await callGeminiModel(prompt, geminiModel);
-      return { response, provider: geminiModel };
-    } catch (error) {
-      tried.push({ model: geminiModel, error: error?.message || String(error) });
-    }
-  }
-
-  insights.trackEvent('AdvancedModelFallbackUsed', {
-    primary: ADVANCED_GEMINI_PRIMARY,
-    secondary: ADVANCED_GEMINI_FALLBACK,
-    tertiary: 'o3',
-    tried
-  });
-
-  const o3RequestBody = buildAzureO3Request(prompt);
-  const response = await callAiWithFailover(o3RequestBody, timezone, 'o3', 0, dataRequest);
-  return { response, provider: 'o3' };
 }
 
 // Función para llamar a modelos GPT
@@ -347,7 +295,6 @@ function processMedicalResponse(response, model) {
 // Extraer la lógica principal a una función reutilizable
 async function processAIRequest(data, requestInfo = null, model = defaultModel, region = null) {
   // Si es un modelo largo, usar WebPubSub con progreso
-  //const isLongModel = (model === 'o3');
   const isLongModel = true;
   const userId = data.myuuid;
 
@@ -384,6 +331,8 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
 
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null, region = null) {
+  model = resolveDiagnoseModel(model);
+  data.model = model;
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -1347,23 +1296,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     const aiStartMs = Date.now();
-    let aiResponse;
-    let diagnosticsModelUsed = model;
-    if (model === 'o3') {
-      const advancedResult = await callAdvancedModelChain(helpDiagnosePrompt, data.timezone, dataRequest);
-      aiResponse = advancedResult.response;
-      diagnosticsModelUsed = advancedResult.provider || model;
-      if (advancedResult.provider !== 'o3') {
-        insights.trackEvent('AdvancedModelChainUsed', {
-          provider: advancedResult.provider,
-          requestedModel: model,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
-        });
-      }
-    } else {
-      aiResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
-    }
+    const aiResponse = await callAiWithFailover(
+      requestBody,
+      data.timezone,
+      model,
+      0,
+      dataRequest
+    );
     const aiElapsedMs = Date.now() - aiStartMs;
     let usage = null;
 
@@ -1373,34 +1312,27 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     // Procesar la respuesta según el modelo
-    let aiResponseText;
-    if (model === 'o3' && aiResponse.data?.output && Array.isArray(aiResponse.data.output)) {
-      usage = aiResponse.data?.usage;
-      aiResponseText = aiResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
-    } else {
-      usage = aiResponse.data?.usage;
-      // Validar que la respuesta tiene el formato esperado
-      if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
-        console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
-        insights.error({
-          message: 'Invalid AI response format - no choices array',
-          response: JSON.stringify(aiResponse.data),
-          model: model,
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          timezone: data.timezone
-        });
-        throw new Error('Invalid AI response format - no choices returned from OpenAI');
-      }
-      aiResponseText = aiResponse.data.choices[0].message?.content;
+    usage = aiResponse.data?.usage;
+    if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
+      console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
+      insights.error({
+        message: 'Invalid AI response format - no choices array',
+        response: JSON.stringify(aiResponse.data),
+        model: model,
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        timezone: data.timezone
+      });
+      throw new Error('Invalid AI response format - no choices returned from OpenAI');
     }
+    const aiResponseText = aiResponse.data.choices[0].message?.content;
 
     console.log('usage', aiResponse.data.usage);
     //console.log('aiResponseText', aiResponseText);
 
     // Calcular costos de la Etapa 1: Diagnósticos completos
     if (usage) {
-      const etapa1Cost = calculatePrice(usage, diagnosticsModelUsed);
+      const etapa1Cost = calculatePrice(usage, model);
       costTracking.etapa1_diagnosticos = {
         cost: etapa1Cost.totalCost,
         tokens: {
@@ -1408,7 +1340,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           output: etapa1Cost.outputTokens,
           total: etapa1Cost.totalTokens
         },
-        model: diagnosticsModelUsed,
+        model: model,
         duration: aiElapsedMs
       };
       costTracking.total.cost += etapa1Cost.totalCost;
@@ -1762,8 +1694,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       } else {
         if (model == 'gpt4o') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-        } else if (model == 'o3') {
-          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
         } else if (model == 'gpt5') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
         } else if (model == 'gpt56terra') {
@@ -2284,9 +2214,9 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
-  const model = aliasRoutingModel(req.body.model || defaultModel);
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
+  const model = resolveDiagnoseModel(req.body.model);
   const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
 
   // SECURITY: Registrar información de autenticación para auditoría

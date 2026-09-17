@@ -9,7 +9,7 @@ const CostTrackingService = require('../../services/costTrackingService');
 const pubsubService = require('../../services/pubsubService');
 const {
     DEFAULT_AI_MODEL,
-    aliasRoutingModel
+    resolveDiagnoseModel
 } = require('../../services/aiUtils');
 
 // Configuración de multer para manejar archivos en memoria
@@ -48,19 +48,6 @@ function getHeader(req, name) {
 }
 
 const PRODUCT_SUMMARY_MIN_CHARS = 1000;
-const EVAL_MODEL_OVERRIDE_TENANTS = /^(dxgpt-local|dxgpt-eval|dxgpt-dev)/i;
-
-function canOverrideModel(tenantId) {
-    return process.env.NODE_ENV === 'local' || EVAL_MODEL_OVERRIDE_TENANTS.test(String(tenantId || ''));
-}
-
-function resolveDiagnoseModel(requestedModel, tenantId) {
-    const requested = aliasRoutingModel(requestedModel);
-    if (requested && canOverrideModel(tenantId)) {
-        return requested;
-    }
-    return DEFAULT_AI_MODEL;
-}
 
 const processDocument = async (fileBuffer, originalName, blobUrl) => {
     try {
@@ -428,7 +415,7 @@ const processMultimodalInput = async (req, res) => {
             }
             
             const summarized = (hasPatient || hasDoc) && combinedInput.trim().length > PRODUCT_SUMMARY_MIN_CHARS;
-            const model = resolveDiagnoseModel(req.body.model, tenantId);
+            const model = resolveDiagnoseModel(req.body.model);
 
             let isImageOnly = false;
             if(!hasDoc && !hasPatient && hasImage){
