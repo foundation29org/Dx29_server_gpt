@@ -200,7 +200,21 @@ async function callInfoDisease(req, res) {
             3. Order them from most likely/relevant to least likely/relevant.`;
           break;
         case 4:
-          prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
+          prompt = `Given the medical description: ${sanitizedData.medicalDescription}, explain why ${sanitizedData.disease} is a diagnostic hypothesis for this patient.
+
+            Use exactly these three unnumbered section headings:
+            - Findings supporting the hypothesis: include up to five patient findings explicitly provided that support ${sanitizedData.disease}.
+            - Key information to check: include up to five unreported findings with the greatest value for distinguishing or confirming this hypothesis.
+            - Findings that make the hypothesis less likely: include up to three explicitly provided findings that reduce its likelihood. If there are none, state: "No findings that clearly make this hypothesis less likely were provided."
+
+            Requirements:
+            - Do not treat an unmentioned finding as absent.
+            - Do not repeat findings between sections.
+            - Do not request further details about a finding that is already established unless that detail is decisive.
+            - Do not include a generic list of common symptoms.
+            - Do not add a conclusion that repeats the sections.
+            - Present this as diagnostic support, not as a confirmed diagnosis.
+            ${answerFormat}`;
           break;
         case 5:
           // Caso para pruebas genéticas - genérico
