@@ -23,8 +23,8 @@ function validateQuestionRequest(data) {
   
     if (data.questionType === undefined) {
       errors.push({ field: 'questionType', reason: 'Field is required' });
-    } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 5) {
-      errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 5' });
+    } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 6) {
+      errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 6' });
     }
   
     if (!data.disease) {
@@ -53,10 +53,10 @@ function validateQuestionRequest(data) {
       errors.push({ field: 'detectedLang', reason: 'Must be a valid language code (2-8 characters)' });
     }
   
-    // Validar medicalDescription si questionType es 3, 4 o 5
-    if ([3, 4, 5].includes(data.questionType)) {
+    // Validar medicalDescription para las preguntas adaptadas al caso
+    if ([3, 4, 5, 6].includes(data.questionType)) {
       if (!data.medicalDescription) {
-        errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3, 4 or 5' });
+        errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3, 4, 5 or 6' });
       } else if (typeof data.medicalDescription !== 'string') {
         errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
       } else if (data.medicalDescription.length < 10) {
@@ -83,7 +83,7 @@ function validateQuestionRequest(data) {
         }
       }
     }
-    if ([3, 4, 5].includes(data.questionType) && data.medicalDescription) {
+    if ([3, 4, 5, 6].includes(data.questionType) && data.medicalDescription) {
       const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
       for (const { pattern, reason } of suspiciousPatterns) {
         if (pattern.test(normalizedMedicalDescription)) {
@@ -207,6 +207,9 @@ async function callInfoDisease(req, res) {
           prompt = `What genetic tests would be appropriate for ${sanitizedData.disease} given the following medical description: ${sanitizedData.medicalDescription}? ${answerFormat}`;
           
           // Continuar con el flujo normal usando callAiWithFailover
+          break;
+        case 6:
+          prompt = `Given the medical description: ${sanitizedData.medicalDescription}, compare ${sanitizedData.disease} with up to three of the most relevant alternative diagnoses. For each alternative, briefly state the most useful clinical finding or diagnostic test to distinguish it from ${sanitizedData.disease}. ${answerFormat}`;
           break;
         default:
           return res.status(400).send({ result: "error", message: "Invalid question type" });
