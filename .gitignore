@@ -5,6 +5,8 @@ configold.js
 *.log
 logs/
 .env
+scripts/output/
+scripts/local/
 
 # Docker
 .dockerignore

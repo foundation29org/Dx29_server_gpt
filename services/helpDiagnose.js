@@ -9,6 +9,7 @@ const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
 const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profileInferenceService');
+const { classifyIntent, shouldSuggestDiagnosisPage } = require('./intentClassifier');
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   DEFAULT_AI_MODEL,
@@ -337,6 +338,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
   // Inicializar objeto para rastrear costos de cada etapa
   const costTracking = {
+    // Legacy property name retained to keep downstream cost aggregation stable.
+    // It now contains the single unified intent-routing call.
     etapa0_clinical_check: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     etapa0__medical_check: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
     detect_language: { cost: 0, tokens: { input: 0, output: 0, total: 0 } },
@@ -359,6 +362,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let reverseTranslationChars = 0; // traducción inversa al idioma original
   // Hoist queryType to function scope so it's available in error paths
   let queryType = 'unknown';
+  let intentDecision = {
+    action: 'go',
+    reason: 'patient_case_ready',
+    queryType: 'diagnostic',
+    usedFallback: false
+  };
   let inferredProfile = getDefaultInferredProfile(profileInferenceConfidenceThreshold);
   let modelTranslation = 'gpt5nano'; //'gpt5mini';
   
@@ -478,203 +487,97 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       //throw translationError;
     }
 
-    // 1.5. Verificar si el input es un escenario clínico antes de continuar
-    //console.log('englishDescription', englishDescription)
-    const clinicalScenarioPrompt = PROMPTS.diagnosis.clinicalScenarioCheck.replace("{{description}}", englishDescription);
-    let clinicalScenarioRequest;
-    if (modelIntencion === 'gpt54mini') {
-      clinicalScenarioRequest = {
-        model: "gpt-5.4-mini",
-        messages: [{ role: "user", content: clinicalScenarioPrompt }],
-        reasoning_effort: "low"
-      };
-    } else if (modelIntencion === 'gpt5mini') {
-      clinicalScenarioRequest = {
-        model: "gpt-5-mini",
-        messages: [{ role: "user", content: clinicalScenarioPrompt }],
-        reasoning_effort: "low"
-      };
-    } else if (modelIntencion === 'gpt5nano') {
-      clinicalScenarioRequest = {
-        model: "gpt-5-nano",
-        messages: [{ role: "user", content: clinicalScenarioPrompt }],
-        reasoning_effort: "low"
-      };
-    } else {
-      clinicalScenarioRequest = {
-        messages: [{ role: "user", content: clinicalScenarioPrompt }],
-        temperature: 0,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-      };
-    }
-    let dataRequest = {
+    // 1.5. Route the request once. This replaces the former two-call
+    // clinical-scenario + medical-question cascade.
+    const dataRequest = {
       tenantId: data.tenantId,
       subscriptionId: data.subscriptionId,
       myuuid: data.myuuid
     };
-    let clinicalScenarioResponse = null;
-    let clinicalScenarioResult = '';
-    let clinicalScenarioCost = null;
-    const clinicalStartMs = Date.now();
-
-    let medicalQuestionResult = '';
-    let medicalQuestionCost = null;
-    try {
-      clinicalScenarioResponse = await callAiWithFailover(clinicalScenarioRequest, data.timezone, modelIntencion, 0, dataRequest);
-      const clinicalElapsedMs = Date.now() - clinicalStartMs;
-      console.log(`⏱ clinicalScenarioCheck (${modelIntencion}) ${clinicalElapsedMs}ms`);
-      if (clinicalScenarioResponse.data.choices && clinicalScenarioResponse.data.choices[0].message.content) {
-        clinicalScenarioResult = clinicalScenarioResponse.data.choices[0].message.content.trim().toLowerCase();
-        clinicalScenarioCost = clinicalScenarioResponse.data.usage ? calculatePrice(clinicalScenarioResponse.data.usage, modelIntencion) : null;
-        if (clinicalScenarioCost) {
-          costTracking.etapa0_clinical_check = {
-            cost: clinicalScenarioCost.totalCost,
-            tokens: {
-              input: clinicalScenarioCost.inputTokens,
-              output: clinicalScenarioCost.outputTokens,
-              total: clinicalScenarioCost.totalTokens
-            },
-            duration: clinicalElapsedMs
-          };
-          costTracking.total.cost += clinicalScenarioCost.totalCost;
-          costTracking.total.tokens.input += clinicalScenarioCost.inputTokens;
-          costTracking.total.tokens.output += clinicalScenarioCost.outputTokens;
-          costTracking.total.tokens.total += clinicalScenarioCost.totalTokens;
-        }
-      }
-    } catch (error) {
-      const clinicalElapsedMs = Date.now() - clinicalStartMs;
-      console.log(`⏱ clinicalScenarioCheck ERROR (${modelIntencion}) ${clinicalElapsedMs}ms`);
-      // Si es un error 400 o ERR_BAD_REQUEST, asumir que es un escenario clínico válido y continuar
-      if ((error.code && error.code === 'ERR_BAD_REQUEST') || (error.response && error.response.status === 400)) {
-        console.error('Clinical scenario check skipped due to ERR_BAD_REQUEST:', error.message);
-        insights.error({
-          message: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
-          error: error.message,
-          requestData: data.description,
-          model: model,
-          operation: 'clinical-scenario-check',
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
-        });
-
-        let infoErrorClinicalScenario = {
-          error: error.message,
-          type: 'Clinical scenario check skipped due to ERR_BAD_REQUEST',
-          detectedLanguage: detectedLanguage || 'unknown',
-          model: model,
-          myuuid: data.myuuid
-        };
-        try {
-          serviceEmail.sendMailErrorGPTIP(
-            data.lang,
-            'Clinical scenario check skipped due to ERR_BAD_REQUEST',
-            infoErrorClinicalScenario,
-            data.tenantId,
-            data.subscriptionId
-          );
-        } catch (emailError) {
-          console.log('Fail sending email');
-          insights.error(emailError);
-        }
-        clinicalScenarioResult = 'true';
-      } else {
-        throw error;
-      }
-    }
-
-    // Determinar el tipo de consulta basado en el resultado del clinical scenario check
-    queryType = 'other';
-    if (clinicalScenarioResult === 'true') {
-      queryType = 'diagnostic';
+    const forceDiagnosis = flow === 'diagnose' && data.forceDiagnosis === true;
+    if (forceDiagnosis) {
+      intentDecision = {
+        action: 'go',
+        reason: 'patient_case_ready',
+        queryType: 'diagnostic',
+        usedFallback: false,
+        duration: 0
+      };
     } else {
-      if (data.tenantId || isSelfHosted) {
-        console.log('Non-diagnostic query, checking if it\'s a medical question');
+      intentDecision = await classifyIntent({
+        description: englishDescription,
+        flow,
+        timezone: data.timezone,
+        model: modelIntencion,
+        requestData: dataRequest
+      });
+    }
+    queryType = intentDecision.queryType;
+    data.intentAction = intentDecision.action;
+    data.intentReason = intentDecision.reason;
 
-        const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
-        let medicalQuestionRequest;
-        if (modelIntencion === 'gpt54mini') {
-          medicalQuestionRequest = {
-            model: "gpt-5.4-mini",
-            messages: [{ role: "user", content: medicalQuestionPrompt }],
-            reasoning_effort: "low"
-          };
-        } else if (modelIntencion === 'gpt5mini') {
-          medicalQuestionRequest = {
-            model: "gpt-5-mini",
-            messages: [{ role: "user", content: medicalQuestionPrompt }],
-            reasoning_effort: "low"
-          };
-        } else if (modelIntencion === 'gpt5nano') {
-          medicalQuestionRequest = {
-            model: "gpt-5-nano",
-            messages: [{ role: "user", content: medicalQuestionPrompt }],
-            reasoning_effort: "low"
-          };
-        } else {
-          medicalQuestionRequest = {
-            messages: [{ role: "user", content: medicalQuestionPrompt }],
-            temperature: 0,
-            top_p: 1,
-            frequency_penalty: 0,
-            presence_penalty: 0,
-          };
-        }
+    console.log(
+      `⏱ intentRouting (${modelIntencion}) ${intentDecision.duration}ms: ` +
+      `${intentDecision.action}/${intentDecision.reason}` +
+      `${forceDiagnosis ? ' [user continue]' : ''}` +
+      `${intentDecision.usedFallback ? ' [parse fallback]' : ''}` +
+      `${intentDecision.transportFallback ? ' [transport fallback]' : ''}` +
+      `${intentDecision.structuredOutputFallback ? ' [plain JSON fallback]' : ''}`
+    );
+    // Enum-only telemetry: never send patient text or raw model output.
+    insights.trackEvent('IntentRoutingDecision', {
+      model,
+      classifierModel: modelIntencion,
+      flow,
+      action: intentDecision.action,
+      reason: intentDecision.reason,
+      queryType,
+      usedFallback: String(intentDecision.usedFallback),
+      transportFallback: String(intentDecision.transportFallback || false),
+      structuredOutputFallback: String(intentDecision.structuredOutputFallback || false),
+      forceDiagnosis: String(forceDiagnosis),
+      descriptionLength: String(data.description?.length || 0)
+    });
 
-        const medicalStartMs = Date.now();
-        try {
-          const medicalQuestionResponse = await callAiWithFailover(medicalQuestionRequest, data.timezone, modelIntencion, 0, dataRequest);
-          const medicalElapsedMs = Date.now() - medicalStartMs;
-          console.log(`⏱ medicalQuestionCheck (${modelIntencion}) ${medicalElapsedMs}ms`);
-          if (medicalQuestionResponse.data.choices && medicalQuestionResponse.data.choices[0].message.content) {
-            medicalQuestionResult = medicalQuestionResponse.data.choices[0].message.content.trim().toLowerCase();
-            medicalQuestionCost = medicalQuestionResponse.data.usage ? calculatePrice(medicalQuestionResponse.data.usage, modelIntencion) : null;
-            if (medicalQuestionCost) {
-              costTracking.etapa0__medical_check = {
-                cost: medicalQuestionCost.totalCost,
-                tokens: {
-                  input: medicalQuestionCost.inputTokens,
-                  output: medicalQuestionCost.outputTokens,
-                  total: medicalQuestionCost.totalTokens
-                },
-                duration: medicalElapsedMs
-              };
-              costTracking.total.cost += medicalQuestionCost.totalCost;
-              costTracking.total.tokens.input += medicalQuestionCost.inputTokens;
-              costTracking.total.tokens.output += medicalQuestionCost.outputTokens;
-              costTracking.total.tokens.total += medicalQuestionCost.totalTokens;
-            }
-            if (medicalQuestionResult === 'medical') {
-              queryType = 'general';
-            } else {
-              queryType = 'other';
-            }
-
-            //console.log('Medical question check result:', medicalQuestionResult, 'Query type:', queryType);
-          }
-        } catch (medicalError) {
-          const medicalElapsedMs = Date.now() - medicalStartMs;
-          console.log(`⏱ medicalQuestionCheck ERROR (${modelIntencion}) ${medicalElapsedMs}ms`);
-          console.error('Error in medical question check:', medicalError);
-          // En caso de error, asumir que no es médico
-          queryType = 'other';
-        }
-      } else {
-        queryType = 'other';
-      }
+    if (intentDecision.transportFallback) {
+      insights.trackEvent('IntentRoutingTransportFallback', {
+        model: modelIntencion,
+        flow,
+        error: String(intentDecision.parseError || 'classifier unavailable').slice(0, 180)
+      });
+    } else if (intentDecision.parseError) {
+      insights.trackEvent('IntentRoutingParseFallback', {
+        model: modelIntencion,
+        flow,
+        responseLength: String(
+          intentDecision.response?.data?.choices?.[0]?.message?.content?.length || 0
+        )
+      });
     }
 
-    console.log('Query type detected:', queryType);
+    if (intentDecision.usage) {
+      const intentCost = calculatePrice(intentDecision.usage, modelIntencion);
+      costTracking.etapa0_clinical_check = {
+        cost: intentCost.totalCost,
+        tokens: {
+          input: intentCost.inputTokens,
+          output: intentCost.outputTokens,
+          total: intentCost.totalTokens
+        },
+        duration: intentDecision.duration
+      };
+      costTracking.total.cost += intentCost.totalCost;
+      costTracking.total.tokens.input += intentCost.inputTokens;
+      costTracking.total.tokens.output += intentCost.outputTokens;
+      costTracking.total.tokens.total += intentCost.totalTokens;
+    }
 
-    const shouldAnswerMedical = flow === 'ask' && queryType === 'general';
-    const shouldRunDiagnosis = flow === 'diagnose' && queryType === 'diagnostic';
+    const shouldAnswerMedical = flow === 'ask' && intentDecision.action === 'explain';
+    const shouldRunDiagnosis = flow === 'diagnose' && intentDecision.action === 'go';
     let suggestedPage = null;
-    if (flow === 'ask' && queryType === 'diagnostic') {
+    if (flow === 'ask' && shouldSuggestDiagnosisPage(intentDecision)) {
       suggestedPage = 'home';
-    } else if (flow === 'diagnose' && queryType === 'general') {
+    } else if (flow === 'diagnose' && intentDecision.action === 'explain') {
       suggestedPage = 'questions';
     }
     
@@ -803,15 +706,17 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: modelType,
           queryType: queryType,
+          intentAction: intentDecision.action,
+          intentReason: intentDecision.reason,
           inferredProfile: inferredProfile,
           question: data.description
         };
 
-        // Guardar costos del clinical check y la respuesta médica
+        // Guardar costos del enrutamiento de intención y la respuesta médica
         const stages = [];
         if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
           stages.push({
-            name: 'clinical_check',
+            name: 'intent_check',
             cost: costTracking.etapa0_clinical_check.cost,
             tokens: costTracking.etapa0_clinical_check.tokens,
             model: modelIntencion,
@@ -953,7 +858,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           console.log(`   Etapa 0 - Detect Language: ${formatCost(costTracking.detect_language.cost)}`);
         }
         if (costTracking.etapa0_clinical_check.cost > 0) {
-          console.log(`   Etapa 0 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+          console.log(`   Etapa 0 - Intent Routing: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
         }
         if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
           console.log(`   Etapa 0 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
@@ -999,6 +904,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             answer: {
               medicalAnswer: medicalAnswer,
               queryType: queryType,
+              intentAction: intentDecision.action,
+              intentReason: intentDecision.reason,
               model: modelType
             },
             timezone: data.timezone,
@@ -1106,6 +1013,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               answer: {
                 medicalAnswer: '',
                 queryType: queryType,
+                intentAction: intentDecision.action,
+                intentReason: intentDecision.reason,
                 model: model
               },
               timezone: data.timezone,
@@ -1125,7 +1034,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               const stages = [];
               if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
                 stages.push({
-                  name: 'clinical_check',
+                  name: 'intent_check',
                   cost: costTracking.etapa0_clinical_check.cost,
                   tokens: costTracking.etapa0_clinical_check.tokens,
                   model: modelIntencion,
@@ -1220,18 +1129,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             console.error('❌ Error guardando sesión no diagnóstica:', saveError.message);
           }
         })();
-        // Resto del código para consultas no diagnósticas (insights, blob, return)
-        insights.trackEvent('NonDiagnosticQueryDetected', {
-          message: 'Non-diagnostic query detected',
-          requestData: data.description,
-          model: model,
-          response: clinicalScenarioResponse.data.choices,
-          operation: 'clinical-scenario-check',
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
-        });
-        
         return {
           result: 'success',
           data: [],
@@ -1243,6 +1140,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: model,
           queryType: queryType,
+          intentAction: intentDecision.action,
+          intentReason: intentDecision.reason,
           suggestedPage: suggestedPage,
           inferredProfile: inferredProfile,
           costTracking: costTracking
@@ -1445,6 +1344,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         },
         detectedLang: detectedLanguage,
         model: model,
+        queryType: queryType,
+        intentAction: intentDecision.action,
+        intentReason: intentDecision.reason,
         inferredProfile: inferredProfile,
         costTracking: costTracking
       };
@@ -1532,6 +1434,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           answer: {
             medicalAnswer: '',
             queryType: queryType,
+            intentAction: intentDecision.action,
+            intentReason: intentDecision.reason,
             model: model
           },
           timezone: data.timezone,
@@ -1717,7 +1621,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     const stages = [];
     if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
       stages.push({
-        name: 'clinical_check',
+        name: 'intent_check',
         cost: costTracking.etapa0_clinical_check.cost,
         tokens: costTracking.etapa0_clinical_check.tokens,
         model: modelIntencion,
@@ -1872,7 +1776,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       console.log(`   Etapa 2 - Translation: ${formatCost(costTracking.translation.cost)}`);
     }
     if (costTracking.etapa0_clinical_check.cost > 0) {
-      console.log(`   Etapa 3.1 - Clinical Check: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
+      console.log(`   Etapa 3.1 - Intent Routing: ${formatCost(costTracking.etapa0_clinical_check.cost)}`);
     }
     if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
       console.log(`   Etapa 3.2 - Medical Question Check: ${formatCost(costTracking.etapa0__medical_check.cost)}`);
@@ -1952,6 +1856,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       detectedLang: detectedLanguage,
       model: model,
       queryType: queryType, // Agregar el tipo de consulta detectado
+      intentAction: intentDecision.action,
+      intentReason: intentDecision.reason,
       inferredProfile: inferredProfile,
       //costTracking: costTracking
     };
@@ -1965,7 +1871,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
         if (costTracking.etapa0_clinical_check && costTracking.etapa0_clinical_check.cost > 0) {
           stages.push({
-            name: 'clinical_check',
+            name: 'intent_check',
             cost: costTracking.etapa0_clinical_check.cost,
             tokens: costTracking.etapa0_clinical_check.tokens,
             model: modelIntencion,
@@ -2170,6 +2076,10 @@ function validateDiagnoseRequest(data) {
   // Validar flag opcional para habilitar funcionalidades beta en dxgpt
   if (data.betaPage !== undefined && typeof data.betaPage !== 'boolean') {
     errors.push({ field: 'betaPage', reason: 'Must be a boolean' });
+  }
+
+  if (data.forceDiagnosis !== undefined && typeof data.forceDiagnosis !== 'boolean') {
+    errors.push({ field: 'forceDiagnosis', reason: 'Must be a boolean' });
   }
 
   // Verificar patrones sospechosos
@@ -2391,6 +2301,7 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     sanitizedData.subscriptionId = subscriptionId;
     sanitizedData.flow = flow;
     sanitizedData.betaPage = flow === 'ask';
+    sanitizedData.forceDiagnosis = flow === 'diagnose' && req.body.forceDiagnosis === true;
 
     // 1. Si la petición va a la cola, responde como siempre
     // Nota: Sistema de colas desactivado para self-hosted

@@ -72,6 +72,7 @@ const CostTrackingSchema = new Schema({
         'reverse_translation', // Traducción inversa
         'reverse_diseases', // Traducción inversa de diagnósticos
         'profile_inference', // Inferencia de perfil/especialidad para feedback
+        'intent_check', // Enrutamiento unificado: diagnóstico, explicación o enriquecimiento
         'medical_question_check', // Verificación de pregunta médica
         'general_medical_response', // Verificación de escenario clínico
         'emergency_questions', // Verificación de escenario clínico
@@ -172,6 +173,7 @@ CostTrackingSchema.statics.createCostRecord = function(data) {
     tenantId: data.tenantId,
     subscriptionId: data.subscriptionId,
     operation: data.operation,
+    intent: data.intent,
     model: data.model,
     lang: data.lang,
     timezone: data.timezone,

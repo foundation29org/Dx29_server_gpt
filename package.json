@@ -7,6 +7,7 @@
     "start": "node index.js",
     "serve": "nodemon index.js",
     "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
+    "test": "node --test test/intentClassifier.test.js",
     "validate-openapi": "swagger-cli validate docs/dxgpt-api.yaml",
     "generate-openapi": "node scripts/generate-openapi.js",
     "swagger-ui": "node scripts/serve-swagger-ui.js",
