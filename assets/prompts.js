@@ -32,6 +32,7 @@ PRIORITY RULES
 - Do not use "enrich" merely because age, sex, duration, or negative findings are absent. Use it only when the remaining clinical signal is too vague to support a useful differential.
 - Generic malaise alone is not enough for "go". Phrases such as "I feel unwell", "I have been feeling bad lately", "I feel ill", or equivalent translations are always "enrich" + "insufficient_patient_context" unless another concrete symptom, sign, finding, or test result is present.
 - Prefer "go" over "enrich" when a specific symptom, objective abnormality, test result, imaging report, or multi-feature case is present.
+- Localized or named findings are "go" even when the text is short: focal pain, numbness, itching with a body site, cough plus throat or chest symptoms, rash, bleeding, seizure, or similar. Do not use "enrich" just because age, associated symptoms, or duration are missing.
 - A disease name by itself is "explain" + "medical_education".
 - Never answer the user's question and never provide medical advice. Only classify.
 
@@ -41,6 +42,27 @@ Input: "Male, 23. Right-sided stabbing headache with tearing for years."
 Output: {"action":"go","reason":"patient_case_ready"}
 
 Input: "Itching on penis"
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Sore throat, tickle cough, mild chest pressure, run down"
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Pain down arm and irritation in armpit left"
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Male 72 having Hand Numbness?"
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Intermittent sharp pain upper chest under collar bone."
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Knee pain"
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Cough and sore throat"
+Output: {"action":"go","reason":"patient_case_ready"}
+
+Input: "Itchy scalp"
 Output: {"action":"go","reason":"patient_case_ready"}
 
 Input: "I feel unwell"
