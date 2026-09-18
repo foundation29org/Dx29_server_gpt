@@ -521,6 +521,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       `${intentDecision.action}/${intentDecision.reason}` +
       `${forceDiagnosis ? ' [user continue]' : ''}` +
       `${intentDecision.usedFallback ? ' [parse fallback]' : ''}` +
+      `${intentDecision.transportFallback ? ' [transport fallback]' : ''}` +
       `${intentDecision.structuredOutputFallback ? ' [plain JSON fallback]' : ''}`
     );
     // Enum-only telemetry: never send patient text or raw model output.
@@ -532,12 +533,19 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       reason: intentDecision.reason,
       queryType,
       usedFallback: String(intentDecision.usedFallback),
+      transportFallback: String(intentDecision.transportFallback || false),
       structuredOutputFallback: String(intentDecision.structuredOutputFallback || false),
       forceDiagnosis: String(forceDiagnosis),
       descriptionLength: String(data.description?.length || 0)
     });
 
-    if (intentDecision.parseError) {
+    if (intentDecision.transportFallback) {
+      insights.trackEvent('IntentRoutingTransportFallback', {
+        model: modelIntencion,
+        flow,
+        error: String(intentDecision.parseError || 'classifier unavailable').slice(0, 180)
+      });
+    } else if (intentDecision.parseError) {
       insights.trackEvent('IntentRoutingParseFallback', {
         model: modelIntencion,
         flow,

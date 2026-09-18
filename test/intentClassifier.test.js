@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildIntentRequest,
+  failOpenDecision,
   parseIntentDecision,
   shouldSuggestDiagnosisPage
 } = require('../services/intentClassifier');
@@ -38,6 +39,20 @@ test('normalizes a reason that is incompatible with the selected action', () => 
 
   assert.equal(decision.action, 'go');
   assert.equal(decision.reason, 'patient_case_ready');
+});
+
+test('transport failure fail-opens diagnose to DDx and ask to explain', () => {
+  const diagnoseDecision = failOpenDecision('diagnose', new Error('ETIMEDOUT'));
+  const askDecision = failOpenDecision('ask', Object.assign(new Error('Azure 500'), { response: { status: 500 } }));
+
+  assert.equal(diagnoseDecision.action, 'go');
+  assert.equal(diagnoseDecision.queryType, 'diagnostic');
+  assert.equal(diagnoseDecision.usedFallback, true);
+  assert.equal(diagnoseDecision.transportFallback, true);
+
+  assert.equal(askDecision.action, 'explain');
+  assert.equal(askDecision.queryType, 'general');
+  assert.equal(askDecision.transportFallback, true);
 });
 
 test('uses flow-safe fallbacks for malformed model output', () => {

@@ -62,6 +62,14 @@ function fallbackDecision(flow) {
   };
 }
 
+function failOpenDecision(flow, error) {
+  return {
+    ...fallbackDecision(flow),
+    parseError: error?.message || 'classifier unavailable',
+    transportFallback: true
+  };
+}
+
 function extractJsonObject(rawContent) {
   if (typeof rawContent !== 'string') {
     throw new TypeError('Intent classifier response must be a string');
@@ -149,43 +157,52 @@ async function classifyIntent({
   // endpoint configuration.
   const { callAiWithFailover } = require('./aiUtils');
   const startedAt = Date.now();
-  let response;
   let structuredOutputFallback = false;
 
   try {
-    response = await callAiWithFailover(
-      buildIntentRequest(description, true),
-      timezone,
-      model,
-      0,
-      requestData
-    );
-  } catch (error) {
-    const status = Number(error?.response?.status);
-    if (status !== 400) {
-      throw error;
+    let response;
+    try {
+      response = await callAiWithFailover(
+        buildIntentRequest(description, true),
+        timezone,
+        model,
+        0,
+        requestData
+      );
+    } catch (error) {
+      const status = Number(error?.response?.status);
+      if (status !== 400) {
+        throw error;
+      }
+
+      structuredOutputFallback = true;
+      response = await callAiWithFailover(
+        buildIntentRequest(description, false),
+        timezone,
+        model,
+        0,
+        requestData
+      );
     }
 
-    structuredOutputFallback = true;
-    response = await callAiWithFailover(
-      buildIntentRequest(description, false),
-      timezone,
-      model,
-      0,
-      requestData
-    );
+    const rawContent = response?.data?.choices?.[0]?.message?.content;
+    const decision = parseIntentDecision(rawContent, flow);
+
+    return {
+      ...decision,
+      response,
+      usage: response?.data?.usage || null,
+      duration: Date.now() - startedAt,
+      structuredOutputFallback
+    };
+  } catch (error) {
+    // Timeouts, 5xx, and exhausted failover must not block Diagnose.
+    return {
+      ...failOpenDecision(flow, error),
+      duration: Date.now() - startedAt,
+      structuredOutputFallback
+    };
   }
-
-  const rawContent = response?.data?.choices?.[0]?.message?.content;
-  const decision = parseIntentDecision(rawContent, flow);
-
-  return {
-    ...decision,
-    response,
-    usage: response?.data?.usage || null,
-    duration: Date.now() - startedAt,
-    structuredOutputFallback
-  };
 }
 
 function shouldSuggestDiagnosisPage(decision) {
@@ -200,6 +217,7 @@ module.exports = {
   ACTION_TO_QUERY_TYPE,
   buildIntentRequest,
   classifyIntent,
+  failOpenDecision,
   fallbackDecision,
   normalizeDecision,
   parseIntentDecision,
