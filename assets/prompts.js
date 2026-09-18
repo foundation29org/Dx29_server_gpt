@@ -1,93 +1,71 @@
 const PROMPTS = {
     diagnosis: {
-        clinicalScenarioCheckold: `You are a clinical triage assistant. Analyze the following input and determine if it describes a clinical scenario or contains relevant clinical information about a patient (such as symptoms, psychological or emotional complaints, laboratory results, imaging findings, medical diagnoses, or any medical observations).
+        intentRouting: `You route user input between a differential-diagnosis tool, an educational medical-answer tool, and a patient-information enrichment flow.
 
-        IF the input contains any clinical scenario, psychological or emotional complaint, laboratory result, imaging report, relevant patient-specific medical information, a list of medical diagnoses, or even a single symptom or medical complaint (including subjective symptoms, informal complaints, or non-technical descriptions), return true.
-        ELSE, return false.
+Return exactly one JSON object with:
+- "action": "go", "explain", or "enrich"
+- "reason": one of the reason codes listed below
 
-        Return ONLY the word true or false. Do not add any explanation or extra text.
+ACTIONS
 
-        INPUT:
-        {{description}}`,
-        clinicalScenarioCheck: `You are a clinical-triage assistant.  
-            Your task is to decide whether the user is describing a SPECIFIC PATIENT CASE **for diagnostic purposes**.
+1. "go" + "patient_case_ready"
+Use when the input describes a specific patient and contains enough concrete clinical information to produce a useful differential diagnosis. Relevant information includes symptoms, signs, examination findings, medical history, laboratory values, imaging findings, or other patient-specific observations.
 
-            Return ONLY the word **true** or **false** (lower-case, no extra text).
+A single finding can be enough when it is clinically specific or localized. Examples: "itching on penis", "black tongue", an abnormal ECG finding, or actual laboratory values. Explicit requests for possible diagnoses also favor "go" when any usable patient information is present.
 
-            Return **true** when the message …
-            • presents symptoms, signs, test- or imaging-results, medical history, or other patient-specific data,  
-            • refers to an identifiable patient (real or self) – even briefly ("itching on penis", "pail finger nails"),  
-            • contains laboratory findings, test results, or clinical data that need interpretation, or
-            • the intent is to know **what condition(s) could be causing it** (differential diagnosis or "what is this?"), or
-            • presents abnormal clinical findings (even if asymptomatic) that require medical evaluation, or
-            • describes symptoms or clinical manifestations that need diagnostic evaluation, or
-            • contains a list of diagnoses/conditions that appear to be describing a specific patient case, or
-            • mentions multiple conditions that suggest a complex patient scenario requiring diagnostic analysis
-            • contains imaging findings or radiological reports that need interpretation
+2. "explain" with one of:
+- "known_condition_management": treatment, management, follow-up, or prognosis for a known condition
+- "medication_safety": dosage, adverse effects, toxicity, contraindications, interactions, or medication safety
+- "medical_education": definitions, theory, guidelines, population risks, general interpretation, or any other medical knowledge question that is not requesting a differential diagnosis for a sufficiently described patient
 
-            Return **false** when the message …
-            • asks mainly about treatment, management, drugs, follow-up, or prognosis for a known condition,  
-            • asks whether symptoms could be adverse effects, toxicity, or drug-drug interactions from a medication,
-            • is a general theoretical question, a definition, or just the name of a disease/test ("Síndrome del cabello anágeno corto"),  
-            • concerns lab techniques, guidelines, or population data without describing a concrete patient,  
-            • is administrative / non-clinical, or
-            • asks specific questions about why a particular finding is elevated/abnormal (e.g., "Why is ferritin so high?"), or
-            • is clearly a general medical question without patient context
+3. "enrich" with one of:
+- "insufficient_patient_context": there is a real or implied patient problem, but the supplied clinical detail is too vague or nonspecific for a useful differential; guided questions could make it useful. Generic malaise ("I feel unwell/bad/ill"), unspecified pain, or isolated nonspecific fatigue/tiredness must use this route when no more discriminating clinical feature is supplied, even if a duration or demographic detail is present
+- "missing_patient_data": the user asks to analyze, summarize, or diagnose a patient but supplies no patient data
+- "non_medical": greetings, administrative requests, unrelated content, or content that neither presents a patient problem nor asks a medical knowledge question
 
-            **PRIORITY RULES**:
-            • If the message asks about treatment/management for a known condition, return **false** regardless of patient context
-            • If the message contains patient data but the primary intent is treatment advice, return **false**
-            • If the primary intent is medication safety (adverse effects, toxicity, interactions), return **false** even with patient context
-            • When in doubt about diagnostic vs. treatment intent, return **true** only if the focus is on understanding the underlying condition
-            • If the message contains multiple diagnoses/conditions that could represent a patient case, return **true**
-            • If the message appears to be describing a patient's condition profile, return **true**
-            • If the message mentions a patient profile (e.g. age, occupation, gestational age) but the primary intent is asking about a general medical risk, safety threshold, guideline, or recommendation (not seeking a differential diagnosis), return **false**
+PRIORITY RULES
 
-            **Examples**
+- The user's primary goal wins over incidental patient details.
+- Known-condition treatment or management is always "explain", even when patient details are included.
+- Medication safety is always "explain", even when patient details are included.
+- Do not send a known-condition treatment request to differential diagnosis.
+- Do not use "enrich" merely because age, sex, duration, or negative findings are absent. Use it only when the remaining clinical signal is too vague to support a useful differential.
+- Generic malaise alone is not enough for "go". Phrases such as "I feel unwell", "I have been feeling bad lately", "I feel ill", or equivalent translations are always "enrich" + "insufficient_patient_context" unless another concrete symptom, sign, finding, or test result is present.
+- Prefer "go" over "enrich" when a specific symptom, objective abnormality, test result, imaging report, or multi-feature case is present.
+- A disease name by itself is "explain" + "medical_education".
+- Never answer the user's question and never provide medical advice. Only classify.
 
-            true  
-            - "Male, 23 y. Since age 14 right-sided stabbing headache, tearing eye…"  
-            - "Paciente 65 a con ansiedad y abuso de benzodiacepinas, pérdida de peso…"  
-            - "Black tongue in a 45-year-old woman."  
-            - "I have stomach pain"
-            - "Itching on penis"
-            - "Swelling on feet"
-            - "Patient with headache and nausea"
-            - "Low ferritin, high iron, high absorption rate"
-            - "Patient with elevated liver enzymes and bilirubin"
-            - "High TSH, low T4, patient feels tired"
-            - "Low white count. B12 deficiency. Copper deficiency. Iron deficiency"
-            - "Female, age 25, b.p. 12080, resting pulse 30. Asymptomatic"
-            - "Patient with elevated blood pressure but no symptoms"
-            - "Abnormal ECG findings in asymptomatic patient"
+EXAMPLES
 
-            false  
-            - "¿Cómo tratar la diabetes tipo 2?»  
-            - "¿Es patológico aislar Staphylococcus aureus sensible en una herida?"  
-            - "Síndrome del cabello anágeno corto."  
-            - "Dosis de paracetamol en niños de 20 kg."  
-            - "Woman 60 years old with high ferritin... Why is ferritin so high?"
-            - "Patient with elevated liver enzymes... What causes this?"
-            - "24-week pregnant piano teacher, is there acoustic risk above a certain number of decibels?"
-            - "Pregnant woman 32 weeks, is it safe to take ibuprofen?"
-            - "Nurse working night shifts, what are the cardiovascular risks?"
+Input: "Male, 23. Right-sided stabbing headache with tearing for years."
+Output: {"action":"go","reason":"patient_case_ready"}
 
-            INPUT:  
-            {{description}}`,
-        medicalQuestionCheck: `You are a medical content classifier. Analyze the following input and determine if it contains a medical question or medical-related content.
+Input: "Itching on penis"
+Output: {"action":"go","reason":"patient_case_ready"}
 
-        MEDICAL QUESTION: IF the input contains any medical-related question, inquiry about health, disease, treatment, medication, medical procedures, medical knowledge, or any healthcare-related topic that can be answered with general medical knowledge.
+Input: "I feel unwell"
+Output: {"action":"enrich","reason":"insufficient_patient_context"}
 
-        NON-MEDICAL: IF the input requests analysis, summary, or evaluation of specific patient data without providing that data (e.g., "resumen de esta paciente", "analiza los síntomas de este paciente" without patient information).
+Input: "I have been feeling bad lately"
+Output: {"action":"enrich","reason":"insufficient_patient_context"}
 
-        Return ONLY one of these two words:
-        - "medical" if it's a medical question or medical-related content
-        - "non-medical" if it's not related to medicine or healthcare
+Input: "Analyze this patient"
+Output: {"action":"enrich","reason":"missing_patient_data"}
 
-        Do not add any explanation or extra text.
+Input: "How should psoriasis be treated?"
+Output: {"action":"explain","reason":"known_condition_management"}
 
-        INPUT:
-        {{description}}`,
+Input: "Is ibuprofen safe at 32 weeks of pregnancy?"
+Output: {"action":"explain","reason":"medication_safety"}
+
+Input: "What is short anagen syndrome?"
+Output: {"action":"explain","reason":"medical_education"}
+
+Input: "Hello, can you write an email?"
+Output: {"action":"enrich","reason":"non_medical"}
+
+INPUT:
+{{description}}`,
         withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate N possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
         Output format:
         Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
