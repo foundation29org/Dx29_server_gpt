@@ -365,10 +365,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   // Variable para rastrear si se detectó información personal (PII)
   let hasPersonalInfo = false;
 
-  // Verificar si es un tenant de DxGPT (requiere betaPage para funcionalidades especiales)
-  const isDxgptTenant = !!data.tenantId && data.tenantId.startsWith('dxgpt-');
-  // Verificar si es self-hosted
+  // El endpoint fija el flujo. El cliente no elige con betaPage ni tenant.
   const isSelfHosted = config.IS_SELF_HOSTED;
+  const flow = data.flow === 'ask' ? 'ask' : 'diagnose';
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -592,10 +591,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     if (clinicalScenarioResult === 'true') {
       queryType = 'diagnostic';
     } else {
-      // Si no es diagnóstico, verificar si es pregunta médica general
-      // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
-      if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true)) {
-        console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
+      if (data.tenantId || isSelfHosted) {
+        console.log('Non-diagnostic query, checking if it\'s a medical question');
 
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
         let medicalQuestionRequest;
@@ -671,13 +668,21 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     console.log('Query type detected:', queryType);
+
+    const shouldAnswerMedical = flow === 'ask' && queryType === 'general';
+    const shouldRunDiagnosis = flow === 'diagnose' && queryType === 'diagnostic';
+    let suggestedPage = null;
+    if (flow === 'ask' && queryType === 'diagnostic') {
+      suggestedPage = 'home';
+    } else if (flow === 'diagnose' && queryType === 'general') {
+      suggestedPage = 'questions';
+    }
     
     // Variable para controlar si debemos guardar después de la anonimización (caso del else)
     let shouldSaveAfterAnonymization = false;
 
-    // Si es una consulta general médica
-    // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
-    if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
+    // Preguntas médicas solo en la página de preguntas (o tenants sin split)
+    if (shouldAnswerMedical) {
 
       if (userId) {
         await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
@@ -1000,7 +1005,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             lang: data.lang || 'en',
             processingTime: Date.now() - startTime,
             status: 'success',
-            betaPage: data.betaPage || false
+            betaPage: flow === 'ask'
           };
           if(hasPersonalInfo){
             questionData.question.anonymizedText = data.description;
@@ -1042,7 +1047,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     } else{
       
       
-      if(queryType !== 'diagnostic'){
+      if(!shouldRunDiagnosis){
 
         // Anonimizar datos y guardar de forma asíncrona (no bloquea el flujo)
         (async () => {
@@ -1056,9 +1061,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             try {
               const anonymStartDescription = Date.now();
               let anonymizedDescriptionResult = null;
-              // Anonimizar solo si no es diagnóstico
-              // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
-              if((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType !== 'diagnostic'){
+              // Anonimizar consultas no diagnósticas (preguntas, other, o caso clínico en página de preguntas)
+              if((data.tenantId || isSelfHosted) && !shouldRunDiagnosis){
                 anonymizedDescriptionResult = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
               }
               const anonymElapsedDescription = Date.now() - anonymStartDescription;
@@ -1108,7 +1112,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               lang: data.lang || 'en',
               processingTime: Date.now() - startTime,
               status: 'unknown',
-              betaPage: data.betaPage || false
+              betaPage: flow === 'ask'
             };
             if (hasPersonalInfoLocal) {
               questionData.question.anonymizedText = anonymizedDescription;
@@ -1239,6 +1243,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: model,
           queryType: queryType,
+          suggestedPage: suggestedPage,
           inferredProfile: inferredProfile,
           costTracking: costTracking
         };
@@ -1533,7 +1538,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           lang: data.lang || 'en',
           processingTime: Date.now() - startTime,
           status: 'unknown',
-          betaPage: data.betaPage || false
+          betaPage: flow === 'ask'
         };
         if (hasPersonalInfo) {
           questionData.question.anonymizedText = anonymizedDescription;
@@ -1677,7 +1682,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         usage: usage,
         costTracking: costTracking,
         iframeParams: data.iframeParams || {},
-        betaPage: data.betaPage || false
+        betaPage: flow === 'ask'
       };
       console.log('Saving to blob');
       if (parsedResponse.length == 0) {
@@ -2214,6 +2219,15 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
+  return handleDiagnoseOrAsk(req, res, 'diagnose');
+}
+
+async function ask(req, res) {
+  return handleDiagnoseOrAsk(req, res, 'ask');
+}
+
+async function handleDiagnoseOrAsk(req, res, flow) {
+  const endpoint = flow === 'ask' ? 'ask' : 'diagnose';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const model = resolveDiagnoseModel(req.body.model);
@@ -2233,7 +2247,7 @@ async function diagnose(req, res) {
     insights.error({
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
       headers: req.headers,
-      endpoint: 'diagnose',
+      endpoint: endpoint,
       requestId: requestId,
       userAgent: req.headers['user-agent'],
       origin: req.get('origin'),
@@ -2241,7 +2255,7 @@ async function diagnose(req, res) {
       hasAuthToken: hasAuthToken,
       authTokenLength: authTokenLength
     }, {
-      endpoint: 'diagnose',
+      endpoint: endpoint,
       requestId: requestId,
       userAgent: req.headers['user-agent'],
       origin: req.get('origin'),
@@ -2322,7 +2336,7 @@ async function diagnose(req, res) {
         subscriptionId: subscriptionId,
         subscriptionName: apimSubscriptionName,
         requestId: requestId,
-        endpoint: 'diagnose',
+        endpoint: endpoint,
         userAgent: req.headers['user-agent'],
         origin: req.get('origin'),
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
@@ -2336,7 +2350,7 @@ async function diagnose(req, res) {
         tenantId: tenantId,
         requestId: requestId,
         errors: JSON.stringify(validationErrors),
-        endpoint: 'diagnose',
+        endpoint: endpoint,
         userAgent: req.headers['user-agent'],
         origin: req.get('origin'),
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
@@ -2357,7 +2371,7 @@ async function diagnose(req, res) {
           alert: securityInfo.securityAlert,
           subscriptionId: subscriptionId,
           productName: productName,
-          endpoint: 'diagnose',
+          endpoint: endpoint,
           hasAuthToken: false,
           origin: req.get('origin'),
           ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress
@@ -2375,6 +2389,8 @@ async function diagnose(req, res) {
     sanitizedData.model = model;
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;
+    sanitizedData.flow = flow;
+    sanitizedData.betaPage = flow === 'ask';
 
     // 1. Si la petición va a la cola, responde como siempre
     // Nota: Sistema de colas desactivado para self-hosted
@@ -2441,12 +2457,12 @@ async function diagnose(req, res) {
   } catch (error) {
     console.error('Error:', error);
     insights.error({
-      message: error.message || 'Unknown error in diagnose',
+      message: error.message || `Unknown error in ${endpoint}`,
       stack: error.stack,
       code: error.code,
       result: error.result,
       timestamp: new Date().toISOString(),
-      endpoint: 'diagnose',
+      endpoint: endpoint,
       phase: error.phase || 'unknown',
       requestInfo: {
         method: requestInfo.method,
@@ -2473,7 +2489,7 @@ async function diagnose(req, res) {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        'Error in diagnose',
+        `Error in ${endpoint}`,
         infoError,
         tenantId,
         subscriptionId
@@ -2502,6 +2518,7 @@ async function diagnose(req, res) {
 
 module.exports = {
   diagnose,
+  ask,
   processAIRequest,
   processAIRequestInternal
 };
