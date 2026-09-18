@@ -54,6 +54,10 @@ function validateFollowUpQuestionsRequest(data) {
     }
   }
 
+  if (data.mode !== undefined && !['general', 'hypothesis'].includes(data.mode)) {
+    errors.push({ field: 'mode', reason: 'Must be either general or hypothesis' });
+  }
+
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
     { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
@@ -91,6 +95,7 @@ function sanitizeFollowUpQuestionsData(data) {
     diseases: sanitizeInput(data.diseases),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
+    mode: data.mode || 'general',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -148,7 +153,7 @@ async function generateFollowUpQuestions(req, res) {
     }
 
     const sanitizedData = sanitizeFollowUpQuestionsData(req.body);
-    const { description, diseases, lang, timezone } = sanitizedData;
+    const { description, diseases, lang, mode, timezone } = sanitizedData;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -254,7 +259,29 @@ async function generateFollowUpQuestions(req, res) {
 
     // 2. Construir el prompt para generar preguntas de seguimiento
 
-    const prompt = `
+    const prompt = mode === 'hypothesis' ? `
+      You are a medical assistant helping to complete the clinical information needed to assess one selected diagnostic hypothesis.
+
+      Patient description:
+      "${englishDescription}"
+
+      Selected diagnostic hypothesis:
+      ${englishDiseases}
+
+      Generate exactly 5 concise follow-up questions with the greatest value for supporting, weakening, differentiating, or confirming this hypothesis.
+
+      Requirements:
+      1. Ask only about information that is not already established in the patient description.
+      2. Prioritize discriminative clinical findings, disease-specific triggers, progression, examination findings, and high-value diagnostic or genetic test results.
+      3. Do not ask for more detail about an existing finding unless that detail materially changes the assessment.
+      4. Make each question self-contained so a short answer such as "yes", "no", "unknown", or a test result remains meaningful when stored with the question.
+      5. Ask one clinical concept per question and avoid generic demographic or administrative questions.
+      6. Do not ask for personal identifiers.
+      7. Use clear language suitable for a clinician or patient.
+
+      Format your response as a JSON array of exactly 5 strings.
+      Your response should be ONLY the JSON array, with no additional text or explanation.
+      ` : `
       You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following description of their symptoms:
   
       "${englishDescription}"
@@ -359,6 +386,17 @@ async function generateFollowUpQuestions(req, res) {
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
+      }
+
+      if (mode === 'hypothesis') {
+        questions = questions
+          .filter(question => typeof question === 'string' && question.trim().length > 0)
+          .map(question => question.trim())
+          .slice(0, 5);
+
+        if (questions.length === 0) {
+          throw new Error('Response contains no valid hypothesis questions');
+        }
       }
     } catch (parseError) {
       console.error("Failed to parse questions:", parseError);
@@ -590,6 +628,10 @@ function validateProcessFollowUpRequest(data) {
     }
   }
 
+  if (data.mode !== undefined && !['general', 'hypothesis'].includes(data.mode)) {
+    errors.push({ field: 'mode', reason: 'Must be either general or hypothesis' });
+  }
+
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
     { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
@@ -643,6 +685,7 @@ function sanitizeProcessFollowUpData(data) {
     })),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
+    mode: data.mode || 'general',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -700,7 +743,7 @@ async function processFollowUpAnswers(req, res) {
     }
 
     const sanitizedData = sanitizeProcessFollowUpData(req.body);
-    const { description, answers, lang, timezone } = sanitizedData;
+    const { description, answers, lang, mode, timezone } = sanitizedData;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -816,6 +859,21 @@ async function processFollowUpAnswers(req, res) {
       `Question: ${item.question}\nAnswer: ${item.answer}`
     ).join('\n\n');
 
+    const updateRequirements = mode === 'hypothesis' ? `
+      1. Preserve every relevant fact and the original perspective of the clinical description.
+      2. Interpret each short answer only in the context of its associated question.
+      3. Convert question-answer pairs into clear, self-contained clinical statements.
+      4. Do not infer facts that are not explicitly contained in the original description or answers.
+      5. Include known negative findings and explicitly unknown or unperformed tests when provided.
+      6. Do not include the questions themselves in the final description.
+    ` : `
+      1. Maintain all relevant information from the original description.
+      2. Seamlessly incorporate the new information from the answers.
+      3. Be well-organized and clear.
+      4. Be written in first person, as if the patient is describing their symptoms.
+      5. Not include the questions themselves, only the information.
+    `;
+
     const prompt = `
       You are a medical assistant helping to update a patient's symptom description based on their answers to follow-up questions.
       
@@ -826,12 +884,8 @@ async function processFollowUpAnswers(req, res) {
       ${questionsAndAnswers}
       
       Please create an updated, comprehensive description that integrates the original information with the new details from the follow-up questions. The updated description should:
-      
-      1. Maintain all relevant information from the original description
-      2. Seamlessly incorporate the new information from the answers
-      3. Be well-organized and clear
-      4. Be written in first person, as if the patient is describing their symptoms
-      5. Not include the questions themselves, only the information
+
+      ${updateRequirements}
       
       Return ONLY the updated description, with no additional commentary or explanation.`;
 
