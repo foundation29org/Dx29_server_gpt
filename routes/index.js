@@ -28,6 +28,7 @@ api.get('/internal/langs/', smartLimiter, langCtrl.getLangs)
 api.post('/internal/homesupport/', smartLimiter, supportCtrl.sendMsgLogoutSupport)
 
 api.post('/diagnose', smartLimiter, helpDiagnoseCtrl.diagnose)
+api.post('/ask', smartLimiter, helpDiagnoseCtrl.ask)
 
 api.post('/disease/info', smartLimiter, callInfoDiseaseCtrl.callInfoDisease)
 

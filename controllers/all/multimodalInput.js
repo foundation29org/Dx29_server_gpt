@@ -7,7 +7,10 @@ const insights = require('../../services/insights');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
 const pubsubService = require('../../services/pubsubService');
-const { aliasRoutingModel } = require('../../services/aiUtils');
+const {
+    DEFAULT_AI_MODEL,
+    resolveDiagnoseModel
+} = require('../../services/aiUtils');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -45,19 +48,6 @@ function getHeader(req, name) {
 }
 
 const PRODUCT_SUMMARY_MIN_CHARS = 1000;
-const EVAL_MODEL_OVERRIDE_TENANTS = /^(dxgpt-local|dxgpt-eval|dxgpt-dev)/i;
-
-function canOverrideModel(tenantId) {
-    return process.env.NODE_ENV === 'local' || EVAL_MODEL_OVERRIDE_TENANTS.test(String(tenantId || ''));
-}
-
-function resolveDiagnoseModel(requestedModel, hasImage, tenantId) {
-    const requested = aliasRoutingModel(requestedModel);
-    if (requested && canOverrideModel(tenantId)) {
-        return requested;
-    }
-    return hasImage ? 'gpt5' : 'gpt54mini';
-}
 
 const processDocument = async (fileBuffer, originalName, blobUrl) => {
     try {
@@ -425,7 +415,7 @@ const processMultimodalInput = async (req, res) => {
             }
             
             const summarized = (hasPatient || hasDoc) && combinedInput.trim().length > PRODUCT_SUMMARY_MIN_CHARS;
-            const model = resolveDiagnoseModel(req.body.model, hasImage, tenantId);
+            const model = resolveDiagnoseModel(req.body.model);
 
             let isImageOnly = false;
             if(!hasDoc && !hasPatient && hasImage){
@@ -511,7 +501,7 @@ async function callDiagnoses(data, requestInfo) {
             myuuid: data.myuuid,
             lang: data.lang,
             timezone: data.timezone || 'UTC',
-            model: data.model || 'gpt54mini',
+            model: data.model || DEFAULT_AI_MODEL,
             iframeParams: data.iframeParams || {},
             imageUrls: data.imageUrls || []
         },

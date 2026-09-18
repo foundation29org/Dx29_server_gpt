@@ -7,10 +7,12 @@ const { jsonrepair } = require('jsonrepair');
 
 // Detectar si es deployment self-hosted (sin APIM)
 const isSelfHosted = config.IS_SELF_HOSTED || false;
-const DEFAULT_AI_MODEL = 'gpt54mini';
+const DEFAULT_AI_MODEL = 'gpt56terra';
 const ROUTING_MODEL_ALIASES = {
   gpt4o: 'gpt4o',
-  o3: 'o3',
+  // Compatibilidad durante el despliegue: clientes antiguos que aún envíen
+  // "o3" reciben Terra; ya no existe una ruta avanzada en el producto.
+  o3: DEFAULT_AI_MODEL,
   gpt5nano: 'gpt5nano',
   'gpt-5-nano': 'gpt5nano',
   gpt5mini: 'gpt5mini',
@@ -24,7 +26,6 @@ const ROUTING_MODEL_ALIASES = {
 };
 const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt4o: 'gpt4o',
-  o3: 'o3',
   gpt5nano: 'gpt-5-nano',
   gpt5mini: 'gpt-5-mini',
   gpt54mini: 'gpt-5.4-mini',
@@ -72,17 +73,13 @@ const modelConfig = {
   'gpt-5.6-terra': {
     apiVersion: '2025-04-01-preview',
     path: '/openai/deployments/gpt-5.6-terra/chat/completions'
-  },
-  'o3': {
-    apiVersion: '2025-04-01-preview',
-    path: '/openai/responses'
   }
 };
 
 /**
  * Construye la URL completa de Azure OpenAI para un endpoint específico
  * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
- * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, o3)
+ * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, gpt-5.6-terra)
  * @returns {Object} - { url, apiKey, region, deployment } o null
  */
 function buildAzureOpenAIEndpoint(region, model) {
@@ -232,36 +229,6 @@ const endpointsMap = {
     other: [
       buildAzureOpenAIEndpoint('us1', 'gpt4o'),
       buildAzureOpenAIEndpoint('as2', 'gpt4o')
-    ]
-  },
-  o3: {
-    asia: [
-      buildAzureOpenAIEndpoint('as1', 'o3'),
-      buildAzureOpenAIEndpoint('as2', 'o3')
-    ],
-    europe: [
-      buildAzureOpenAIEndpoint('eu1', 'o3'),
-      buildAzureOpenAIEndpoint('us1', 'o3')
-    ],
-    northamerica: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('us2', 'o3')
-    ],
-    southamerica: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('us2', 'o3')
-    ],
-    africa: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('as2', 'o3')
-    ],
-    oceania: [
-      buildAzureOpenAIEndpoint('as2', 'o3'),
-      buildAzureOpenAIEndpoint('us1', 'o3')
-    ],
-    other: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('as2', 'o3')
     ]
   },
   gpt5nano: {
@@ -426,6 +393,12 @@ function normalizeRoutingModel(model) {
   return normalized || DEFAULT_AI_MODEL;
 }
 
+function resolveDiagnoseModel(requestedModel) {
+  return process.env.NODE_ENV === 'local'
+    ? normalizeRoutingModel(requestedModel)
+    : DEFAULT_AI_MODEL;
+}
+
 function getEndpointsByTimezone(timezone, model = DEFAULT_AI_MODEL) {
   const normalizedModel = normalizeRoutingModel(model);
 
@@ -561,14 +534,8 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
   }
 
   try {
-    // Preparar el body
-    // Para o3, el endpoint /openai/responses requiere el campo 'model' en el body
-    // Para otros modelos (chat completions), el modelo está en la URL, así que lo removemos
     const requestBodyCopy = { ...requestBody };
-    const isO3Endpoint = endpoint.url.includes('/openai/responses');
-    
-    if (!isO3Endpoint && requestBodyCopy.model) {
-      // Solo remover 'model' si NO es el endpoint de o3
+    if (requestBodyCopy.model) {
       delete requestBodyCopy.model;
     }
 
@@ -1145,6 +1112,34 @@ function parseFollowUpQuestions(raw) {
  * @returns {Promise<any>} - El JSON reparado y parseado
  * @throws {Error} - Si GPT no puede reparar el JSON
  */
+function extractJsonPayload(text, jsonType = 'generic') {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+
+  const preferArray = jsonType === 'diagnosis' || jsonType === 'questions';
+  const preferObject = jsonType === 'object';
+  const candidates = preferArray
+    ? ['[', '{']
+    : preferObject
+      ? ['{', '[']
+      : ['[', '{'];
+
+  for (const openChar of candidates) {
+    const start = text.indexOf(openChar);
+    if (start === -1) {
+      continue;
+    }
+    const closeChar = openChar === '[' ? ']' : '}';
+    const end = text.lastIndexOf(closeChar);
+    if (end > start) {
+      return text.slice(start, end + 1);
+    }
+  }
+
+  return text;
+}
+
 async function repairJsonWithGPT(brokenJson, jsonType = 'generic') {
   const timezone = 'Europe/Madrid';
   
@@ -1213,22 +1208,13 @@ ${instructions}
 
 Return the fixed JSON:`;
 
-  /*const requestBody = {
-    model: "gpt-5-mini",
-    messages: [{ role: "user", content: repairPrompt }],
-    reasoning_effort: "medium"
-  };*/
-
   const requestBody = {
     messages: [{ role: "user", content: repairPrompt }],
-    temperature: 0,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
+    reasoning_effort: 'low'
   };
 
   try {
-    const response = await callAiWithFailover(requestBody, timezone, 'gpt4o', 0, null);
+    const response = await callAiWithFailover(requestBody, timezone, 'gpt54mini', 0, null);
     const choice = response?.data?.choices?.[0];
     if (!choice || !choice.message || !choice.message.content) {
       throw new Error('GPT repair returned no content');
@@ -1238,6 +1224,7 @@ Return the fixed JSON:`;
     repairedText = repairedText
       .replace(/^```json\s*|\s*```$/g, '')
       .replace(/^```\s*|\s*```$/g, '');
+    repairedText = extractJsonPayload(repairedText, jsonType);
 
     return JSON.parse(repairedText);
   } catch (gptError) {
@@ -1257,7 +1244,8 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
   let cleanResponse = jsonText.trim()
     .replace(/^```json\s*|\s*```$/g, '')
     .replace(/^```\s*|\s*```$/g, '');
-    cleanResponse = stripComments(cleanResponse);
+  cleanResponse = extractJsonPayload(cleanResponse, jsonType);
+  cleanResponse = stripComments(cleanResponse);
   // 1) Intento directo
   try {
     return JSON.parse(cleanResponse);
@@ -1351,9 +1339,11 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
 }
 
 module.exports = {
+  DEFAULT_AI_MODEL,
   sanitizeAiData,
   sanitizeInput,
   aliasRoutingModel,
+  resolveDiagnoseModel,
   getEndpointsByTimezone,
   callAiWithFailover,
   detectLanguageWithRetry,

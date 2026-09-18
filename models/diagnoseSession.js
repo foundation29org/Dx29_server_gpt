@@ -55,7 +55,7 @@ const DiagnoseSessionSchema = new Schema({
     model: {
       type: String,
       required: true,
-      default: 'o3-dxgpt'
+      default: 'gpt56terra'
     }
   },
   timezone: {

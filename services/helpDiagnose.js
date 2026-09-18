@@ -11,23 +11,21 @@ const pubsubService = require('./pubsubService');
 const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profileInferenceService');
 const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
+  DEFAULT_AI_MODEL,
   callAiWithFailover,
   translateTextWithRetry,
   translateInvertWithRetry,
   sanitizeAiData,
   parseJsonWithFixes,
-  aliasRoutingModel
+  resolveDiagnoseModel
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
-const { callGeminiModel } = require('./geminiClient');
 
-const defaultModel = 'gpt54mini';
+const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
 const modelAnonymization = 'gpt54mini';//'gpt5mini'; //'gpt5nano';
-const ADVANCED_GEMINI_PRIMARY = 'gemini-3.5-flash';
-const ADVANCED_GEMINI_FALLBACK = 'gemini-2.5-pro';
 const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
 const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
   ? config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD
@@ -90,7 +88,6 @@ function isVisionDiagnoseModel(model) {
 
 function isLongDiagnoseModel(model) {
   return (
-    model === 'o3' ||
     model === 'gpt5nano' ||
     model === 'gpt5mini' ||
     model === 'gpt54mini' ||
@@ -140,54 +137,6 @@ async function callSonarAPI(prompt, timezone, modelType) {
   });
 
   return perplexityResponse;
-}
-
-function buildAzureO3Request(prompt) {
-  return {
-    model: "o3-dxgpt",
-    input: [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: prompt }
-        ]
-      }
-    ],
-    tools: [],
-    text: {
-      format: {
-        type: "text"
-      }
-    },
-    reasoning: {
-      effort: "high"
-    }
-  };
-}
-
-async function callAdvancedModelChain(prompt, timezone, dataRequest) {
-  const tried = [];
-  const geminiCandidates = [ADVANCED_GEMINI_PRIMARY, ADVANCED_GEMINI_FALLBACK];
-
-  for (const geminiModel of geminiCandidates) {
-    try {
-      const response = await callGeminiModel(prompt, geminiModel);
-      return { response, provider: geminiModel };
-    } catch (error) {
-      tried.push({ model: geminiModel, error: error?.message || String(error) });
-    }
-  }
-
-  insights.trackEvent('AdvancedModelFallbackUsed', {
-    primary: ADVANCED_GEMINI_PRIMARY,
-    secondary: ADVANCED_GEMINI_FALLBACK,
-    tertiary: 'o3',
-    tried
-  });
-
-  const o3RequestBody = buildAzureO3Request(prompt);
-  const response = await callAiWithFailover(o3RequestBody, timezone, 'o3', 0, dataRequest);
-  return { response, provider: 'o3' };
 }
 
 // Función para llamar a modelos GPT
@@ -346,7 +295,6 @@ function processMedicalResponse(response, model) {
 // Extraer la lógica principal a una función reutilizable
 async function processAIRequest(data, requestInfo = null, model = defaultModel, region = null) {
   // Si es un modelo largo, usar WebPubSub con progreso
-  //const isLongModel = (model === 'o3');
   const isLongModel = true;
   const userId = data.myuuid;
 
@@ -383,6 +331,8 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
 
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null, region = null) {
+  model = resolveDiagnoseModel(model);
+  data.model = model;
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -415,10 +365,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   // Variable para rastrear si se detectó información personal (PII)
   let hasPersonalInfo = false;
 
-  // Verificar si es un tenant de DxGPT (requiere betaPage para funcionalidades especiales)
-  const isDxgptTenant = !!data.tenantId && data.tenantId.startsWith('dxgpt-');
-  // Verificar si es self-hosted
+  // El endpoint fija el flujo. El cliente no elige con betaPage ni tenant.
   const isSelfHosted = config.IS_SELF_HOSTED;
+  const flow = data.flow === 'ask' ? 'ask' : 'diagnose';
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
@@ -642,10 +591,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     if (clinicalScenarioResult === 'true') {
       queryType = 'diagnostic';
     } else {
-      // Si no es diagnóstico, verificar si es pregunta médica general
-      // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
-      if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true)) {
-        console.log('Non-diagnostic query for special tenant, checking if it\'s a medical question');
+      if (data.tenantId || isSelfHosted) {
+        console.log('Non-diagnostic query, checking if it\'s a medical question');
 
         const medicalQuestionPrompt = PROMPTS.diagnosis.medicalQuestionCheck.replace("{{description}}", englishDescription);
         let medicalQuestionRequest;
@@ -721,13 +668,21 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     console.log('Query type detected:', queryType);
+
+    const shouldAnswerMedical = flow === 'ask' && queryType === 'general';
+    const shouldRunDiagnosis = flow === 'diagnose' && queryType === 'diagnostic';
+    let suggestedPage = null;
+    if (flow === 'ask' && queryType === 'diagnostic') {
+      suggestedPage = 'home';
+    } else if (flow === 'diagnose' && queryType === 'general') {
+      suggestedPage = 'questions';
+    }
     
     // Variable para controlar si debemos guardar después de la anonimización (caso del else)
     let shouldSaveAfterAnonymization = false;
 
-    // Si es una consulta general médica
-    // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
-    if ((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType === 'general') {
+    // Preguntas médicas solo en la página de preguntas (o tenants sin split)
+    if (shouldAnswerMedical) {
 
       if (userId) {
         await pubsubService.sendProgress(userId, 'medical_question', 'Generating educational response...', 50);
@@ -1050,7 +1005,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             lang: data.lang || 'en',
             processingTime: Date.now() - startTime,
             status: 'success',
-            betaPage: data.betaPage || false
+            betaPage: flow === 'ask'
           };
           if(hasPersonalInfo){
             questionData.question.anonymizedText = data.description;
@@ -1092,7 +1047,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     } else{
       
       
-      if(queryType !== 'diagnostic'){
+      if(!shouldRunDiagnosis){
 
         // Anonimizar datos y guardar de forma asíncrona (no bloquea el flujo)
         (async () => {
@@ -1106,9 +1061,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
             try {
               const anonymStartDescription = Date.now();
               let anonymizedDescriptionResult = null;
-              // Anonimizar solo si no es diagnóstico
-              // Para tenants externos y self-hosted siempre, para dxgpt-* solo con betaPage
-              if((data.tenantId || isSelfHosted) && (!isDxgptTenant || data.betaPage === true) && queryType !== 'diagnostic'){
+              // Anonimizar consultas no diagnósticas (preguntas, other, o caso clínico en página de preguntas)
+              if((data.tenantId || isSelfHosted) && !shouldRunDiagnosis){
                 anonymizedDescriptionResult = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
               }
               const anonymElapsedDescription = Date.now() - anonymStartDescription;
@@ -1158,7 +1112,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
               lang: data.lang || 'en',
               processingTime: Date.now() - startTime,
               status: 'unknown',
-              betaPage: data.betaPage || false
+              betaPage: flow === 'ask'
             };
             if (hasPersonalInfoLocal) {
               questionData.question.anonymizedText = anonymizedDescription;
@@ -1289,6 +1243,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           detectedLang: detectedLanguage,
           model: model,
           queryType: queryType,
+          suggestedPage: suggestedPage,
           inferredProfile: inferredProfile,
           costTracking: costTracking
         };
@@ -1346,23 +1301,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     const aiStartMs = Date.now();
-    let aiResponse;
-    let diagnosticsModelUsed = model;
-    if (model === 'o3') {
-      const advancedResult = await callAdvancedModelChain(helpDiagnosePrompt, data.timezone, dataRequest);
-      aiResponse = advancedResult.response;
-      diagnosticsModelUsed = advancedResult.provider || model;
-      if (advancedResult.provider !== 'o3') {
-        insights.trackEvent('AdvancedModelChainUsed', {
-          provider: advancedResult.provider,
-          requestedModel: model,
-          tenantId: data.tenantId,
-          subscriptionId: data.subscriptionId
-        });
-      }
-    } else {
-      aiResponse = await callAiWithFailover(requestBody, data.timezone, model, 0, dataRequest);
-    }
+    const aiResponse = await callAiWithFailover(
+      requestBody,
+      data.timezone,
+      model,
+      0,
+      dataRequest
+    );
     const aiElapsedMs = Date.now() - aiStartMs;
     let usage = null;
 
@@ -1372,34 +1317,27 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     }
 
     // Procesar la respuesta según el modelo
-    let aiResponseText;
-    if (model === 'o3' && aiResponse.data?.output && Array.isArray(aiResponse.data.output)) {
-      usage = aiResponse.data?.usage;
-      aiResponseText = aiResponse.data.output.find(el => el.type === "message")?.content?.[0]?.text?.trim();
-    } else {
-      usage = aiResponse.data?.usage;
-      // Validar que la respuesta tiene el formato esperado
-      if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
-        console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
-        insights.error({
-          message: 'Invalid AI response format - no choices array',
-          response: JSON.stringify(aiResponse.data),
-          model: model,
-          myuuid: data.myuuid,
-          tenantId: data.tenantId,
-          timezone: data.timezone
-        });
-        throw new Error('Invalid AI response format - no choices returned from OpenAI');
-      }
-      aiResponseText = aiResponse.data.choices[0].message?.content;
+    usage = aiResponse.data?.usage;
+    if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
+      console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
+      insights.error({
+        message: 'Invalid AI response format - no choices array',
+        response: JSON.stringify(aiResponse.data),
+        model: model,
+        myuuid: data.myuuid,
+        tenantId: data.tenantId,
+        timezone: data.timezone
+      });
+      throw new Error('Invalid AI response format - no choices returned from OpenAI');
     }
+    const aiResponseText = aiResponse.data.choices[0].message?.content;
 
     console.log('usage', aiResponse.data.usage);
     //console.log('aiResponseText', aiResponseText);
 
     // Calcular costos de la Etapa 1: Diagnósticos completos
     if (usage) {
-      const etapa1Cost = calculatePrice(usage, diagnosticsModelUsed);
+      const etapa1Cost = calculatePrice(usage, model);
       costTracking.etapa1_diagnosticos = {
         cost: etapa1Cost.totalCost,
         tokens: {
@@ -1407,7 +1345,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           output: etapa1Cost.outputTokens,
           total: etapa1Cost.totalTokens
         },
-        model: diagnosticsModelUsed,
+        model: model,
         duration: aiElapsedMs
       };
       costTracking.total.cost += etapa1Cost.totalCost;
@@ -1600,7 +1538,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           lang: data.lang || 'en',
           processingTime: Date.now() - startTime,
           status: 'unknown',
-          betaPage: data.betaPage || false
+          betaPage: flow === 'ask'
         };
         if (hasPersonalInfo) {
           questionData.question.anonymizedText = anonymizedDescription;
@@ -1744,7 +1682,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         usage: usage,
         costTracking: costTracking,
         iframeParams: data.iframeParams || {},
-        betaPage: data.betaPage || false
+        betaPage: flow === 'ask'
       };
       console.log('Saving to blob');
       if (parsedResponse.length == 0) {
@@ -1761,8 +1699,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       } else {
         if (model == 'gpt4o') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-        } else if (model == 'o3') {
-          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v3');
         } else if (model == 'gpt5') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
         } else if (model == 'gpt56terra') {
@@ -2283,9 +2219,18 @@ function validateDiagnoseRequest(data) {
 }
 
 async function diagnose(req, res) {
-  const model = aliasRoutingModel(req.body.model || 'gpt54mini');
+  return handleDiagnoseOrAsk(req, res, 'diagnose');
+}
+
+async function ask(req, res) {
+  return handleDiagnoseOrAsk(req, res, 'ask');
+}
+
+async function handleDiagnoseOrAsk(req, res, flow) {
+  const endpoint = flow === 'ask' ? 'ask' : 'diagnose';
   const tenantId = getHeader(req, 'X-Tenant-Id');
   const subscriptionId = getHeader(req, 'x-subscription-id');
+  const model = resolveDiagnoseModel(req.body.model);
   const authToken = getHeader(req, 'X-MS-AUTH-TOKEN'); // Token JWT de Static Web Apps
 
   // SECURITY: Registrar información de autenticación para auditoría
@@ -2302,7 +2247,7 @@ async function diagnose(req, res) {
     insights.error({
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
       headers: req.headers,
-      endpoint: 'diagnose',
+      endpoint: endpoint,
       requestId: requestId,
       userAgent: req.headers['user-agent'],
       origin: req.get('origin'),
@@ -2310,7 +2255,7 @@ async function diagnose(req, res) {
       hasAuthToken: hasAuthToken,
       authTokenLength: authTokenLength
     }, {
-      endpoint: 'diagnose',
+      endpoint: endpoint,
       requestId: requestId,
       userAgent: req.headers['user-agent'],
       origin: req.get('origin'),
@@ -2391,7 +2336,7 @@ async function diagnose(req, res) {
         subscriptionId: subscriptionId,
         subscriptionName: apimSubscriptionName,
         requestId: requestId,
-        endpoint: 'diagnose',
+        endpoint: endpoint,
         userAgent: req.headers['user-agent'],
         origin: req.get('origin'),
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
@@ -2405,7 +2350,7 @@ async function diagnose(req, res) {
         tenantId: tenantId,
         requestId: requestId,
         errors: JSON.stringify(validationErrors),
-        endpoint: 'diagnose',
+        endpoint: endpoint,
         userAgent: req.headers['user-agent'],
         origin: req.get('origin'),
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
@@ -2426,7 +2371,7 @@ async function diagnose(req, res) {
           alert: securityInfo.securityAlert,
           subscriptionId: subscriptionId,
           productName: productName,
-          endpoint: 'diagnose',
+          endpoint: endpoint,
           hasAuthToken: false,
           origin: req.get('origin'),
           ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress
@@ -2441,8 +2386,11 @@ async function diagnose(req, res) {
     }
 
     const sanitizedData = sanitizeAiData(req.body);
+    sanitizedData.model = model;
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;
+    sanitizedData.flow = flow;
+    sanitizedData.betaPage = flow === 'ask';
 
     // 1. Si la petición va a la cola, responde como siempre
     // Nota: Sistema de colas desactivado para self-hosted
@@ -2509,12 +2457,12 @@ async function diagnose(req, res) {
   } catch (error) {
     console.error('Error:', error);
     insights.error({
-      message: error.message || 'Unknown error in diagnose',
+      message: error.message || `Unknown error in ${endpoint}`,
       stack: error.stack,
       code: error.code,
       result: error.result,
       timestamp: new Date().toISOString(),
-      endpoint: 'diagnose',
+      endpoint: endpoint,
       phase: error.phase || 'unknown',
       requestInfo: {
         method: requestInfo.method,
@@ -2541,7 +2489,7 @@ async function diagnose(req, res) {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        'Error in diagnose',
+        `Error in ${endpoint}`,
         infoError,
         tenantId,
         subscriptionId
@@ -2570,6 +2518,7 @@ async function diagnose(req, res) {
 
 module.exports = {
   diagnose,
+  ask,
   processAIRequest,
   processAIRequestInternal
 };
