@@ -113,12 +113,12 @@ async function callSonarAPI(prompt, timezone, modelType) {
   const perplexityPrompt = `${prompt}
 
   IMPORTANT: Use your web search capabilities to find current, accurate medical information.
-  
-  Search for recent medical information, studies, and official sources to provide the most up-to-date and accurate response.
 
-  Prioritice medical guidelines references.
-  
-  Include a references section with real, working links that you found through web search.`;
+  Prioritize current clinical guidelines, systematic reviews, and official medical sources.
+
+  Cite supported claims inline using the citation markers associated with the search results.
+  Do not include a separate references, sources, or bibliography section, and do not list raw URLs.
+  The application renders the verified references separately from the API citation metadata.`;
 
   let reasoning_effort = "low";
   if (modelType === 'sonar-reasoning-pro' || modelType === 'sonar-pro') {
