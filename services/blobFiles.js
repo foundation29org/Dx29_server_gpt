@@ -1,4 +1,5 @@
 const { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryParameters, BlobSASPermissions } = require('@azure/storage-blob');
+const crypto = require('node:crypto');
 const config = require('../config');
 
 const accountname = config.openDxAccessToken.blobAccount;
@@ -31,11 +32,22 @@ async function createBlob(blobName, data, contentType) {
     }
 }
 
-function generateSasUrl(blobName) {
+const DEFAULT_READ_SAS_MS = 60 * 60 * 1000;
+const DEFAULT_PREVIEW_SAS_MS = 24 * 60 * 60 * 1000;
+
+function resolveSasTtlMs(expiresInMs, fallbackMs) {
+    return Number.isFinite(expiresInMs) && expiresInMs > 0 ? expiresInMs : fallbackMs;
+}
+
+function generateBlobReadUrl(blobName, expiresInMs) {
+    const ttlMs = resolveSasTtlMs(
+        expiresInMs,
+        config.BLOB_READ_SAS_MS || DEFAULT_READ_SAS_MS
+    );
     const startDate = new Date();
     const expiryDate = new Date();
     startDate.setTime(startDate.getTime() - 5 * 60 * 1000); // 5 minutos antes
-    expiryDate.setTime(expiryDate.getTime() + 60 * 60 * 1000); // 1 hora después
+    expiryDate.setTime(expiryDate.getTime() + ttlMs);
 
     const sasToken = generateBlobSASQueryParameters({
         containerName: containerName,
@@ -46,10 +58,53 @@ function generateSasUrl(blobName) {
         protocol: 'https'
     }, sharedKeyCredential).toString();
 
-    return `https://${accountname}.blob.core.windows.net/${containerName}/${blobName}?${sasToken}`;
+    return {
+        url: `https://${accountname}.blob.core.windows.net/${containerName}/${blobName}?${sasToken}`,
+        expiresAt: expiryDate
+    };
 }
 
-async function createBlobFile(fileBuffer, originalName, body) {
+function generatePreviewReadUrl(blobName) {
+    return generateBlobReadUrl(
+        blobName,
+        config.BLOB_PREVIEW_SAS_MS || DEFAULT_PREVIEW_SAS_MS
+    );
+}
+
+function generateSasUrl(blobName) {
+    return generateBlobReadUrl(blobName).url;
+}
+
+function safePathSegment(value) {
+    return String(value).trim().replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function isOwnedBlobUrl(value, context = {}) {
+    if (typeof value !== 'string') {
+        return false;
+    }
+    try {
+        const parsedUrl = new URL(value);
+        if (
+            parsedUrl.protocol !== 'https:' ||
+            parsedUrl.hostname !== `${accountname}.blob.core.windows.net`
+        ) {
+            return false;
+        }
+
+        const ownerPrefix = context.tenantId
+            ? `tenants/${safePathSegment(context.tenantId)}/`
+            : context.subscriptionId
+                ? `marketplace/${safePathSegment(context.subscriptionId)}/`
+                : null;
+        return ownerPrefix !== null &&
+            parsedUrl.pathname.startsWith(`/${containerName}/${ownerPrefix}files/`);
+    } catch {
+        return false;
+    }
+}
+
+async function createBlobFileWithMetadata(fileBuffer, originalName, body, mimeType) {
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth() + 1;
@@ -69,7 +124,8 @@ async function createBlobFile(fileBuffer, originalName, body) {
     // Extraer la extensión del archivo original
     const fileExtension = originalName.toLowerCase().split('.').pop();
     
-    const name = (body.myuuid || 'noid') + '/' + date + '.' + fileExtension;
+    const uniqueSuffix = crypto.randomUUID();
+    const name = safePathSegment(body.myuuid || 'noid') + '/' + date + '-' + uniqueSuffix + '.' + fileExtension;
     const url = y.toString().substr(-2) + '/' + 
                 (m < 10 ? '0' : '') + m + '/' + 
                 (d < 10 ? '0' : '') + d + '/' + 
@@ -78,23 +134,33 @@ async function createBlobFile(fileBuffer, originalName, body) {
     // Determinar el prefijo según el tipo de cliente
     let clientPrefix;
     if (body.tenantId) {
-        clientPrefix = `tenants/${body.tenantId}/`;
+        clientPrefix = `tenants/${safePathSegment(body.tenantId)}/`;
     } else if (body.subscriptionId) {
-        clientPrefix = `marketplace/${body.subscriptionId}/`;
+        clientPrefix = `marketplace/${safePathSegment(body.subscriptionId)}/`;
     } else {
         throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
     }
     
     const tempUrl = `${clientPrefix}files/${url}`;
-    const contentType = getContentType(originalName);
+    const contentType = mimeType || getContentType(originalName);
     
     // Crear el blob
     await createBlob(tempUrl, fileBuffer, contentType);
     
     // Generar URL con SAS token
-    const sasUrl = generateSasUrl(tempUrl);
+    const sas = generatePreviewReadUrl(tempUrl);
     
-    return sasUrl;
+    return {
+        blobName: tempUrl,
+        containerName,
+        url: sas.url,
+        sasExpiresAt: sas.expiresAt
+    };
+}
+
+async function createBlobFile(fileBuffer, originalName, body, mimeType) {
+    const asset = await createBlobFileWithMetadata(fileBuffer, originalName, body, mimeType);
+    return asset.url;
 }
 
 function getContentType(filename) {
@@ -117,5 +183,9 @@ function getContentType(filename) {
 }
 
 module.exports = {
-    createBlobFile
+    createBlobFile,
+    createBlobFileWithMetadata,
+    generateBlobReadUrl,
+    generatePreviewReadUrl,
+    isOwnedBlobUrl
 }; 

@@ -1,20 +1,37 @@
 const multer = require('multer');
-const { default: createDocumentIntelligenceClient, getLongRunningPoller, isUnexpected } = require("@azure-rest/ai-document-intelligence");
 const config = require('../../config');
 const summarizeCtrl = require('../../services/summarizeService');
 const blobFiles = require('../../services/blobFiles');
+const multimodalAssetService = require('../../services/multimodalAssetService');
 const insights = require('../../services/insights');
 const serviceEmail = require('../../services/email');
 const CostTrackingService = require('../../services/costTrackingService');
 const pubsubService = require('../../services/pubsubService');
+const createLimitedMemoryStorage = require('../../services/limitedMemoryStorage');
 const {
     DEFAULT_AI_MODEL,
     resolveDiagnoseModel
 } = require('../../services/aiUtils');
+const {
+    getSuccessfulSummary,
+    validateParsedMultimodalInput,
+    validateUploadedFiles
+} = require('../../services/multimodalInputValidation');
+const {
+    resolveImageReferences,
+    validateImageReferenceFields
+} = require('../../services/multimodalImageResolver');
+const {
+    extractDocument,
+    failedDocumentResult,
+    toPublicDocumentResult,
+    mapWithConcurrency,
+    isRetryableDocumentError
+} = require('../../services/documentIntelligenceService');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: createLimitedMemoryStorage(),
     limits: {
         fileSize: 20 * 1024 * 1024 // límite de 20MB
     },
@@ -43,80 +60,77 @@ const upload = multer({
     }
 });
 
+const uploadFields = upload.fields([
+    { name: 'document', maxCount: 5 },
+    { name: 'image', maxCount: 5 }
+]);
+
+function parseMultipart(req, res) {
+    return new Promise((resolve, reject) => {
+        uploadFields(req, res, (error) => {
+            if (error) {
+                error.phase = 'multipart';
+                error.httpStatus = 400;
+                reject(error);
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
+function parseAssetIds(value) {
+    if (value === undefined || value === null || value === '') {
+        return [];
+    }
+    if (Array.isArray(value)) {
+        return value;
+    }
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
 
 const PRODUCT_SUMMARY_MIN_CHARS = 1000;
 
-const processDocument = async (fileBuffer, originalName, blobUrl) => {
+async function extractUploadedDocument(file, context) {
     try {
-        console.log('Iniciando procesamiento de documento:', originalName);
-        console.log('Tamaño del archivo:', fileBuffer.length, 'bytes');
-        console.log('URL del blob:', blobUrl);
-        
-        // Verificar si es un archivo de texto (.txt)
-        const fileExtension = originalName.toLowerCase().split('.').pop();
-        if (fileExtension === 'txt') {
-            const textContent = fileBuffer.toString('utf-8');
-            // Texto plano no usa Document Intelligence → 0 páginas cobrables
-            return { content: textContent, pages: 0, duration: 0 };
-        }
-        
-        // Para otros tipos de archivo, usar Azure Document Intelligence
-        console.log('Usando Azure Document Intelligence para archivo:', fileExtension);
-        const modelId = "prebuilt-layout";
-
-        // Crear el cliente dentro de la función, igual que en el otro proyecto
-        const clientIntelligence = createDocumentIntelligenceClient(
-            config.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT,
-            { key: config.AZURE_DOCUMENT_INTELLIGENCE_KEY },
-            { apiVersion: "2024-11-30" }
-        );
-
-        console.log('Enviando solicitud a Azure Document Intelligence...');
-        const startDi = Date.now();
-        const initialResponse = await clientIntelligence
-            .path("/documentModels/{modelId}:analyze", modelId)
-            .post({
-                contentType: "application/json",
-                body: { urlSource: blobUrl },
-                queryParameters: { outputContentFormat: "markdown" }
-            });
-
-        console.log('Respuesta inicial recibida:', initialResponse.status);
-
-        if (isUnexpected(initialResponse)) {
-            throw initialResponse.body.error;
-        }
-
-        console.log('Iniciando polling...');
-        const poller = getLongRunningPoller(clientIntelligence, initialResponse);
-        console.log('Poller creado, esperando resultado...');
-
-        const flatResponse = await poller.pollUntilDone();
-        const result = flatResponse.body;
-        const duration = Date.now() - startDi;
-        console.log('Análisis completado');
-
-        if (result.status === 'failed') {
-            console.error('Error in analyzing document:', result.error);
-            throw new Error('Error processing the document after multiple attempts. Please try again with other document.');
-        } else {
-            console.log('Documento procesado exitosamente');
-            const pages = Array.isArray(result?.analyzeResult?.pages) ? result.analyzeResult.pages.length : 1;
-            return { content: result.analyzeResult.content, pages, duration };
-        }
-    } catch (error) {
-        console.error('Error detallado procesando documento:', {
-            message: error.message,
-            code: error.code,
-            innererror: error.innererror,
-            stack: error.stack
+        const blobUrl = await blobFiles.createBlobFile(file.buffer, file.originalname, {
+            ...context.body,
+            tenantId: context.tenantId,
+            subscriptionId: context.subscriptionId
+        }, file.mimetype);
+        return await extractDocument({
+            fileBuffer: file.buffer,
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            blobUrl
         });
-        throw new Error(`Error al procesar el documento: ${error.message}`);
+    } catch (error) {
+        insights.error({
+            message: 'Document extraction failed',
+            error: error.message,
+            code: error.code,
+            retryable: isRetryableDocumentError(error),
+            originalName: file.originalname,
+            tenantId: context.tenantId,
+            subscriptionId: context.subscriptionId
+        });
+        return failedDocumentResult(
+            file.originalname,
+            file.mimetype,
+            'The document could not be processed',
+            error.attempts || 1
+        );
     }
-};
+}
 
 const processMultimodalInput = async (req, res) => {
     const subscriptionId = getHeader(req, 'x-subscription-id');
@@ -146,26 +160,10 @@ const processMultimodalInput = async (req, res) => {
         params: req.params,
         query: req.query,
         header_language: req.headers['accept-language'],
-        timezone: req.body.timezone
+        timezone: req.body?.timezone
     };
     try {
-        // Configurar los campos específicos para Multer 2.x
-        const uploadFields = upload.fields([
-            { name: 'document', maxCount: 5 },  // Permitir hasta 5 documentos
-            { name: 'image', maxCount: 5 }      // Permitir hasta 5 imágenes
-        ]);
-
-        uploadFields(req, res, async function(err) {
-            if (err) {
-                insights.error({
-                    message: "Error en multer",
-                    error: err.message,
-                    tenantId: tenantId,
-                    subscriptionId: subscriptionId,
-                    requestInfo: requestInfo
-                });
-                return res.status(400).json({ error: err.message });
-            }
+        await parseMultipart(req, res);
 
             // userId está disponible después de que Multer haya procesado el multipart/form-data
             const userId = req.body.myuuid;
@@ -173,6 +171,15 @@ const processMultimodalInput = async (req, res) => {
             // Actualizar requestInfo con el body parseado y timezone correcto
             requestInfo.body = req.body;
             requestInfo.timezone = req.body.timezone;
+            const assetIds = parseAssetIds(req.body.assetIds);
+            if (assetIds === null) {
+                return res.status(400).json({
+                    result: 'error',
+                    error: 'Invalid multipart request',
+                    details: [{ field: 'assetIds', reason: 'Must be a JSON array' }]
+                });
+            }
+            req.body.assetIds = assetIds;
 
             // Log para debug - ver qué está llegando
             console.log('Body recibido:', {
@@ -184,105 +191,126 @@ const processMultimodalInput = async (req, res) => {
                 contentType: req.headers['content-type']
             });
 
-            // Validar que al menos uno de los campos requeridos esté presente
-            if (!req.body.text && !req.files?.document && !req.files?.image) {
-                return res.status(400).json({ 
-                    error: 'Se requiere al menos uno de los siguientes campos: text, document, o image' 
+            const imageReferenceErrors = [];
+            validateImageReferenceFields({ assetIds }, imageReferenceErrors);
+            const newImageCount = Array.isArray(req.files?.image) ? req.files.image.length : 0;
+            if (assetIds.length + newImageCount > 5) {
+                imageReferenceErrors.push({
+                    field: 'images',
+                    reason: 'Existing and newly uploaded images must not exceed 5 items'
+                });
+            }
+            const validationErrors = [
+                ...validateParsedMultimodalInput(req.body, req.files),
+                ...validateUploadedFiles(req.files),
+                ...imageReferenceErrors
+            ];
+            if (validationErrors.length > 0) {
+                return res.status(400).json({
+                    result: 'error',
+                    error: 'Invalid multipart request',
+                    details: validationErrors
                 });
             }
 
+            const existingImageAssets = await resolveImageReferences(
+                { assetIds },
+                {
+                    myuuid: req.body.myuuid,
+                    tenantId,
+                    subscriptionId
+                }
+            );
             let results = {
                 textInput: req.body.text || '',
                 documentAnalysis: null,
-                imageAnalysis: null
+                imageAnalysis: null,
+                imageUrls: existingImageAssets,
+                documents: []
             };
 
             // Procesar documento si existe
             if (req.files && req.files.document) {
-                try {
-                    let documentTexts = [];
-                    let totalPagesProcessed = 0;
-                    let totalDiDurationMs = 0;
-                    let processedDocNames = [];
-                    
-                    // Procesar cada documento
-                    for (let i = 0; i < req.files.document.length; i++) {
-                        const fileBuffer = req.files.document[i].buffer;
-                        const originalName = req.files.document[i].originalname;
-                        
-                        // Subir a Azure Blob
-                        const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
-                            ...req.body,
-                            tenantId: tenantId,
-                            subscriptionId: subscriptionId
-                        });
-                        console.log(`Documento ${i + 1} subido a Azure Blob:`, blobUrl);
-                        
-                        // Procesar el documento
-                        if (userId) {
-                            await pubsubService.sendProgress(userId.toString(), 'extract_documents', 'Extracting documents...', 5);
-                        }
-                        const { content: documentText, pages, duration } = await processDocument(fileBuffer, originalName, blobUrl);
-                        documentTexts.push(`--- Documento ${i + 1}: ${originalName} ---\n${documentText}`);
-                        totalPagesProcessed += (pages || 0);
-                        totalDiDurationMs += (duration || 0);
-                        processedDocNames.push(originalName);
-                    }
-                    
-                    // Combinar todos los documentos
-                    results.documentAnalysis = documentTexts.join('\n\n');
+                if (userId) {
+                    await pubsubService.sendProgress(userId.toString(), 'extract_documents', 'Extracting documents...', 5);
+                }
+                const documentContext = {
+                    body: req.body,
+                    tenantId,
+                    subscriptionId
+                };
+                results.documents = await mapWithConcurrency(
+                    req.files.document,
+                    config.DOCUMENT_INTELLIGENCE_CONCURRENCY || 2,
+                    (file) => extractUploadedDocument(file, documentContext)
+                );
 
-                    // Guardar coste de Azure Document Intelligence (Layout)
-                    if (totalPagesProcessed > 0) {
-                        console.log('Pages processed:', totalPagesProcessed);
-                        // Tarifa S0 Web/Contenedor Lectura: $1.50 por 1000 páginas (<1M)
-                        const diCost = (totalPagesProcessed / 1000) * 1.5;
-                        try {
-                            const documentIntelligenceCostRecord = {
-                                myuuid: req.body.myuuid || 'default-uuid',
-                                tenantId: tenantId,
-                                subscriptionId: subscriptionId,
-                                operation: 'multimodal_process_image',
+                const succeededDocuments = results.documents.filter((document) =>
+                    document.status === 'succeeded' && document.content
+                );
+                results.documentAnalysis = results.documents
+                    .map((document, index) => (
+                        document.status === 'succeeded' && document.content
+                            ? `--- Documento ${index + 1}: ${document.name} ---\n${document.content}`
+                            : null
+                    ))
+                    .filter(Boolean)
+                    .join('\n\n');
+
+                const totalPagesProcessed = succeededDocuments.reduce(
+                    (total, document) => total + (document.pages || 0),
+                    0
+                );
+                const totalDiDurationMs = succeededDocuments.reduce(
+                    (total, document) => total + (document.durationMs || 0),
+                    0
+                );
+                if (totalPagesProcessed > 0) {
+                    const diCost = (totalPagesProcessed / 1000) * 1.5;
+                    const processedDocNames = succeededDocuments.map((document) => document.name);
+                    try {
+                        const documentIntelligenceCostRecord = {
+                            myuuid: req.body.myuuid || 'default-uuid',
+                            tenantId: tenantId,
+                            subscriptionId: subscriptionId,
+                            operation: 'multimodal_extract_document',
+                            model: 'document_intelligence',
+                            lang: req.body.lang || 'en',
+                            timezone: req.body.timezone || 'UTC',
+                            stages: [{
+                                name: 'document_intelligence',
+                                cost: diCost,
+                                tokens: { input: 0, output: 0, total: 0 },
                                 model: 'document_intelligence',
-                                lang: req.body.lang || 'en',
-                                timezone: req.body.timezone || 'UTC',
-                                stages: [{
-                                    name: 'document_intelligence',
-                                    cost: diCost,
-                                    tokens: { input: 0, output: 0, total: 0 },
-                                    model: 'document_intelligence',
-                                    duration: totalDiDurationMs,
-                                    success: true
-                                }],
-                                totalCost: diCost,
-                                totalTokens: { input: 0, output: 0, total: 0 },
-                                description: `Azure Document Intelligence: ${totalPagesProcessed} páginas — ${processedDocNames.join(', ')}`,
-                                status: 'success',
-                                iframeParams: req.body.iframeParams || {},
-                                operationData: { totalPages: totalPagesProcessed, documents: processedDocNames }
-                            };
-                            void CostTrackingService.saveCostRecordBestEffort(documentIntelligenceCostRecord, {
-                                context: 'multimodal document intelligence save'
-                            });
-                        } catch (ctErr) {
-                            console.error('Error guardando coste de Document Intelligence:', ctErr.message);
-                            insights.error({ message: 'Error guardando coste DI', error: ctErr.message, pages: totalPagesProcessed, tenantId, subscriptionId });
-                        }
+                                duration: totalDiDurationMs,
+                                success: true
+                            }],
+                            totalCost: diCost,
+                            totalTokens: { input: 0, output: 0, total: 0 },
+                            description: `Azure Document Intelligence: ${totalPagesProcessed} páginas — ${processedDocNames.join(', ')}`,
+                            status: 'success',
+                            iframeParams: req.body.iframeParams || {},
+                            operationData: {
+                                totalPages: totalPagesProcessed,
+                                documents: processedDocNames,
+                                failedDocuments: results.documents
+                                    .filter((document) => document.status === 'failed')
+                                    .map((document) => document.name)
+                            }
+                        };
+                        void CostTrackingService.saveCostRecordBestEffort(documentIntelligenceCostRecord, {
+                            context: 'multimodal document intelligence save'
+                        });
+                    } catch (ctErr) {
+                        console.error('Error guardando coste de Document Intelligence:', ctErr.message);
+                        insights.error({
+                            message: 'Error guardando coste DI',
+                            error: ctErr.message,
+                            pages: totalPagesProcessed,
+                            tenantId,
+                            subscriptionId
+                        });
                     }
-                } catch (error) {
-                    let originalNames = '';
-                    for (let i = 0; i < req.files.document.length; i++) {
-                        originalNames += req.files.document[i].originalname + ', ';
-                    }
-                    insights.error({
-                        message: "Error procesando documentos",
-                        error: error.message,
-                        originalName: originalNames,
-                        tenantId: tenantId,
-                        subscriptionId: subscriptionId,
-                        requestInfo: requestInfo
-                    });
-                    throw error;
                 }
             }
 
@@ -290,7 +318,7 @@ const processMultimodalInput = async (req, res) => {
             if (req.files && req.files.image) {
                 try {
                     let imageAnalyses = [];
-                    let imageUrls = [];
+                    let imageUrls = [...results.imageUrls];
                     
                     // Procesar cada imagen
                     for (let i = 0; i < req.files.image.length; i++) {
@@ -298,15 +326,41 @@ const processMultimodalInput = async (req, res) => {
                         const originalName = req.files.image[i].originalname;
                         
                         // Subir a Azure Blob
-                        const blobUrl = await blobFiles.createBlobFile(fileBuffer, originalName, {
+                        const blob = await blobFiles.createBlobFileWithMetadata(fileBuffer, originalName, {
                             ...req.body,
                             tenantId: tenantId,
                             subscriptionId: subscriptionId
-                        });
-                        console.log(`Imagen ${i + 1} subida a Azure Blob:`, blobUrl);
-                        imageAnalyses.push(`Paciente con hallazgos de imagen médica:\n\n--- Imagen ${i + 1}: ${originalName} (${blobUrl}) ---\nHallazgos de imagen que requieren interpretación médica`);
+                        }, req.files.image[i].mimetype);
+                        let imageAsset;
+                        try {
+                            imageAsset = await multimodalAssetService.registerImageAsset(
+                                blob,
+                                req.files.image[i],
+                                {
+                                    myuuid: req.body.myuuid,
+                                    tenantId,
+                                    subscriptionId
+                                }
+                            );
+                        } catch (registerError) {
+                            insights.error({
+                                message: 'Image uploaded but asset registry failed; continuing with current request SAS',
+                                error: registerError.message,
+                                originalName,
+                                tenantId,
+                                subscriptionId
+                            });
+                            imageAsset = {
+                                name: originalName,
+                                url: blob.url,
+                                sasExpiresAt: blob.sasExpiresAt
+                            };
+                        }
+                        const blobUrl = imageAsset.url;
+                        console.log(`Imagen ${i + 1} subida a Azure Blob:`, originalName);
+                        imageAnalyses.push(`Paciente con hallazgos de imagen médica:\n\n--- Imagen ${i + 1}: ${originalName} ---\nHallazgos de imagen que requieren interpretación médica`);
 
-                        imageUrls.push({name: originalName, url: blobUrl});
+                        imageUrls.push(imageAsset);
                     }
                     
                     // Combinar análisis de imágenes
@@ -341,6 +395,21 @@ const processMultimodalInput = async (req, res) => {
             const hasPatient = !!results.textInput?.trim();
             const hasDoc = !!results.documentAnalysis?.trim();
             const hasImage = results.imageUrls?.length > 0;
+            const publicDocuments = (results.documents || []).map(toPublicDocumentResult);
+
+            if (
+                Array.isArray(req.files?.document) &&
+                req.files.document.length > 0 &&
+                !hasDoc &&
+                !hasPatient &&
+                !hasImage
+            ) {
+                return res.status(400).json({
+                    result: 'error',
+                    error: 'No document could be processed',
+                    documents: publicDocuments
+                });
+            }
 
             const mockReq = {
                 body: {
@@ -384,12 +453,12 @@ const processMultimodalInput = async (req, res) => {
                 if (combinedInputLength > minLengthForSummary) {
                     // Si hay texto/documento largo, resumir primero
                     let summaryResult = null;
+                    let summaryStatusCode = null;
                     const captureRes = {
                         status: (code) => ({
                             send: (data) => {
-                                if (code === 200) {
-                                    summaryResult = data;
-                                }
+                                summaryStatusCode = code;
+                                summaryResult = data;
                             }
                         })
                     };
@@ -397,7 +466,7 @@ const processMultimodalInput = async (req, res) => {
                         await pubsubService.sendProgress(userId.toString(), 'summarize_input', 'Summarizing input...', 10);
                     }
                     await summarizeCtrl.summarize(mockReq, captureRes);
-                    description = summaryResult.data.summary;
+                    description = getSuccessfulSummary(summaryResult, summaryStatusCode);
                 } else {
                     // Si es corto, usar directamente el combinedInput
                     description = combinedInput;
@@ -430,6 +499,9 @@ const processMultimodalInput = async (req, res) => {
                 model: model,
                 iframeParams: req.body.iframeParams || {},
                 imageUrls: results.imageUrls || [],
+                assetIds: (results.imageUrls || [])
+                    .map((image) => image.assetId)
+                    .filter(Boolean),
                 isImageOnly: isImageOnly
             };
             await callDiagnoses(diagnoseData, requestInfo);
@@ -437,6 +509,7 @@ const processMultimodalInput = async (req, res) => {
                 result: 'processing',
                 description: description,
                 imageUrls: results.imageUrls || [],
+                documents: publicDocuments,
                 isImageOnly: isImageOnly,
                 summarized: summarized,
                 model: model
@@ -450,8 +523,6 @@ const processMultimodalInput = async (req, res) => {
                 details: results,
                 detectedLang: req.body.lang || 'en'
             });*/
-            
-        });
     } catch (error) {
         console.error('Error en processMultimodalInput:', error);
         
@@ -468,25 +539,40 @@ const processMultimodalInput = async (req, res) => {
             subscriptionId: subscriptionId
         });
         
+        const statusCode = error.httpStatus === 400 ? 400 : 500;
         let infoError = {
             error: error.message,
-            myuuid: req.body.myuuid
+            myuuid: req.body?.myuuid
         };
         
-        try {
-            let lang = req.body.lang ? req.body.lang : 'en';
-            await serviceEmail.sendMailErrorGPTIP(
-                lang,
-                'Multimodal input error',
-                infoError,
-                tenantId,
-                subscriptionId
-            );
-        } catch (emailError) {
-            console.error('Error sending error email:', emailError);
+        if (statusCode === 500) {
+            try {
+                let lang = req.body?.lang ? req.body.lang : 'en';
+                await serviceEmail.sendMailErrorGPTIP(
+                    lang,
+                    'Multimodal input error',
+                    infoError,
+                    tenantId,
+                    subscriptionId
+                );
+            } catch (emailError) {
+                console.error('Error sending error email:', emailError);
+            }
         }
         
-        res.status(500).json({ error: 'Error procesando la entrada multimodal' });
+        if (!res.headersSent) {
+            return res.status(statusCode).json({
+                result: 'error',
+                error: statusCode === 400
+                    ? error.message
+                    : 'Error procesando la entrada multimodal',
+                message: statusCode === 400
+                    ? error.message
+                    : 'Error procesando la entrada multimodal',
+                code: error.code
+            });
+        }
+        return undefined;
     }
 };
 
@@ -503,7 +589,8 @@ async function callDiagnoses(data, requestInfo) {
             timezone: data.timezone || 'UTC',
             model: data.model || DEFAULT_AI_MODEL,
             iframeParams: data.iframeParams || {},
-            imageUrls: data.imageUrls || []
+            imageUrls: data.imageUrls || [],
+            assetIds: data.assetIds || []
         },
         headers: requestInfo.headers,
         get: (header) => requestInfo.headers[header.toLowerCase()],
@@ -514,17 +601,22 @@ async function callDiagnoses(data, requestInfo) {
 
     // Crear un mock response para capturar el resultado
     let diagnoseResult = null;
+    let diagnoseStatusCode = null;
     const mockRes = {
         status: (code) => ({
             send: (data) => {
-                if (code === 200) {
-                    diagnoseResult = data;
-                }
+                diagnoseStatusCode = code;
+                diagnoseResult = data;
             }
         })
     };
 
     await diagnose(mockReq, mockRes);
+    if (diagnoseStatusCode !== 200) {
+        const error = new Error('The diagnosis request could not be started');
+        error.phase = 'diagnose';
+        throw error;
+    }
     return diagnoseResult;
 }
 

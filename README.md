@@ -168,6 +168,7 @@ The cost tracking system allows calculating and storing the cost of AI operation
 - `summarize` - Summarize medical descriptions
 - `multimodal_detect_type` - Medical image type detection
 - `multimodal_process_image` - Medical image processing
+- `multimodal_extract_document` - Azure Document Intelligence extraction
 
 ### Simplified Approach
 - **AI call only**: Track only the main AI call

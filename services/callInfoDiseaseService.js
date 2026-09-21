@@ -3,6 +3,10 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
+const {
+  resolveImageReferences,
+  validateImageReferenceFields
+} = require('./multimodalImageResolver');
 
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
@@ -92,6 +96,8 @@ function validateQuestionRequest(data) {
         }
       }
     }
+
+    validateImageReferenceFields(data, errors);
   
     return errors;
   }
@@ -174,6 +180,28 @@ async function callInfoDisease(req, res) {
   
       // Sanitizar los datos
       const sanitizedData = sanitizeQuestionData(req.body);
+      try {
+        sanitizedData.imageUrls = await resolveImageReferences(req.body, {
+          myuuid: sanitizedData.myuuid,
+          tenantId,
+          subscriptionId
+        });
+        delete sanitizedData.assetIds;
+      } catch (assetError) {
+        insights.error({
+          message: assetError.message,
+          code: assetError.code,
+          endpoint: 'callInfoDisease',
+          tenantId,
+          subscriptionId,
+          myuuid: sanitizedData.myuuid
+        });
+        return res.status(assetError.httpStatus || 400).send({
+          result: 'error',
+          message: 'Invalid or expired image reference',
+          code: assetError.code
+        });
+      }
   
       const answerFormat = 'Return ONLY the HTML content without any introductory text, explanations, or markdown formatting. Use only <p>, <li>, </ul>, and <span> tags. Use <strong> for titles. Do not include any text before or after the HTML.';
   

@@ -22,6 +22,10 @@ const {
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
+const {
+  resolveImageReferences,
+  validateImageReferenceFields
+} = require('./multimodalImageResolver');
 
 const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
@@ -334,6 +338,13 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
 async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null, region = null) {
   model = resolveDiagnoseModel(model);
   data.model = model;
+  if (Array.isArray(data.assetIds) && data.assetIds.length > 0) {
+    data.imageUrls = await resolveImageReferences(data, {
+      myuuid: data.myuuid,
+      tenantId: data.tenantId,
+      subscriptionId: data.subscriptionId
+    });
+  }
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -2072,6 +2083,8 @@ function validateDiagnoseRequest(data) {
     errors.push({ field: 'forceDiagnosis', reason: 'Must be a boolean' });
   }
 
+  validateImageReferenceFields(data, errors);
+
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
     { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
@@ -2292,6 +2305,27 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     sanitizedData.flow = flow;
     sanitizedData.betaPage = flow === 'ask';
     sanitizedData.forceDiagnosis = flow === 'diagnose' && req.body.forceDiagnosis === true;
+    try {
+      sanitizedData.imageUrls = await resolveImageReferences(req.body, {
+        myuuid: sanitizedData.myuuid,
+        tenantId,
+        subscriptionId
+      });
+    } catch (assetError) {
+      insights.error({
+        message: assetError.message,
+        code: assetError.code,
+        endpoint,
+        tenantId,
+        subscriptionId,
+        myuuid: sanitizedData.myuuid
+      });
+      return res.status(assetError.httpStatus || 400).send({
+        result: 'error',
+        message: 'Invalid or expired image reference',
+        code: assetError.code
+      });
+    }
 
     // 1. Si la petición va a la cola, responde como siempre
     // Nota: Sistema de colas desactivado para self-hosted

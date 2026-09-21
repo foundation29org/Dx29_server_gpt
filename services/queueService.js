@@ -397,7 +397,9 @@ class QueueService {
           subscriptionId: data.subscriptionId,
           requestInfo: requestInfo,
           model: model,
-          iframeParams: data.iframeParams || {}
+          iframeParams: data.iframeParams || {},
+          assetIds: data.assetIds || [],
+          imageUrls: data.assetIds?.length ? [] : (data.imageUrls || [])
         },
         applicationProperties: {
           requestType: 'diagnosis',
