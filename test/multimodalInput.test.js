@@ -37,6 +37,7 @@ const state = {
   documentPostCalls: 0,
   preprocessingMessages: [],
   pubsubErrors: [],
+  teamEmails: [],
   documentPost: async () => ({
     status: '202',
     body: {}
@@ -71,6 +72,7 @@ stubModule('../config', {
   translationKey: 'test-key'
 });
 stubModule('../services/summarizeService', {
+  MAX_SUMMARY_INPUT_CHARS: 400000,
   summarize: (...args) => state.summarize(...args)
 });
 stubModule('../services/blobFiles', {
@@ -92,7 +94,11 @@ stubModule('../services/insights', {
   error: () => undefined,
   trackEvent: (name, properties) => state.insightEvents.push({ name, properties })
 });
-stubModule('../services/email', { sendMailErrorGPTIP: async () => undefined });
+stubModule('../services/email', {
+  sendMailErrorGPTIP: async (lang, subject, info) => {
+    state.teamEmails.push(info);
+  }
+});
 stubModule('../services/costTrackingService', {
   saveCostRecordBestEffort: async () => undefined
 });
@@ -283,6 +289,7 @@ test.beforeEach(() => {
   state.documentPost = async () => ({ status: '202', body: {} });
   state.preprocessingMessages = [];
   state.pubsubErrors = [];
+  state.teamEmails = [];
 });
 
 test('accepts the signatures of every supported file type', () => {
@@ -736,6 +743,7 @@ test('does not continue to Diagnose when summarization returns an error', async 
 
   assertFailedOverSocket(res);
   assert.equal(state.diagnoseCalls.length, 0);
+  assert.equal(state.teamEmails.length, 1);
 });
 
 test('passes valid parsed text to Diagnose and returns processing once', async () => {
@@ -1074,21 +1082,82 @@ test('summarizes mixed-image OCR while retaining the original image', async () =
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
 });
 
-test('does not report processing when Diagnose rejects the request', async () => {
+function rejectDiagnoseWith(details) {
   state.diagnose = async (req, res) => res.status(400).send({
     result: 'error',
-    message: 'Invalid request'
+    message: 'Invalid request format',
+    details
   });
-  const req = createMultipartRequest({
-    ...validFields,
-    text: 'Patient description'
-  });
-  const res = createResponse();
+}
 
-  await processMultimodalInput(req, res);
+async function analyzeText(text) {
+  const res = createResponse();
+  await processMultimodalInput(createMultipartRequest({ ...validFields, text }), res);
+  return res;
+}
+
+test('reports a short description from Diagnose without emailing the team', async () => {
+  rejectDiagnoseWith([{ field: 'description', reason: 'Must be at least 10 characters' }]);
+
+  const res = await analyzeText('Patient description');
 
   assertFailedOverSocket(res);
   assert.equal(state.diagnoseCalls.length, 1);
+  assert.equal(state.pubsubErrors[0].code, 'DESCRIPTION_TOO_SHORT');
+  assert.equal(state.teamEmails.length, 0);
+});
+
+test('reports suspicious content from Diagnose without emailing the team', async () => {
+  rejectDiagnoseWith([{ field: 'description', reason: 'Contains suspicious content: Contains script tags' }]);
+
+  const res = await analyzeText('Patient description');
+
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'INVALID_DIAGNOSE_INPUT');
+  assert.equal(state.teamEmails.length, 0);
+});
+
+test('emails the team when our summary exceeds the Diagnose limit', async () => {
+  rejectDiagnoseWith([{ field: 'description', reason: 'Must not exceed 8000 characters' }]);
+
+  const res = await analyzeText('Patient description');
+
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'SUMMARY_TOO_LONG');
+  assert.equal(state.teamEmails.length, 1);
+  assert.equal(state.teamEmails[0].code, 'SUMMARY_TOO_LONG');
+});
+
+test('rejects input above the summarize limit, emails the team and skips the AI calls', async () => {
+  let summarizeCalls = 0;
+  state.summarize = async (req, res) => {
+    summarizeCalls += 1;
+    return res.status(200).send({ result: 'success', data: { summary: 'Valid summary' } });
+  };
+
+  const res = await analyzeText('x'.repeat(400001));
+
+  assertFailedOverSocket(res);
+  assert.equal(summarizeCalls, 0);
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.equal(state.pubsubErrors[0].code, 'INPUT_TOO_LARGE');
+  assert.equal(state.teamEmails.length, 1);
+  assert.equal(state.teamEmails[0].inputChars, 400001);
+  assert.equal(JSON.stringify(state.teamEmails[0]).includes('xxxxxxxxxx'), false);
+});
+
+test('reports summarize validation errors without emailing the team', async () => {
+  state.summarize = async (req, res) => res.status(400).send({
+    result: 'error',
+    message: 'Invalid request format or content'
+  });
+
+  const res = await analyzeText('x'.repeat(1001));
+
+  assertFailedOverSocket(res);
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.equal(state.pubsubErrors[0].code, 'SUMMARY_INPUT_REJECTED');
+  assert.equal(state.teamEmails.length, 0);
 });
 
 const DELETE_UPLOAD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

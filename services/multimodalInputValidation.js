@@ -216,6 +216,12 @@ function getSuccessfulSummary(summaryResult, statusCode) {
   ) {
     const error = new Error('The medical summary could not be generated');
     error.phase = 'summarize_input';
+    // Un 400 es el contenido del paciente (p. ej. patrones sospechosos), no
+    // un fallo nuestro: no hay nada que revisar por email.
+    if (statusCode === 400) {
+      error.httpStatus = 400;
+      error.code = 'SUMMARY_INPUT_REJECTED';
+    }
     throw error;
   }
   return summary.trim();

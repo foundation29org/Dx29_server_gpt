@@ -6,6 +6,7 @@ const insights = require('./insights');
 const { calculatePrice, formatCost } = require('./costUtils');
 const modelTranslation = 'gpt54mini';
 const modelSummarize = 'gpt54mini';
+const MAX_SUMMARY_INPUT_CHARS = 400000;
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -26,8 +27,8 @@ function validateSummarizeRequest(data) {
       errors.push({ field: 'description', reason: 'Must be a string' });
     } else if (data.description.length < 10) {
       errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
-    } else if (data.description.length > 400000) {
-      errors.push({ field: 'description', reason: 'Must not exceed 400000 characters' });
+    } else if (data.description.length > MAX_SUMMARY_INPUT_CHARS) {
+      errors.push({ field: 'description', reason: `Must not exceed ${MAX_SUMMARY_INPUT_CHARS} characters` });
     }
   
     if (!data.myuuid) {
@@ -520,5 +521,6 @@ async function summarize(req, res) {
 }
 
 module.exports = {
+  MAX_SUMMARY_INPUT_CHARS,
   summarize
 }; 

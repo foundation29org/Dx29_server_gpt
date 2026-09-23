@@ -506,6 +506,16 @@ const processMultimodalInput = async (req, res) => {
                 const combinedInputLength = combinedInput.trim().length;
                 const minLengthForSummary = PRODUCT_SUMMARY_MIN_CHARS;
 
+                if (combinedInput.length > summarizeCtrl.MAX_SUMMARY_INPUT_CHARS) {
+                    const tooLarge = new Error('The extracted text is too long to summarize');
+                    tooLarge.phase = 'summarize_input';
+                    tooLarge.httpStatus = 400;
+                    tooLarge.code = 'INPUT_TOO_LARGE';
+                    tooLarge.notifyTeam = true;
+                    tooLarge.inputChars = combinedInput.length;
+                    throw tooLarge;
+                }
+
                 if (combinedInputLength > minLengthForSummary) {
                     // Si hay texto/documento largo, resumir primero
                     let summaryResult = null;
@@ -635,7 +645,9 @@ const processMultimodalInput = async (req, res) => {
                 subscriptionId,
                 requestStartedAt,
                 files: req.files,
-                validationFields: [REJECTION_FIELD_BY_CODE[error.code] || 'files'],
+                validationFields: error.validationFields?.length
+                    ? error.validationFields
+                    : [REJECTION_FIELD_BY_CODE[error.code] || 'files'],
                 phase: error.phase || 'unknown',
                 code: error.code || ''
             });
@@ -654,10 +666,15 @@ const processMultimodalInput = async (req, res) => {
 
         let infoError = {
             error: error.message,
-            myuuid: req.body?.myuuid
+            code: error.code,
+            phase: error.phase,
+            inputChars: error.inputChars,
+            files: Array.isArray(req.files) ? req.files.length : 0,
+            myuuid: req.body?.myuuid,
+            correlationId
         };
         
-        if (statusCode === 500) {
+        if (statusCode === 500 || error.notifyTeam) {
             try {
                 let lang = req.body?.lang ? req.body.lang : 'en';
                 await serviceEmail.sendMailErrorGPTIP(
@@ -732,12 +749,39 @@ async function callDiagnoses(data, requestInfo) {
     };
 
     await diagnose(mockReq, mockRes);
+    if (diagnoseStatusCode === 400) {
+        throw diagnoseRejection(diagnoseResult, data.description);
+    }
     if (diagnoseStatusCode !== 200) {
         const error = new Error('The diagnosis request could not be started');
         error.phase = 'diagnose';
         throw error;
     }
     return diagnoseResult;
+}
+
+// Un 400 de Diagnose casi siempre es el contenido del paciente y no merece
+// email. La excepción es un resumen de más de 8000 caracteres: lo genera
+// nuestro propio resumen, así que sí hay que revisarlo.
+function diagnoseRejection(result, description) {
+    const details = Array.isArray(result?.details) ? result.details : [];
+    const descriptionReasons = details
+        .filter((detail) => detail?.field === 'description')
+        .map((detail) => String(detail.reason || ''));
+    const error = new Error('Diagnose rejected the request');
+    error.phase = 'diagnose';
+    error.httpStatus = 400;
+    error.inputChars = typeof description === 'string' ? description.length : 0;
+    error.validationFields = details.map((detail) => detail?.field).filter(Boolean);
+    if (descriptionReasons.some((reason) => reason.startsWith('Must be at least'))) {
+        error.code = 'DESCRIPTION_TOO_SHORT';
+    } else if (descriptionReasons.some((reason) => reason.startsWith('Must not exceed'))) {
+        error.code = 'SUMMARY_TOO_LONG';
+        error.notifyTeam = true;
+    } else {
+        error.code = 'INVALID_DIAGNOSE_INPUT';
+    }
+    return error;
 }
 
 // DELETE /medical/upload/:uploadId
