@@ -7,9 +7,8 @@
     "start": "node index.js",
     "serve": "nodemon index.js",
     "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
-    "test": "node --test test/intentClassifier.test.js test/multimodalInput.test.js test/multimodalAssetService.test.js test/multimodalImageResolver.test.js test/blobFiles.test.js test/documentIntelligenceService.test.js",
-    "validate-openapi": "swagger-cli validate docs/dxgpt-api.yaml",
-    "generate-openapi": "node scripts/generate-openapi.js",
+    "test": "node --test test/intentClassifier.test.js test/multimodalInput.test.js test/multimodalUploadService.test.js test/multimodalImageClassifierService.test.js test/multimodalImageRoutingConfig.test.js test/blobFiles.test.js test/documentIntelligenceService.test.js test/requestCorrelation.test.js test/insights.test.js",
+    "validate-openapi": "swagger-cli validate docs/dxgptapi-dev-yaml && swagger-cli validate docs/dxgptapi-prod.yaml && swagger-cli validate docs/internal-api.yaml",
     "swagger-ui": "node scripts/serve-swagger-ui.js",
     "cost:daily-durations": "node scripts/daily-operation-durations.js"
   },
@@ -40,9 +39,7 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "swagger-cli": "^4.0.4",
-    "swagger-jsdoc": "^6.2.8",
-    "yaml": "^2.8.0"
+    "swagger-cli": "^4.0.4"
   },
   "volta": {
     "node": "18.20.6"

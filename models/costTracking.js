@@ -76,7 +76,8 @@ const CostTrackingSchema = new Schema({
         'medical_question_check', // Verificación de pregunta médica
         'general_medical_response', // Verificación de escenario clínico
         'emergency_questions', // Verificación de escenario clínico
-        'document_intelligence' // Lectura/analítica de documentos (Azure Document Intelligence)
+        'document_intelligence', // Lectura/analítica de documentos (Azure Document Intelligence)
+        'image_classification' // Enrutamiento documento/imagen médica
       ]
     },
     cost: {

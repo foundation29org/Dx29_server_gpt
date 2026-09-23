@@ -4,9 +4,10 @@ const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
 const {
-  resolveImageReferences,
-  validateImageReferenceFields
-} = require('./multimodalImageResolver');
+  loadImageDataUrls,
+  resolveDiagnosticImages,
+  validateUploadReferenceFields
+} = require('./multimodalUploadService');
 
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
@@ -97,7 +98,7 @@ function validateQuestionRequest(data) {
       }
     }
 
-    validateImageReferenceFields(data, errors);
+    validateUploadReferenceFields(data, errors);
   
     return errors;
   }
@@ -181,25 +182,25 @@ async function callInfoDisease(req, res) {
       // Sanitizar los datos
       const sanitizedData = sanitizeQuestionData(req.body);
       try {
-        sanitizedData.imageUrls = await resolveImageReferences(req.body, {
+        sanitizedData.imageUrls = await resolveDiagnosticImages(req.body, {
           myuuid: sanitizedData.myuuid,
           tenantId,
           subscriptionId
         });
-        delete sanitizedData.assetIds;
-      } catch (assetError) {
+        delete sanitizedData.uploadId;
+      } catch (uploadError) {
         insights.error({
-          message: assetError.message,
-          code: assetError.code,
+          message: uploadError.message,
+          code: uploadError.code,
           endpoint: 'callInfoDisease',
           tenantId,
           subscriptionId,
           myuuid: sanitizedData.myuuid
         });
-        return res.status(assetError.httpStatus || 400).send({
+        return res.status(uploadError.httpStatus || 400).send({
           result: 'error',
           message: 'Invalid or expired image reference',
-          code: assetError.code
+          code: uploadError.code
         });
       }
   
@@ -292,20 +293,17 @@ async function callInfoDisease(req, res) {
         ],
         reasoning_effort: "low"
       };
-      if (sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0) {
-        const imagePrompts = sanitizedData.imageUrls.map((image, index) => 
-          { 
-            return {
-              type: "image_url",
-              image_url: {
-                url: image.url
-              }
-            }
-          }
-        );
-
-        requestBody.messages[0].content.push(...imagePrompts);
-      }
+      const visionImages = await loadImageDataUrls(sanitizedData.imageUrls, {
+        myuuid: sanitizedData.myuuid,
+        tenantId,
+        subscriptionId
+      });
+      requestBody.messages[0].content.push(...visionImages.map((image) => ({
+        type: "image_url",
+        image_url: {
+          url: image.url
+        }
+      })));
     }
 
       aiStartTime = Date.now();

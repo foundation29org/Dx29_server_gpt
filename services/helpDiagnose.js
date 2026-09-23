@@ -23,9 +23,10 @@ const {
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
 const {
-  resolveImageReferences,
-  validateImageReferenceFields
-} = require('./multimodalImageResolver');
+  loadImageDataUrls,
+  resolveDiagnosticImages,
+  validateUploadReferenceFields
+} = require('./multimodalUploadService');
 
 const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
@@ -338,13 +339,6 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
 async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null, region = null) {
   model = resolveDiagnoseModel(model);
   data.model = model;
-  if (Array.isArray(data.assetIds) && data.assetIds.length > 0) {
-    data.imageUrls = await resolveImageReferences(data, {
-      myuuid: data.myuuid,
-      tenantId: data.tenantId,
-      subscriptionId: data.subscriptionId
-    });
-  }
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -1182,10 +1176,16 @@ ${medicalQuestionForModel}
         reasoning_effort: "low" //minimal, low, medium, high
       };
     } else if (isVisionDiagnoseModel(model)) {
+      // Los bytes se leen aquí, no antes: data.imageUrls viaja por cola,
+      // tracking y logs y solo debe llevar referencias.
       requestBody = buildVisionDiagnoseRequest(
         VISION_DEPLOYMENT_NAMES[model],
         helpDiagnosePrompt,
-        data.imageUrls
+        await loadImageDataUrls(data.imageUrls, {
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        })
       );
     } else {
       const messages = [{ role: "user", content: helpDiagnosePrompt }];
@@ -2083,7 +2083,7 @@ function validateDiagnoseRequest(data) {
     errors.push({ field: 'forceDiagnosis', reason: 'Must be a boolean' });
   }
 
-  validateImageReferenceFields(data, errors);
+  validateUploadReferenceFields(data, errors);
 
   // Verificar patrones sospechosos
   const suspiciousPatterns = [
@@ -2153,7 +2153,8 @@ async function handleDiagnoseOrAsk(req, res, flow) {
   // Validar que al menos uno de los dos headers esté presente
   // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
   if (!tenantId && !subscriptionId) {
-    const requestId = getHeader(req, 'x-request-id') || 
+    const requestId = getHeader(req, 'x-correlation-id') ||
+                     getHeader(req, 'x-request-id') ||
                      getHeader(req, 'request-id') ||
                      req.headers['x-ms-request-id'];
     
@@ -2208,7 +2209,8 @@ async function handleDiagnoseOrAsk(req, res, flow) {
                                    subscriptionId; // Usar subscriptionId como fallback
       const productName = getHeader(req, 'x-product-name') || 'unknown';
       const productId = getHeader(req, 'x-product-id') || 'unknown';
-      const requestId = getHeader(req, 'x-request-id') || 
+      const requestId = getHeader(req, 'x-correlation-id') ||
+                       getHeader(req, 'x-request-id') ||
                        getHeader(req, 'request-id') ||
                        req.headers['x-ms-request-id'];
       const authToken = getHeader(req, 'X-MS-AUTH-TOKEN');
@@ -2243,7 +2245,6 @@ async function handleDiagnoseOrAsk(req, res, flow) {
       
       insights.error({
         message: "Invalid request format or content",
-        request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
         subscriptionId: subscriptionId,
@@ -2306,24 +2307,24 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     sanitizedData.betaPage = flow === 'ask';
     sanitizedData.forceDiagnosis = flow === 'diagnose' && req.body.forceDiagnosis === true;
     try {
-      sanitizedData.imageUrls = await resolveImageReferences(req.body, {
+      sanitizedData.imageUrls = await resolveDiagnosticImages(req.body, {
         myuuid: sanitizedData.myuuid,
         tenantId,
         subscriptionId
       });
-    } catch (assetError) {
+    } catch (uploadError) {
       insights.error({
-        message: assetError.message,
-        code: assetError.code,
+        message: uploadError.message,
+        code: uploadError.code,
         endpoint,
         tenantId,
         subscriptionId,
         myuuid: sanitizedData.myuuid
       });
-      return res.status(assetError.httpStatus || 400).send({
+      return res.status(uploadError.httpStatus || 400).send({
         result: 'error',
         message: 'Invalid or expired image reference',
-        code: assetError.code
+        code: uploadError.code
       });
     }
 
@@ -2409,7 +2410,6 @@ async function handleDiagnoseOrAsk(req, res, flow) {
         countryCode: requestInfo.countryCode,
         header_language: requestInfo.header_language
       },
-      requestData: req.body,
       model: model
     });
 

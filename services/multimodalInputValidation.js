@@ -2,6 +2,23 @@
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const MAX_TOTAL_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_DOCUMENT_FILES = 5;
+const MAX_IMAGE_FILES = 5;
+const SUPPORTED_DOCUMENT_TYPES = Object.freeze([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain'
+]);
+const SUPPORTED_IMAGE_TYPES = Object.freeze([
+  'image/jpeg',
+  'image/png',
+  'image/tiff',
+  'image/bmp',
+  'image/webp'
+]);
 
 const SIGNATURES = {
   pdf: Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2D]),
@@ -158,9 +175,8 @@ function validateParsedMultimodalInput(body = {}, files = {}) {
   const hasText = typeof body.text === 'string' && body.text.trim().length > 0;
   const hasDocuments = hasUploadedFiles(files, 'document');
   const hasImages = hasUploadedFiles(files, 'image');
-  const hasExistingAssets = Array.isArray(body.assetIds) && body.assetIds.length > 0;
 
-  if (!hasText && !hasDocuments && !hasImages && !hasExistingAssets) {
+  if (!hasText && !hasDocuments && !hasImages) {
     errors.push({
       field: 'input',
       reason: 'At least one of text, document, or image is required'
@@ -213,7 +229,12 @@ function getSuccessfulSummary(summaryResult, statusCode) {
 }
 
 module.exports = {
+  MAX_DOCUMENT_FILES,
+  MAX_IMAGE_FILES,
   MAX_TOTAL_UPLOAD_BYTES,
+  SUPPORTED_DOCUMENT_TYPES,
+  SUPPORTED_IMAGE_TYPES,
+  UUID_PATTERN,
   getSuccessfulSummary,
   validateParsedMultimodalInput,
   validateUploadedFiles

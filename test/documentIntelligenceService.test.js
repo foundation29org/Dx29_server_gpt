@@ -27,9 +27,7 @@ const state = {
 
 stubModule('../config', {
   AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: 'https://document-intelligence.test',
-  AZURE_DOCUMENT_INTELLIGENCE_KEY: 'test-key',
-  DOCUMENT_INTELLIGENCE_MAX_ATTEMPTS: 3,
-  DOCUMENT_INTELLIGENCE_CONCURRENCY: 2
+  AZURE_DOCUMENT_INTELLIGENCE_KEY: 'test-key'
 });
 stubModule('@azure-rest/ai-document-intelligence', {
   default: () => ({

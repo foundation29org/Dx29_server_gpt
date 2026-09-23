@@ -16,13 +16,25 @@ function stubModule(modulePath, exports) {
 
 const state = {
   diagnoseCalls: [],
+  insightEvents: [],
   diagnose: async (req, res) => res.status(200).send({ result: 'success' }),
-  resolvedAssets: [],
-  imageUploadCount: 0,
+  imageUploads: [],
+  imageUploadError: null,
+  classifiedImages: [],
   summarize: async (req, res) => res.status(200).send({
     result: 'success',
     data: { summary: 'Valid summary' }
   }),
+  imageClassification: {
+    classification: 'contains_medical_visual',
+    confidence: 0.99,
+    hasDocumentText: false,
+    hasMedicalVisual: true,
+    evidence: []
+  },
+  imageClassificationError: null,
+  documentContent: 'Extracted document content',
+  documentPostCalls: 0,
   documentPost: async () => ({
     status: '202',
     body: {}
@@ -32,7 +44,10 @@ const state = {
 stubModule('@azure-rest/ai-document-intelligence', {
   default: () => ({
     path: () => ({
-      post: (...args) => state.documentPost(...args)
+      post: (...args) => {
+        state.documentPostCalls += 1;
+        return state.documentPost(...args);
+      }
     })
   }),
   getLongRunningPoller: () => ({
@@ -40,7 +55,7 @@ stubModule('@azure-rest/ai-document-intelligence', {
       body: {
         status: 'succeeded',
         analyzeResult: {
-          content: 'Extracted document content',
+          content: state.documentContent,
           pages: [{}]
         }
       }
@@ -51,31 +66,30 @@ stubModule('@azure-rest/ai-document-intelligence', {
 stubModule('../config', {
   AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: 'https://document-intelligence.test',
   AZURE_DOCUMENT_INTELLIGENCE_KEY: 'test-key',
-  translationKey: 'test-key',
-  DOCUMENT_INTELLIGENCE_MAX_ATTEMPTS: 1,
-  DOCUMENT_INTELLIGENCE_CONCURRENCY: 2
+  translationKey: 'test-key'
 });
 stubModule('../services/summarizeService', {
   summarize: (...args) => state.summarize(...args)
 });
 stubModule('../services/blobFiles', {
-  createBlobFile: async (_buffer, originalName) => `https://storage.test/${originalName || 'blob'}?sig=secret`,
-  createBlobFileWithMetadata: async () => {
-    state.imageUploadCount += 1;
-    return {
-      blobName: 'tenants/tenant-test/files/scan.png',
-      containerName: 'files',
-      url: 'https://storage.test/blob?sig=secret',
-      sasExpiresAt: new Date('2026-09-21T15:00:00Z')
-    };
+  uploadImage: async (buffer, options) => {
+    if (state.imageUploadError) {
+      throw state.imageUploadError;
+    }
+    state.imageUploads.push({ buffer, options });
+    return `${options.owner.tenantId}/${options.uploadId}/${options.index}`;
   },
-  isOwnedBlobUrl: () => true
+  listUploadImages: async () => [],
+  downloadBlob: async () => Buffer.alloc(0),
+  deleteUploadImages: async (owner, uploadId) => {
+    state.uploadDeletions.push({ owner, uploadId });
+    return state.deletedBlobCount;
+  }
 });
-stubModule('../services/multimodalAssetService', {
-  registerImageAsset: (...args) => state.registerImageAsset(...args),
-  resolveImageAssets: (...args) => state.resolveImageAssets(...args)
+stubModule('../services/insights', {
+  error: () => undefined,
+  trackEvent: (name, properties) => state.insightEvents.push({ name, properties })
 });
-stubModule('../services/insights', { error: () => undefined });
 stubModule('../services/email', { sendMailErrorGPTIP: async () => undefined });
 stubModule('../services/costTrackingService', {
   saveCostRecordBestEffort: async () => undefined
@@ -84,6 +98,32 @@ stubModule('../services/pubsubService', { sendProgress: async () => undefined })
 stubModule('../services/aiUtils', {
   DEFAULT_AI_MODEL: 'gpt56terra',
   resolveDiagnoseModel: () => 'gpt56terra'
+});
+stubModule('../services/multimodalImageClassifierService', {
+  classifyImage: async (image) => {
+    state.classifiedImages.push(image);
+    if (state.imageClassificationError) {
+      throw state.imageClassificationError;
+    }
+    return state.imageClassification;
+  },
+  fallbackClassification: (error) => ({
+    classification: 'unknown',
+    confidence: 0,
+    hasDocumentText: false,
+    hasMedicalVisual: false,
+    error: error.message
+  }),
+  shouldExtractDocumentText: (classification) =>
+    classification.classification === 'document_only' &&
+    classification.hasDocumentText === true &&
+    classification.hasMedicalVisual === false &&
+    classification.confidence >= 0.9,
+  shouldExtractMixedDocumentText: (classification) =>
+    classification.classification === 'contains_medical_visual' &&
+    classification.hasDocumentText === true &&
+    classification.hasMedicalVisual === true &&
+    classification.confidence >= 0.9
 });
 stubModule('../services/translation', {
   translateInvert: async (text) => text
@@ -95,9 +135,14 @@ stubModule('../services/helpDiagnose', {
   }
 });
 
-const { processMultimodalInput } = require('../controllers/all/multimodalInput');
+const { deleteUpload, processMultimodalInput } = require('../controllers/all/multimodalInput');
 const { validateUploadedFiles } = require('../services/multimodalInputValidation');
-const { validateImageReferenceFields } = require('../services/multimodalImageResolver');
+
+const PNG = Buffer.from([
+  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+  0x66, 0x61, 0x6B, 0x65
+]);
+const UPLOAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function createMultipartRequest(fields, files = []) {
   const boundary = '----dxgpt-test-boundary';
@@ -141,12 +186,30 @@ function createMultipartRequest(fields, files = []) {
   return req;
 }
 
+function createDeleteRequest({ uploadId, body = {}, query = {}, headers = {} } = {}) {
+  const req = {
+    method: 'DELETE',
+    url: `/api/medical/upload/${uploadId}`,
+    headers: { 'x-tenant-id': 'tenant-test', ...headers },
+    body,
+    query,
+    params: { uploadId },
+    connection: { remoteAddress: '127.0.0.1' }
+  };
+  req.get = (name) => req.headers[name.toLowerCase()];
+  return req;
+}
+
 function createResponse() {
   return {
     body: undefined,
     headersSent: false,
     responseCount: 0,
     statusCode: undefined,
+    headers: {},
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value;
+    },
     status(code) {
       this.statusCode = code;
       return this;
@@ -171,22 +234,28 @@ const validFields = {
 
 test.beforeEach(() => {
   state.diagnoseCalls = [];
-  state.resolvedAssets = [];
-  state.imageUploadCount = 0;
-  state.resolveImageAssets = async () => state.resolvedAssets;
+  state.insightEvents = [];
+  state.imageUploads = [];
+  state.imageUploadError = null;
+  state.uploadDeletions = [];
+  state.deletedBlobCount = 2;
+  state.classifiedImages = [];
+  state.imageClassification = {
+    classification: 'contains_medical_visual',
+    confidence: 0.99,
+    hasDocumentText: false,
+    hasMedicalVisual: true,
+    evidence: []
+  };
+  state.imageClassificationError = null;
+  state.documentContent = 'Extracted document content';
+  state.documentPostCalls = 0;
   state.diagnose = async (req, res) => res.status(200).send({ result: 'success' });
   state.summarize = async (req, res) => res.status(200).send({
     result: 'success',
     data: { summary: 'Valid summary' }
   });
   state.documentPost = async () => ({ status: '202', body: {} });
-  state.registerImageAsset = async (blob, file) => ({
-    assetId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    name: file.originalname,
-    url: blob.url,
-    sasExpiresAt: blob.sasExpiresAt,
-    expiresAt: new Date('2026-09-22T14:00:00Z')
-  });
 });
 
 test('accepts the signatures of every supported file type', () => {
@@ -213,60 +282,186 @@ test('accepts the signatures of every supported file type', () => {
   }
 });
 
-test('validates assetId and image URL request shapes', () => {
-  const errors = [];
-  validateImageReferenceFields({
-    assetIds: ['invalid'],
-    imageUrls: [{}]
-  }, errors);
-
-  assert.deepEqual(errors, [
-    { field: 'assetIds[0]', reason: 'Must be a valid asset UUID' },
-    { field: 'imageUrls[0]', reason: 'Must contain an object with a URL' }
-  ]);
-});
-
-test('reuses an existing image asset without uploading it again', async () => {
-  const existingAsset = {
-    assetId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    name: 'scan.png',
-    size: 12,
-    url: 'https://storage.test/renewed?sig=secret'
-  };
-  state.resolvedAssets = [existingAsset];
+test('rejects every image reference on analyze: each analysis is a new upload', async () => {
   const req = createMultipartRequest({
     ...validFields,
-    assetIds: JSON.stringify([existingAsset.assetId])
-  });
-  const res = createResponse();
-
-  await processMultimodalInput(req, res);
-
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.responseCount, 1);
-  assert.equal(state.imageUploadCount, 0);
-  assert.deepEqual(res.body.imageUrls, [existingAsset]);
-  assert.deepEqual(state.diagnoseCalls[0].assetIds, [existingAsset.assetId]);
-});
-
-test('preserves the asset error code so the client can request a re-upload', async () => {
-  state.resolveImageAssets = async () => {
-    const error = new Error('One or more image assets are invalid, expired, or unavailable');
-    error.code = 'INVALID_ASSET_REFERENCE';
-    error.httpStatus = 400;
-    throw error;
-  };
-  const req = createMultipartRequest({
-    ...validFields,
-    assetIds: JSON.stringify(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
+    text: 'Patient description',
+    uploadId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assetIds: JSON.stringify(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']),
+    imageUrls: JSON.stringify([{ url: 'https://storage.test/blob?sig=secret' }])
   });
   const res = createResponse();
 
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.equal(res.body.result, 'error');
-  assert.equal(res.body.code, 'INVALID_ASSET_REFERENCE');
+  assert.deepEqual(res.body.details.map((detail) => detail.field), [
+    'uploadId',
+    'assetIds',
+    'imageUrls'
+  ]);
+  assert.equal(state.diagnoseCalls.length, 0);
+  const rejected = state.insightEvents.find(
+    (event) => event.name === 'MultimodalInputRejected'
+  );
+  assert.match(rejected.properties.validationFields, /uploadId/);
+});
+
+test('returns and tracks a safe correlation ID without request content', async () => {
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'Sensitive clinical description'
+  });
+  req.headers['x-correlation-id'] = 'support-case-123';
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['x-correlation-id'], 'support-case-123');
+  assert.equal(res.body.correlationId, 'support-case-123');
+  const completed = state.insightEvents.find(
+    (event) => event.name === 'MultimodalAnalysisCompleted'
+  );
+  assert.equal(completed.properties.correlationId, 'support-case-123');
+  assert.doesNotMatch(
+    JSON.stringify(completed.properties),
+    /Sensitive clinical description|sig=/
+  );
+});
+
+test('never returns a storage URL or SAS to the client', async () => {
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'scan.png',
+    type: 'image/png',
+    content: PNG
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body.uploadId, UPLOAD_ID_PATTERN);
+  assert.deepEqual(res.body.images, [{
+    uploadId: res.body.uploadId,
+    index: 0,
+    name: 'scan.png',
+    size: PNG.length,
+    mimeType: 'image/png',
+    routing: 'vision',
+    diagnosticUse: true
+  }]);
+  assert.equal(res.body.imageUrls, undefined);
+  assert.doesNotMatch(JSON.stringify(res.body), /https?:|sig=|blob\.core/);
+});
+
+test('classifies the image inline and stores its route in the same blob write', async () => {
+  state.imageClassification = {
+    classification: 'contains_medical_visual',
+    confidence: 0.97,
+    hasDocumentText: false,
+    hasMedicalVisual: true,
+    evidence: ['skin lesion']
+  };
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'lesion.png',
+    type: 'image/png',
+    content: PNG
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.classifiedImages.length, 1);
+  assert.match(state.classifiedImages[0].url, /^data:image\/png;base64,/);
+  assert.equal(state.imageUploads.length, 1);
+  assert.equal(state.imageUploads[0].options.uploadId, res.body.uploadId);
+  assert.equal(state.imageUploads[0].options.owner.tenantId, 'tenant-test');
+  assert.equal(state.imageUploads[0].options.owner.myuuid, validFields.myuuid);
+  assert.equal(state.imageUploads[0].options.metadata.routing, 'vision');
+  assert.equal(state.imageUploads[0].options.metadata.classification, 'contains_medical_visual');
+  assert.equal(res.body.images[0].diagnosticUse, true);
+});
+
+test('does not store document-only images: their text already lives in the description', async () => {
+  state.imageClassification = {
+    classification: 'document_only',
+    confidence: 0.98,
+    hasDocumentText: true,
+    hasMedicalVisual: false,
+    evidence: ['lab table']
+  };
+  state.documentContent = 'Hemoglobin 8.2 g/dL with microcytosis';
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'lab-report.png',
+    type: 'image/png',
+    content: PNG
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.imageUploads.length, 0);
+  assert.equal(res.body.uploadId, null);
+  assert.deepEqual(res.body.images, [{
+    uploadId: null,
+    index: null,
+    name: 'lab-report.png',
+    size: PNG.length,
+    mimeType: 'image/png',
+    routing: 'ocr_text',
+    diagnosticUse: false
+  }]);
+  assert.match(state.diagnoseCalls[0].description, /Hemoglobin 8\.2 g\/dL/);
+});
+
+test('sends document images to Document Intelligence as bytes, not as a URL', async () => {
+  let payload;
+  state.documentPost = async (body) => {
+    payload = body;
+    return { status: '202', body: {} };
+  };
+  state.imageClassification = {
+    classification: 'document_only',
+    confidence: 0.98,
+    hasDocumentText: true,
+    hasMedicalVisual: false,
+    evidence: ['lab table']
+  };
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'lab-report.png',
+    type: 'image/png',
+    content: PNG
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(payload.body.urlSource, undefined);
+  assert.deepEqual(Buffer.from(payload.body.base64Source, 'base64'), PNG);
+});
+
+test('fails the whole request when an image cannot be stored', async () => {
+  state.imageUploadError = new Error('Storage unavailable');
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'scan.png',
+    type: 'image/png',
+    content: PNG
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.responseCount, 1);
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
@@ -285,6 +480,12 @@ test('returns one 400 response for a Multer file validation error', async () => 
   assert.equal(res.responseCount, 1);
   assert.match(res.body.error, /Tipo de archivo no soportado/);
   assert.equal(state.diagnoseCalls.length, 0);
+  assert.ok(state.insightEvents.some(
+    (event) => event.name === 'MultimodalInputRejected'
+  ));
+  assert.equal(state.insightEvents.some(
+    (event) => event.name === 'MultimodalAnalysisFailed'
+  ), false);
 });
 
 test('validates required multipart fields after Multer parses them', async () => {
@@ -305,6 +506,26 @@ test('validates required multipart fields after Multer parses them', async () =>
     reason: 'A valid UUID is required'
   }]);
   assert.equal(state.diagnoseCalls.length, 0);
+  assert.ok(state.insightEvents.some(
+    (event) => event.name === 'MultimodalInputRejected'
+  ));
+});
+
+test('tracks missing tenant and subscription headers as an input rejection', async () => {
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'Patient description'
+  });
+  delete req.headers['x-tenant-id'];
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  const rejected = state.insightEvents.find(
+    (event) => event.name === 'MultimodalInputRejected'
+  );
+  assert.equal(rejected.properties.phase, 'headers');
 });
 
 test('rejects a file whose content does not match its declared type', async () => {
@@ -401,7 +622,8 @@ test('returns one 400 response when every document fails and there is nothing el
 
 test('continues to Diagnose when one document fails and another succeeds', async () => {
   state.documentPost = async (payload) => {
-    if (payload?.body?.urlSource?.includes('bad.pdf')) {
+    const content = Buffer.from(payload?.body?.base64Source || '', 'base64').toString();
+    if (content.includes('bad')) {
       const error = new Error('InvalidContent');
       error.code = 'InvalidContent';
       error.statusCode = 400;
@@ -495,7 +717,7 @@ test('passes valid parsed text to Diagnose and returns processing once', async (
   assert.equal(state.diagnoseCalls.length, 1);
   assert.equal(
     state.diagnoseCalls[0].description,
-    'Patient with fever and a persistent cough\n\n'
+    'Patient with fever and a persistent cough'
   );
   assert.equal(state.diagnoseCalls[0].model, 'gpt56terra');
 });
@@ -519,28 +741,29 @@ test('keeps image-only input on the direct vision path to Diagnose', async () =>
   assert.equal(res.body.isImageOnly, true);
   assert.equal(res.body.summarized, false);
   assert.equal(state.diagnoseCalls.length, 1);
-  assert.equal(state.diagnoseCalls[0].imageUrls.length, 1);
-  assert.equal(
-    state.diagnoseCalls[0].imageUrls[0].assetId,
-    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-  );
-  assert.equal(
-    state.diagnoseCalls[0].imageUrls[0].url,
-    'https://storage.test/blob?sig=secret'
-  );
+  assert.equal(state.documentPostCalls, 0);
+  assert.equal(state.diagnoseCalls[0].uploadId, res.body.uploadId);
+  assert.equal(state.diagnoseCalls[0].imageUrls, undefined);
+  assert.equal(state.diagnoseCalls[0].assetIds, undefined);
+  assert.equal(res.body.images[0].url, undefined);
   assert.equal(
     state.diagnoseCalls[0].description,
     'Patient with medical imaging findings that require diagnostic interpretation'
   );
 });
 
-test('still diagnoses if the asset registry fails after the blob upload', async () => {
-  state.registerImageAsset = async () => {
-    throw new Error('Cosmos unavailable');
+test('converts a high-confidence document-only image to text without sending it to Terra', async () => {
+  state.imageClassification = {
+    classification: 'document_only',
+    confidence: 0.98,
+    hasDocumentText: true,
+    hasMedicalVisual: false,
+    evidence: ['clinical report']
   };
+  state.documentContent = 'Potassium 6.1 mmol/L on 2026-06-21';
   const req = createMultipartRequest(validFields, [{
     field: 'image',
-    name: 'scan.png',
+    name: 'lab-report.png',
     type: 'image/png',
     content: Buffer.from([
       0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
@@ -552,9 +775,266 @@ test('still diagnoses if the asset registry fails after the blob upload', async 
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(state.diagnoseCalls.length, 1);
-  assert.equal(state.diagnoseCalls[0].imageUrls[0].url, 'https://storage.test/blob?sig=secret');
-  assert.equal(state.diagnoseCalls[0].imageUrls[0].assetId, undefined);
+  assert.equal(res.body.images.length, 1);
+  assert.equal(res.body.imageRouting[0].route, 'ocr_text');
+  assert.equal(res.body.isImageOnly, false);
+  assert.equal(state.documentPostCalls, 1);
+  // Sin imágenes para visión no hay subida ni referencia para Diagnose.
+  assert.equal(state.imageUploads.length, 0);
+  assert.equal(state.diagnoseCalls[0].uploadId, undefined);
+  assert.match(state.diagnoseCalls[0].description, /Potassium 6\.1 mmol\/L/);
+});
+
+test('adds OCR text while keeping a mixed medical image on direct vision', async () => {
+  state.imageClassification = {
+    classification: 'contains_medical_visual',
+    confidence: 0.99,
+    hasDocumentText: true,
+    hasMedicalVisual: true,
+    evidence: ['radiograph with report text']
+  };
+  state.documentContent = 'D-dimer 3.2 mg/L FEU with a segmental filling defect';
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'Patient with shortness of breath'
+  }, [{
+    field: 'image',
+    name: 'mixed-report.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.imageRouting[0].route, 'vision');
+  assert.equal(res.body.imageRouting[0].ocrTextUsed, true);
+  assert.equal(state.documentPostCalls, 1);
+  assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
+  assert.match(
+    state.diagnoseCalls[0].description,
+    /Patient with shortness of breath/
+  );
+  assert.match(
+    state.diagnoseCalls[0].description,
+    /D-dimer 3\.2 mg\/L FEU/
+  );
+});
+
+test('falls back to direct vision when image classification fails', async () => {
+  state.imageClassificationError = new Error('Classifier unavailable');
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'unknown.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.imageRouting[0].classification, 'unknown');
+  assert.equal(res.body.imageRouting[0].route, 'vision');
+  assert.equal(
+    res.body.imageRouting[0].fallbackReason,
+    'classification_failed'
+  );
+  assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
+});
+
+test('falls back to direct vision when OCR of a document image fails', async () => {
+  state.imageClassification = {
+    classification: 'document_only',
+    confidence: 0.98,
+    hasDocumentText: true,
+    hasMedicalVisual: false,
+    evidence: ['clinical report']
+  };
+  state.documentPost = async () => {
+    const error = new Error('InvalidContent');
+    error.code = 'InvalidContent';
+    error.statusCode = 400;
+    throw error;
+  };
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'corrupt-report.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.imageRouting[0].route, 'vision');
+  assert.equal(res.body.imageRouting[0].fallbackReason, 'ocr_failed');
+  assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
+});
+
+test('keeps a mixed image on vision when its additive OCR fails', async () => {
+  state.imageClassification = {
+    classification: 'contains_medical_visual',
+    confidence: 0.99,
+    hasDocumentText: true,
+    hasMedicalVisual: true,
+    evidence: ['medical image and report text']
+  };
+  state.documentPost = async () => {
+    const error = new Error('InvalidContent');
+    error.code = 'InvalidContent';
+    error.statusCode = 400;
+    throw error;
+  };
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'mixed-report.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.imageRouting[0].route, 'vision');
+  assert.equal(res.body.imageRouting[0].ocrTextUsed, false);
+  assert.equal(res.body.imageRouting[0].fallbackReason, 'ocr_failed');
+  assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
+});
+
+test('keeps a mixed image on vision when its OCR text is too short', async () => {
+  state.imageClassification = {
+    classification: 'contains_medical_visual',
+    confidence: 0.99,
+    hasDocumentText: true,
+    hasMedicalVisual: true,
+    evidence: ['medical image and a small report panel']
+  };
+  state.documentContent = 'short';
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'mixed-short-text.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.imageRouting[0].route, 'vision');
+  assert.equal(res.body.imageRouting[0].ocrTextUsed, false);
+  assert.equal(
+    res.body.imageRouting[0].fallbackReason,
+    'ocr_text_too_short'
+  );
+  assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
+  assert.doesNotMatch(state.diagnoseCalls[0].description, /short/);
+});
+
+test('summarizes the combined patient text and document-image OCR over 1000 characters', async () => {
+  state.imageClassification = {
+    classification: 'document_only',
+    confidence: 0.98,
+    hasDocumentText: true,
+    hasMedicalVisual: false,
+    evidence: ['clinical report']
+  };
+  state.documentContent = 'Laboratory findings '.repeat(10);
+  let summarizedInput = '';
+  state.summarize = async (req, res) => {
+    summarizedInput = req.body.description;
+    return res.status(200).send({
+      result: 'success',
+      data: { summary: 'Combined clinical summary' }
+    });
+  };
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'x'.repeat(950)
+  }, [{
+    field: 'image',
+    name: 'report.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.summarized, true);
+  assert.match(summarizedInput, /^x{100}/);
+  assert.match(summarizedInput, /Laboratory findings/);
+  assert.equal(
+    state.diagnoseCalls[0].description,
+    'Combined clinical summary'
+  );
+  assert.equal(state.diagnoseCalls[0].uploadId, undefined);
+});
+
+test('summarizes mixed-image OCR while retaining the original image', async () => {
+  state.imageClassification = {
+    classification: 'contains_medical_visual',
+    confidence: 0.99,
+    hasDocumentText: true,
+    hasMedicalVisual: true,
+    evidence: ['medical image and report text']
+  };
+  state.documentContent = 'Mixed image report findings '.repeat(10);
+  let summarizedInput = '';
+  state.summarize = async (req, res) => {
+    summarizedInput = req.body.description;
+    return res.status(200).send({
+      result: 'success',
+      data: { summary: 'Combined mixed-image summary' }
+    });
+  };
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'x'.repeat(950)
+  }, [{
+    field: 'image',
+    name: 'mixed-report.png',
+    type: 'image/png',
+    content: Buffer.from([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x66, 0x61, 0x6B, 0x65
+    ])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.summarized, true);
+  assert.match(summarizedInput, /Mixed image report findings/);
+  assert.match(
+    state.diagnoseCalls[0].description,
+    /Combined mixed-image summary/
+  );
+  assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
 });
 
 test('does not report processing when Diagnose rejects the request', async () => {
@@ -573,4 +1053,81 @@ test('does not report processing when Diagnose rejects the request', async () =>
   assert.equal(res.statusCode, 500);
   assert.equal(res.responseCount, 1);
   assert.equal(state.diagnoseCalls.length, 1);
+});
+
+const DELETE_UPLOAD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+test('DELETE /medical/upload scopes the deletion to tenant + myuuid + uploadId', async () => {
+  const req = createDeleteRequest({
+    uploadId: DELETE_UPLOAD_ID,
+    body: { myuuid: validFields.myuuid }
+  });
+  const res = createResponse();
+
+  await deleteUpload(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.result, 'success');
+  assert.equal(res.body.deleted, 2);
+  assert.equal(state.uploadDeletions.length, 1);
+  assert.equal(state.uploadDeletions[0].uploadId, DELETE_UPLOAD_ID);
+  assert.equal(state.uploadDeletions[0].owner.tenantId, 'tenant-test');
+  assert.equal(state.uploadDeletions[0].owner.myuuid, validFields.myuuid);
+  assert.equal(state.insightEvents.at(-1).name, 'MultimodalUploadDeleted');
+});
+
+test('DELETE /medical/upload accepts myuuid in the query when the body is dropped', async () => {
+  const req = createDeleteRequest({
+    uploadId: DELETE_UPLOAD_ID,
+    body: undefined,
+    query: { myuuid: validFields.myuuid }
+  });
+  const res = createResponse();
+
+  await deleteUpload(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.uploadDeletions[0].owner.myuuid, validFields.myuuid);
+});
+
+test('DELETE /medical/upload is idempotent: an expired or foreign upload deletes nothing', async () => {
+  state.deletedBlobCount = 0;
+  const req = createDeleteRequest({
+    uploadId: DELETE_UPLOAD_ID,
+    body: { myuuid: validFields.myuuid }
+  });
+  const res = createResponse();
+
+  await deleteUpload(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.deleted, 0);
+});
+
+test('DELETE /medical/upload rejects requests without myuuid or with a malformed id', async () => {
+  for (const [label, request] of [
+    ['missing myuuid', createDeleteRequest({ uploadId: DELETE_UPLOAD_ID })],
+    ['bad myuuid', createDeleteRequest({ uploadId: DELETE_UPLOAD_ID, body: { myuuid: 'nope' } })],
+    ['bad uploadId', createDeleteRequest({ uploadId: '../other', body: { myuuid: validFields.myuuid } })]
+  ]) {
+    const res = createResponse();
+    await deleteUpload(request, res);
+    assert.equal(res.statusCode, 400, label);
+    assert.equal(state.uploadDeletions.length, 0, label);
+  }
+});
+
+test('DELETE /medical/upload requires an authenticated tenant or subscription', async () => {
+  const req = createDeleteRequest({
+    uploadId: DELETE_UPLOAD_ID,
+    body: { myuuid: validFields.myuuid },
+    headers: { 'x-tenant-id': undefined }
+  });
+  delete req.headers['x-tenant-id'];
+  const res = createResponse();
+
+  await deleteUpload(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(state.uploadDeletions.length, 0);
 });

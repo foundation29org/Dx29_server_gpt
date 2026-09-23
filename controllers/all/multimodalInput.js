@@ -1,11 +1,8 @@
 const multer = require('multer');
 const config = require('../../config');
 const summarizeCtrl = require('../../services/summarizeService');
-const blobFiles = require('../../services/blobFiles');
-const multimodalAssetService = require('../../services/multimodalAssetService');
 const insights = require('../../services/insights');
 const serviceEmail = require('../../services/email');
-const CostTrackingService = require('../../services/costTrackingService');
 const pubsubService = require('../../services/pubsubService');
 const createLimitedMemoryStorage = require('../../services/limitedMemoryStorage');
 const {
@@ -13,43 +10,49 @@ const {
     resolveDiagnoseModel
 } = require('../../services/aiUtils');
 const {
+    MAX_DOCUMENT_FILES,
+    MAX_IMAGE_FILES,
+    MAX_TOTAL_UPLOAD_BYTES,
+    SUPPORTED_DOCUMENT_TYPES,
+    SUPPORTED_IMAGE_TYPES,
+    UUID_PATTERN,
     getSuccessfulSummary,
     validateParsedMultimodalInput,
     validateUploadedFiles
 } = require('../../services/multimodalInputValidation');
 const {
-    resolveImageReferences,
-    validateImageReferenceFields
-} = require('../../services/multimodalImageResolver');
+    deleteUpload: deleteUploadImages,
+    isValidUploadId,
+    validateUploadReferenceFields
+} = require('../../services/multimodalUploadService');
 const {
     extractDocument,
     failedDocumentResult,
     toPublicDocumentResult,
     mapWithConcurrency,
-    isRetryableDocumentError
+    isRetryableDocumentError,
+    DEFAULT_CONCURRENCY
 } = require('../../services/documentIntelligenceService');
+const {
+    processUploadedImages,
+    saveDocumentExtractionCost
+} = require('../../services/multimodalImageRoutingService');
+const {
+    CORRELATION_HEADER,
+    ensureCorrelationId
+} = require('../../services/requestCorrelation');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
     storage: createLimitedMemoryStorage(),
     limits: {
-        fileSize: 20 * 1024 * 1024 // límite de 20MB
+        // Tope por archivo; el total combinado lo impone LimitedMemoryStorage.
+        fileSize: MAX_TOTAL_UPLOAD_BYTES
     },
     fileFilter: function (req, file, cb) {
         const allowedTypes = [
-            // Documentos
-            'application/pdf',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'text/plain',
-            // Imágenes
-            'image/jpeg',
-            'image/png',
-            'image/tiff',
-            'image/bmp',
-            'image/webp'
+            ...SUPPORTED_DOCUMENT_TYPES,
+            ...SUPPORTED_IMAGE_TYPES
         ];
         
         if (allowedTypes.includes(file.mimetype)) {
@@ -61,8 +64,8 @@ const upload = multer({
 });
 
 const uploadFields = upload.fields([
-    { name: 'document', maxCount: 5 },
-    { name: 'image', maxCount: 5 }
+    { name: 'document', maxCount: MAX_DOCUMENT_FILES },
+    { name: 'image', maxCount: MAX_IMAGE_FILES }
 ]);
 
 function parseMultipart(req, res) {
@@ -79,39 +82,89 @@ function parseMultipart(req, res) {
     });
 }
 
-function parseAssetIds(value) {
-    if (value === undefined || value === null || value === '') {
-        return [];
-    }
-    if (Array.isArray(value)) {
-        return value;
-    }
-    try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed : null;
-    } catch {
-        return null;
-    }
-}
-
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
 
 const PRODUCT_SUMMARY_MIN_CHARS = 1000;
 
+const REJECTION_FIELD_BY_CODE = Object.freeze({
+    INVALID_UPLOAD_OWNER: 'myuuid'
+});
+
+// Cada análisis es un caso nuevo y crea su propio uploadId; las referencias
+// a subidas anteriores solo tienen sentido en /diagnose y /disease/info.
+function validateAnalyzeImageReferences(body) {
+    const errors = [];
+    if (body.uploadId !== undefined) {
+        errors.push({
+            field: 'uploadId',
+            reason: 'Not accepted here: every analysis creates a new upload'
+        });
+    }
+    validateUploadReferenceFields(body, errors);
+    return errors;
+}
+
+function getUploadObservability(files = {}) {
+    const documents = Array.isArray(files.document) ? files.document : [];
+    const images = Array.isArray(files.image) ? files.image : [];
+    const uploadedFiles = [...documents, ...images];
+    const mimeTypes = uploadedFiles.reduce((counts, file) => {
+        const mimeType = file.mimetype || 'unknown';
+        counts[mimeType] = (counts[mimeType] || 0) + 1;
+        return counts;
+    }, {});
+    return {
+        properties: {
+            uploadedMimeTypes: JSON.stringify(mimeTypes)
+        },
+        measurements: {
+            uploadedBytes: uploadedFiles.reduce(
+                (total, file) => total + (file.size || 0),
+                0
+            ),
+            uploadedDocuments: documents.length,
+            uploadedImages: images.length
+        }
+    };
+}
+
+function trackMultimodalInputRejected({
+    correlationId,
+    tenantId,
+    subscriptionId,
+    requestStartedAt,
+    files,
+    validationFields = [],
+    phase = 'validation',
+    code = ''
+}) {
+    const upload = getUploadObservability(files);
+    insights.trackEvent('MultimodalInputRejected', {
+        correlationId,
+        tenantId: tenantId || '',
+        subscriptionId: subscriptionId || '',
+        validationFields: JSON.stringify(validationFields),
+        phase,
+        code,
+        ...upload.properties
+    }, {
+        durationMs: Date.now() - requestStartedAt,
+        validationErrors: validationFields.length,
+        ...upload.measurements
+    });
+}
+
+// Los documentos se procesan solo en memoria: nada los vuelve a leer después
+// de extraer su texto, así que no se guardan en blob.
 async function extractUploadedDocument(file, context) {
     try {
-        const blobUrl = await blobFiles.createBlobFile(file.buffer, file.originalname, {
-            ...context.body,
-            tenantId: context.tenantId,
-            subscriptionId: context.subscriptionId
-        }, file.mimetype);
         return await extractDocument({
             fileBuffer: file.buffer,
             originalName: file.originalname,
             mimeType: file.mimetype,
-            blobUrl
+            size: file.size
         });
     } catch (error) {
         insights.error({
@@ -119,7 +172,8 @@ async function extractUploadedDocument(file, context) {
             error: error.message,
             code: error.code,
             retryable: isRetryableDocumentError(error),
-            originalName: file.originalname,
+            mimeType: file.mimetype,
+            correlationId: context.correlationId,
             tenantId: context.tenantId,
             subscriptionId: context.subscriptionId
         });
@@ -127,40 +181,62 @@ async function extractUploadedDocument(file, context) {
             file.originalname,
             file.mimetype,
             'The document could not be processed',
-            error.attempts || 1
+            error.attempts || 1,
+            file.size
         );
     }
 }
 
 const processMultimodalInput = async (req, res) => {
+    const requestStartedAt = Date.now();
+    const correlationId = ensureCorrelationId(req, res);
     const subscriptionId = getHeader(req, 'x-subscription-id');
     const tenantId = getHeader(req, 'X-Tenant-Id');
 
     // Validar que al menos uno de los dos headers esté presente
     // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
     if (!tenantId && !subscriptionId) {
+        trackMultimodalInputRejected({
+            correlationId,
+            tenantId,
+            subscriptionId,
+            requestStartedAt,
+            files: req.files,
+            validationFields: ['headers'],
+            phase: 'headers',
+            code: 'MISSING_AUTH_CONTEXT'
+        });
         insights.error({
             message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
-            headers: req.headers,
-            endpoint: 'processMultimodalInput'
+            endpoint: 'processMultimodalInput',
+            correlationId
         });
         return res.status(400).send({
             result: "error",
-            message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
+            message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
+            correlationId
         });
     }
     
     const requestInfo = {
         method: req.method,
         url: req.url,
-        headers: req.headers,
-        origin: req.get('origin'),
-        body: req.body,
+        headers: {
+            ...req.headers,
+            [CORRELATION_HEADER]: correlationId
+        },
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
         params: req.params,
-        query: req.query,
+        query: req.query
+    };
+    const safeRequestInfo = {
+        method: req.method,
+        url: req.url,
+        origin: req.get('origin'),
+        contentType: req.headers['content-type'],
+        userAgent: req.headers['user-agent'],
         header_language: req.headers['accept-language'],
-        timezone: req.body?.timezone
+        correlationId
     };
     try {
         await parseMultipart(req, res);
@@ -169,17 +245,7 @@ const processMultimodalInput = async (req, res) => {
             const userId = req.body.myuuid;
 
             // Actualizar requestInfo con el body parseado y timezone correcto
-            requestInfo.body = req.body;
-            requestInfo.timezone = req.body.timezone;
-            const assetIds = parseAssetIds(req.body.assetIds);
-            if (assetIds === null) {
-                return res.status(400).json({
-                    result: 'error',
-                    error: 'Invalid multipart request',
-                    details: [{ field: 'assetIds', reason: 'Must be a JSON array' }]
-                });
-            }
-            req.body.assetIds = assetIds;
+            safeRequestInfo.timezone = req.body.timezone;
 
             // Log para debug - ver qué está llegando
             console.log('Body recibido:', {
@@ -191,45 +257,42 @@ const processMultimodalInput = async (req, res) => {
                 contentType: req.headers['content-type']
             });
 
-            const imageReferenceErrors = [];
-            validateImageReferenceFields({ assetIds }, imageReferenceErrors);
-            const newImageCount = Array.isArray(req.files?.image) ? req.files.image.length : 0;
-            if (assetIds.length + newImageCount > 5) {
-                imageReferenceErrors.push({
-                    field: 'images',
-                    reason: 'Existing and newly uploaded images must not exceed 5 items'
-                });
-            }
             const validationErrors = [
                 ...validateParsedMultimodalInput(req.body, req.files),
                 ...validateUploadedFiles(req.files),
-                ...imageReferenceErrors
+                ...validateAnalyzeImageReferences(req.body)
             ];
             if (validationErrors.length > 0) {
+                trackMultimodalInputRejected({
+                    correlationId,
+                    tenantId,
+                    subscriptionId,
+                    requestStartedAt,
+                    files: req.files,
+                    validationFields: validationErrors.map(
+                        (error) => error.field
+                    )
+                });
                 return res.status(400).json({
                     result: 'error',
                     error: 'Invalid multipart request',
-                    details: validationErrors
+                    details: validationErrors,
+                    correlationId
                 });
             }
 
-            const existingImageAssets = await resolveImageReferences(
-                { assetIds },
-                {
-                    myuuid: req.body.myuuid,
-                    tenantId,
-                    subscriptionId
-                }
-            );
             let results = {
                 textInput: req.body.text || '',
                 documentAnalysis: null,
-                imageAnalysis: null,
-                imageUrls: existingImageAssets,
+                imageDocumentAnalysis: null,
+                uploadId: null,
+                visionImages: [],
+                imageRouting: [],
+                publicImages: [],
                 documents: []
             };
 
-            // Procesar documento si existe
+            // Extraer documentos tradicionales (PDF, Word, Excel y TXT).
             if (req.files && req.files.document) {
                 if (userId) {
                     await pubsubService.sendProgress(userId.toString(), 'extract_documents', 'Extracting documents...', 5);
@@ -237,17 +300,15 @@ const processMultimodalInput = async (req, res) => {
                 const documentContext = {
                     body: req.body,
                     tenantId,
-                    subscriptionId
+                    subscriptionId,
+                    correlationId
                 };
                 results.documents = await mapWithConcurrency(
                     req.files.document,
-                    config.DOCUMENT_INTELLIGENCE_CONCURRENCY || 2,
+                    DEFAULT_CONCURRENCY,
                     (file) => extractUploadedDocument(file, documentContext)
                 );
 
-                const succeededDocuments = results.documents.filter((document) =>
-                    document.status === 'succeeded' && document.content
-                );
                 results.documentAnalysis = results.documents
                     .map((document, index) => (
                         document.status === 'succeeded' && document.content
@@ -257,145 +318,68 @@ const processMultimodalInput = async (req, res) => {
                     .filter(Boolean)
                     .join('\n\n');
 
-                const totalPagesProcessed = succeededDocuments.reduce(
-                    (total, document) => total + (document.pages || 0),
-                    0
-                );
-                const totalDiDurationMs = succeededDocuments.reduce(
-                    (total, document) => total + (document.durationMs || 0),
-                    0
-                );
-                if (totalPagesProcessed > 0) {
-                    const diCost = (totalPagesProcessed / 1000) * 1.5;
-                    const processedDocNames = succeededDocuments.map((document) => document.name);
-                    try {
-                        const documentIntelligenceCostRecord = {
-                            myuuid: req.body.myuuid || 'default-uuid',
-                            tenantId: tenantId,
-                            subscriptionId: subscriptionId,
-                            operation: 'multimodal_extract_document',
-                            model: 'document_intelligence',
-                            lang: req.body.lang || 'en',
-                            timezone: req.body.timezone || 'UTC',
-                            stages: [{
-                                name: 'document_intelligence',
-                                cost: diCost,
-                                tokens: { input: 0, output: 0, total: 0 },
-                                model: 'document_intelligence',
-                                duration: totalDiDurationMs,
-                                success: true
-                            }],
-                            totalCost: diCost,
-                            totalTokens: { input: 0, output: 0, total: 0 },
-                            description: `Azure Document Intelligence: ${totalPagesProcessed} páginas — ${processedDocNames.join(', ')}`,
-                            status: 'success',
-                            iframeParams: req.body.iframeParams || {},
-                            operationData: {
-                                totalPages: totalPagesProcessed,
-                                documents: processedDocNames,
-                                failedDocuments: results.documents
-                                    .filter((document) => document.status === 'failed')
-                                    .map((document) => document.name)
-                            }
-                        };
-                        void CostTrackingService.saveCostRecordBestEffort(documentIntelligenceCostRecord, {
-                            context: 'multimodal document intelligence save'
-                        });
-                    } catch (ctErr) {
-                        console.error('Error guardando coste de Document Intelligence:', ctErr.message);
-                        insights.error({
-                            message: 'Error guardando coste DI',
-                            error: ctErr.message,
-                            pages: totalPagesProcessed,
-                            tenantId,
-                            subscriptionId
-                        });
-                    }
-                }
+                void saveDocumentExtractionCost(results.documents, {
+                    myuuid: req.body.myuuid,
+                    tenantId,
+                    subscriptionId,
+                    lang: req.body.lang,
+                    timezone: req.body.timezone,
+                    iframeParams: req.body.iframeParams,
+                    correlationId
+                }, 'uploaded_document').catch((error) => {
+                    insights.error({
+                        message: 'Error saving uploaded document extraction cost',
+                        error: error.message,
+                        tenantId,
+                        subscriptionId,
+                        correlationId
+                    });
+                });
             }
 
-            // Procesar imagen si existe
-            if (req.files && req.files.image) {
-                try {
-                    let imageAnalyses = [];
-                    let imageUrls = [...results.imageUrls];
-                    
-                    // Procesar cada imagen
-                    for (let i = 0; i < req.files.image.length; i++) {
-                        const fileBuffer = req.files.image[i].buffer;
-                        const originalName = req.files.image[i].originalname;
-                        
-                        // Subir a Azure Blob
-                        const blob = await blobFiles.createBlobFileWithMetadata(fileBuffer, originalName, {
-                            ...req.body,
-                            tenantId: tenantId,
-                            subscriptionId: subscriptionId
-                        }, req.files.image[i].mimetype);
-                        let imageAsset;
-                        try {
-                            imageAsset = await multimodalAssetService.registerImageAsset(
-                                blob,
-                                req.files.image[i],
-                                {
-                                    myuuid: req.body.myuuid,
-                                    tenantId,
-                                    subscriptionId
-                                }
-                            );
-                        } catch (registerError) {
-                            insights.error({
-                                message: 'Image uploaded but asset registry failed; continuing with current request SAS',
-                                error: registerError.message,
-                                originalName,
-                                tenantId,
-                                subscriptionId
-                            });
-                            imageAsset = {
-                                name: originalName,
-                                url: blob.url,
-                                sasExpiresAt: blob.sasExpiresAt
-                            };
-                        }
-                        const blobUrl = imageAsset.url;
-                        console.log(`Imagen ${i + 1} subida a Azure Blob:`, originalName);
-                        imageAnalyses.push(`Paciente con hallazgos de imagen médica:\n\n--- Imagen ${i + 1}: ${originalName} ---\nHallazgos de imagen que requieren interpretación médica`);
-
-                        imageUrls.push(imageAsset);
-                    }
-                    
-                    // Combinar análisis de imágenes
-                    results.imageAnalysis = imageAnalyses.join('\n\n');
-                    results.imageUrls = imageUrls; // Guardar URLs para el frontend
-                } catch (error) {
-                    insights.error({
-                        message: "Error procesando imagen",
-                        error: error.message,
-                        originalName: req.files.image[0].originalname,
-                        tenantId: tenantId,
-                        subscriptionId: subscriptionId,
-                        requestInfo: requestInfo
-                    });
-                    throw error;
+            // Documento puro -> OCR sin imagen. Imagen mixta -> OCR + imagen.
+            // Imagen médica pura, desconocida o con OCR fallido -> visión.
+            if ((req.files?.image || []).length > 0) {
+                if (userId) {
+                    await pubsubService.sendProgress(
+                        userId.toString(),
+                        'classify_images',
+                        'Classifying images...',
+                        7
+                    );
                 }
+                const processedImages = await processUploadedImages({
+                    files: req.files.image,
+                    body: req.body,
+                    tenantId,
+                    subscriptionId,
+                    correlationId
+                });
+                results = {
+                    ...results,
+                    ...processedImages
+                };
             }
 
             // Combinar todos los inputs para el resumen
-            // Usar:
-            let combinedInput = '';
-            if (results.textInput?.trim()) {
-                combinedInput += `${results.textInput.trim()}\n\n`;
-            }
-            if (results.documentAnalysis?.trim()) {
-                combinedInput += `${results.documentAnalysis.trim()}`;
-            }
-            if (!combinedInput.trim()) {
-                combinedInput = 'No content was provided to analyze.';
-            }
+            const combinedInput = [
+                results.textInput,
+                results.documentAnalysis,
+                results.imageDocumentAnalysis
+            ]
+                .map((value) => value?.trim())
+                .filter(Boolean)
+                .join('\n\n');
 
             const hasPatient = !!results.textInput?.trim();
-            const hasDoc = !!results.documentAnalysis?.trim();
-            const hasImage = results.imageUrls?.length > 0;
+            const hasDoc = !!(
+                results.documentAnalysis?.trim() ||
+                results.imageDocumentAnalysis?.trim()
+            );
+            const hasImage = results.visionImages.length > 0;
             const publicDocuments = (results.documents || []).map(toPublicDocumentResult);
+            const publicImageRouting = results.imageRouting;
+            const publicImages = results.publicImages;
 
             if (
                 Array.isArray(req.files?.document) &&
@@ -404,10 +388,31 @@ const processMultimodalInput = async (req, res) => {
                 !hasPatient &&
                 !hasImage
             ) {
+                const failedUpload = getUploadObservability(req.files);
+                insights.trackEvent('MultimodalAnalysisFailed', {
+                    correlationId,
+                    tenantId: tenantId || '',
+                    subscriptionId: subscriptionId || '',
+                    phase: 'extract_documents',
+                    statusCode: 400,
+                    ...failedUpload.properties
+                }, {
+                    durationMs: Date.now() - requestStartedAt,
+                    failedDocuments: publicDocuments.filter(
+                        (document) => document.status === 'failed'
+                    ).length,
+                    documentRetryAttempts: publicDocuments.reduce(
+                        (total, document) =>
+                            total + Math.max(0, (document.attempts || 1) - 1),
+                        0
+                    ),
+                    ...failedUpload.measurements
+                });
                 return res.status(400).json({
                     result: 'error',
                     error: 'No document could be processed',
-                    documents: publicDocuments
+                    documents: publicDocuments,
+                    correlationId
                 });
             }
 
@@ -474,12 +479,9 @@ const processMultimodalInput = async (req, res) => {
                 
                 // Si también hay imagen, añadirla
                 if (hasImage) {
-                    //description += '\n\n' + results.imageAnalysis;
                     description += '\n\n' + descriptionImage;
                 }
             } else if (hasImage) {
-                // Si solo hay imagen, usar análisis de imagen
-                //description = results.imageAnalysis;
                 description = descriptionImage;
             }
             
@@ -498,33 +500,69 @@ const processMultimodalInput = async (req, res) => {
                 timezone: req.body.timezone || 'UTC',
                 model: model,
                 iframeParams: req.body.iframeParams || {},
-                imageUrls: results.imageUrls || [],
-                assetIds: (results.imageUrls || [])
-                    .map((image) => image.assetId)
-                    .filter(Boolean),
+                // Solo si queda alguna imagen para visión; /diagnose vuelve a
+                // filtrar por ruta al listar la subida.
+                uploadId: hasImage ? results.uploadId : undefined,
                 isImageOnly: isImageOnly
             };
             await callDiagnoses(diagnoseData, requestInfo);
+            const completedUpload = getUploadObservability(req.files);
+            insights.trackEvent('MultimodalAnalysisCompleted', {
+                correlationId,
+                tenantId: tenantId || '',
+                subscriptionId: subscriptionId || '',
+                summarized,
+                model,
+                ...completedUpload.properties
+            }, {
+                durationMs: Date.now() - requestStartedAt,
+                succeededDocuments: publicDocuments.filter(
+                    (document) => document.status === 'succeeded'
+                ).length,
+                failedDocuments: publicDocuments.filter(
+                    (document) => document.status === 'failed'
+                ).length,
+                documentRetryAttempts: publicDocuments.reduce(
+                    (total, document) =>
+                        total + Math.max(0, (document.attempts || 1) - 1),
+                    0
+                ),
+                totalImages: publicImageRouting.length,
+                documentImageRoutes: publicImageRouting.filter(
+                    (image) => image.route === 'ocr_text'
+                ).length,
+                mixedImageRoutes: publicImageRouting.filter(
+                    (image) => image.route === 'vision' && image.ocrTextUsed === true
+                ).length,
+                visionImageRoutes: publicImageRouting.filter(
+                    (image) =>
+                        image.route === 'vision' &&
+                        image.ocrTextUsed !== true
+                ).length,
+                imageFallbacks: publicImageRouting.filter(
+                    (image) => !!image.fallbackReason
+                ).length,
+                ...completedUpload.measurements
+            });
             res.status(200).send({
                 result: 'processing',
                 description: description,
-                imageUrls: results.imageUrls || [],
+                uploadId: results.uploadId,
+                images: publicImages,
+                imageRouting: publicImageRouting,
                 documents: publicDocuments,
                 isImageOnly: isImageOnly,
                 summarized: summarized,
-                model: model
+                model: model,
+                correlationId
             });
-            // Devolver resultado de diagnose
-            /*return res.status(200).send({
-                result: 'success',
-                data: diagnoseResult.data,
-                imageUrls: results.imageUrls || [],
-                isImageOnly: isImageOnly,
-                details: results,
-                detectedLang: req.body.lang || 'en'
-            });*/
     } catch (error) {
-        console.error('Error en processMultimodalInput:', error);
+        console.error('Error en processMultimodalInput:', {
+            message: error.message,
+            code: error.code,
+            phase: error.phase || 'unknown',
+            correlationId
+        });
         
         insights.error({
             message: error.message || 'Unknown error in processMultimodalInput',
@@ -533,13 +571,36 @@ const processMultimodalInput = async (req, res) => {
             timestamp: new Date().toISOString(),
             endpoint: 'processMultimodalInput',
             phase: error.phase || 'unknown',
-            requestInfo: requestInfo,
-            requestData: req.body,
+            requestInfo: safeRequestInfo,
+            correlationId,
             tenantId: tenantId,
             subscriptionId: subscriptionId
         });
-        
         const statusCode = error.httpStatus === 400 ? 400 : 500;
+        if (statusCode === 400) {
+            trackMultimodalInputRejected({
+                correlationId,
+                tenantId,
+                subscriptionId,
+                requestStartedAt,
+                files: req.files,
+                validationFields: [REJECTION_FIELD_BY_CODE[error.code] || 'files'],
+                phase: error.phase || 'unknown',
+                code: error.code || ''
+            });
+        } else {
+            insights.trackEvent('MultimodalAnalysisFailed', {
+                correlationId,
+                tenantId: tenantId || '',
+                subscriptionId: subscriptionId || '',
+                phase: error.phase || 'unknown',
+                code: error.code || '',
+                statusCode
+            }, {
+                durationMs: Date.now() - requestStartedAt
+            });
+        }
+
         let infoError = {
             error: error.message,
             myuuid: req.body?.myuuid
@@ -569,7 +630,8 @@ const processMultimodalInput = async (req, res) => {
                 message: statusCode === 400
                     ? error.message
                     : 'Error procesando la entrada multimodal',
-                code: error.code
+                code: error.code,
+                correlationId
             });
         }
         return undefined;
@@ -589,8 +651,7 @@ async function callDiagnoses(data, requestInfo) {
             timezone: data.timezone || 'UTC',
             model: data.model || DEFAULT_AI_MODEL,
             iframeParams: data.iframeParams || {},
-            imageUrls: data.imageUrls || [],
-            assetIds: data.assetIds || []
+            ...(data.uploadId ? { uploadId: data.uploadId } : {})
         },
         headers: requestInfo.headers,
         get: (header) => requestInfo.headers[header.toLowerCase()],
@@ -620,6 +681,72 @@ async function callDiagnoses(data, requestInfo) {
     return diagnoseResult;
 }
 
+// DELETE /medical/upload/:uploadId
+// El cliente lo llama al empezar un caso nuevo; si no llega, blobCleanup
+// borra la subida a las 24 h. El myuuid es obligatorio porque forma parte del
+// prefijo del blob: sin tenant + myuuid + uploadId no hay nada que borrar, y
+// un atacante necesitaría los tres para tocar una subida ajena.
+const deleteUpload = async (req, res) => {
+    const correlationId = ensureCorrelationId(req, res);
+    const subscriptionId = getHeader(req, 'x-subscription-id');
+    const tenantId = getHeader(req, 'X-Tenant-Id');
+    if (!tenantId && !subscriptionId) {
+        return res.status(400).send({
+            result: 'error',
+            message: 'Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required',
+            correlationId
+        });
+    }
+
+    // Algunos proxies descartan el body de un DELETE: se admite también en query.
+    const rawMyuuid = req.body?.myuuid ?? req.query?.myuuid;
+    const myuuid = typeof rawMyuuid === 'string' ? rawMyuuid.trim() : '';
+    const uploadId = req.params?.uploadId;
+    const errors = [];
+    if (!UUID_PATTERN.test(myuuid)) {
+        errors.push({ field: 'myuuid', reason: 'A valid UUID is required' });
+    }
+    if (!isValidUploadId(uploadId)) {
+        errors.push({ field: 'uploadId', reason: 'Must be a valid upload UUID' });
+    }
+    if (errors.length > 0) {
+        return res.status(400).send({
+            result: 'error',
+            message: 'Invalid request format',
+            errors,
+            correlationId
+        });
+    }
+
+    try {
+        const { deleted } = await deleteUploadImages(uploadId, { myuuid, tenantId, subscriptionId });
+        insights.trackEvent('MultimodalUploadDeleted', {
+            correlationId,
+            tenantId: tenantId || '',
+            subscriptionId: subscriptionId || ''
+        }, {
+            deletedBlobs: deleted
+        });
+        return res.status(200).send({ result: 'success', deleted, correlationId });
+    } catch (error) {
+        insights.error({
+            message: 'Error deleting multimodal upload',
+            error: error.message,
+            code: error.code,
+            correlationId,
+            tenantId,
+            subscriptionId
+        });
+        return res.status(error.httpStatus || 500).send({
+            result: 'error',
+            message: error.httpStatus ? error.message : 'The upload could not be deleted',
+            ...(error.code ? { code: error.code } : {}),
+            correlationId
+        });
+    }
+};
+
 module.exports = {
+    deleteUpload,
     processMultimodalInput
 }; 

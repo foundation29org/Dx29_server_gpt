@@ -1,5 +1,4 @@
-const { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryParameters, BlobSASPermissions } = require('@azure/storage-blob');
-const crypto = require('node:crypto');
+const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
 const config = require('../config');
 
 const accountname = config.openDxAccessToken.blobAccount;
@@ -12,9 +11,13 @@ const blobServiceClient = new BlobServiceClient(
 
 const containerName = 'files'; // Contenedor específico para archivos
 
-async function createBlob(blobName, data, contentType) {
+function getContainerClient() {
+    return blobServiceClient.getContainerClient(containerName);
+}
+
+async function createBlob(blobName, data, contentType, metadata) {
     try {
-        const containerClient = blobServiceClient.getContainerClient(containerName);
+        const containerClient = getContainerClient();
         
         // Crear el contenedor si no existe
         await containerClient.createIfNotExists();
@@ -22,7 +25,8 @@ async function createBlob(blobName, data, contentType) {
         const blockBlobClient = containerClient.getBlockBlobClient(blobName);
         
         await blockBlobClient.upload(data, data.length, {
-            blobHTTPHeaders: { blobContentType: contentType }
+            blobHTTPHeaders: { blobContentType: contentType },
+            ...(metadata ? { metadata } : {})
         });
         
         return blockBlobClient.url;
@@ -32,139 +36,94 @@ async function createBlob(blobName, data, contentType) {
     }
 }
 
-const DEFAULT_READ_SAS_MS = 60 * 60 * 1000;
-const DEFAULT_PREVIEW_SAS_MS = 24 * 60 * 60 * 1000;
-
-function resolveSasTtlMs(expiresInMs, fallbackMs) {
-    return Number.isFinite(expiresInMs) && expiresInMs > 0 ? expiresInMs : fallbackMs;
-}
-
-function generateBlobReadUrl(blobName, expiresInMs) {
-    const ttlMs = resolveSasTtlMs(
-        expiresInMs,
-        config.BLOB_READ_SAS_MS || DEFAULT_READ_SAS_MS
-    );
-    const startDate = new Date();
-    const expiryDate = new Date();
-    startDate.setTime(startDate.getTime() - 5 * 60 * 1000); // 5 minutos antes
-    expiryDate.setTime(expiryDate.getTime() + ttlMs);
-
-    const sasToken = generateBlobSASQueryParameters({
-        containerName: containerName,
-        blobName: blobName,
-        permissions: BlobSASPermissions.parse("r"), // Solo lectura
-        startsOn: startDate,
-        expiresOn: expiryDate,
-        protocol: 'https'
-    }, sharedKeyCredential).toString();
-
-    return {
-        url: `https://${accountname}.blob.core.windows.net/${containerName}/${blobName}?${sasToken}`,
-        expiresAt: expiryDate
-    };
-}
-
-function generatePreviewReadUrl(blobName) {
-    return generateBlobReadUrl(
-        blobName,
-        config.BLOB_PREVIEW_SAS_MS || DEFAULT_PREVIEW_SAS_MS
-    );
-}
-
-function generateSasUrl(blobName) {
-    return generateBlobReadUrl(blobName).url;
-}
-
 function safePathSegment(value) {
     return String(value).trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-function isOwnedBlobUrl(value, context = {}) {
-    if (typeof value !== 'string') {
-        return false;
+// El prefijo del propietario sale de las cabeceras autenticadas, nunca del
+// body: es lo que impide que un cliente liste o lea ficheros de otro tenant.
+function getOwnerPrefix({ tenantId, subscriptionId } = {}) {
+    if (tenantId) {
+        return `tenants/${safePathSegment(tenantId)}/`;
     }
-    try {
-        const parsedUrl = new URL(value);
-        if (
-            parsedUrl.protocol !== 'https:' ||
-            parsedUrl.hostname !== `${accountname}.blob.core.windows.net`
-        ) {
-            return false;
-        }
-
-        const ownerPrefix = context.tenantId
-            ? `tenants/${safePathSegment(context.tenantId)}/`
-            : context.subscriptionId
-                ? `marketplace/${safePathSegment(context.subscriptionId)}/`
-                : null;
-        return ownerPrefix !== null &&
-            parsedUrl.pathname.startsWith(`/${containerName}/${ownerPrefix}files/`);
-    } catch {
-        return false;
+    if (subscriptionId) {
+        return `marketplace/${safePathSegment(subscriptionId)}/`;
     }
+    throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
 }
 
-async function createBlobFileWithMetadata(fileBuffer, originalName, body, mimeType) {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth() + 1;
-    const d = now.getDate();
-    const h = now.getHours();
-    const mm = now.getMinutes();
-    const ss = now.getSeconds();
-    const ff = Math.round(now.getMilliseconds()/10);
-    const date = '' + y.toString().substr(-2) + 
-                (m < 10 ? '0' : '') + m + 
-                (d < 10 ? '0' : '') + d + 
-                (h < 10 ? '0' : '') + h + 
-                (mm < 10 ? '0' : '') + mm + 
-                (ss < 10 ? '0' : '') + ss + 
-                (ff < 10 ? '0' : '') + ff;
-    
-    // Extraer la extensión del archivo original
-    const fileExtension = originalName.toLowerCase().split('.').pop();
-    
-    const uniqueSuffix = crypto.randomUUID();
-    const name = safePathSegment(body.myuuid || 'noid') + '/' + date + '-' + uniqueSuffix + '.' + fileExtension;
-    const url = y.toString().substr(-2) + '/' + 
-                (m < 10 ? '0' : '') + m + '/' + 
-                (d < 10 ? '0' : '') + d + '/' + 
-                name;
-    
-    // Determinar el prefijo según el tipo de cliente
-    let clientPrefix;
-    if (body.tenantId) {
-        clientPrefix = `tenants/${safePathSegment(body.tenantId)}/`;
-    } else if (body.subscriptionId) {
-        clientPrefix = `marketplace/${safePathSegment(body.subscriptionId)}/`;
-    } else {
-        throw new Error('No tenantId ni subscriptionId: integración incorrecta, revisar frontend/backend');
-    }
-    
-    const tempUrl = `${clientPrefix}files/${url}`;
-    const contentType = mimeType || getContentType(originalName);
-    
-    // Crear el blob
-    await createBlob(tempUrl, fileBuffer, contentType);
-    
-    // Generar URL con SAS token
-    const sas = generatePreviewReadUrl(tempUrl);
-    
-    return {
-        blobName: tempUrl,
-        containerName,
-        url: sas.url,
-        sasExpiresAt: sas.expiresAt
-    };
+// Un upload = una carpeta. El uploadId es aleatorio y el myuuid va en la
+// ruta, así que la referencia que guarda el cliente no sirve fuera de su
+// propio contexto.
+function getUploadPrefix(owner, uploadId) {
+    return `${getOwnerPrefix(owner)}files/uploads/` +
+        `${safePathSegment(owner.myuuid || 'noid')}/${safePathSegment(uploadId)}/`;
 }
 
-async function createBlobFile(fileBuffer, originalName, body, mimeType) {
-    const asset = await createBlobFileWithMetadata(fileBuffer, originalName, body, mimeType);
-    return asset.url;
+function buildUploadBlobName(owner, uploadId, index, originalName) {
+    const extension = safePathSegment(
+        String(originalName || '').toLowerCase().split('.').pop() || 'bin'
+    );
+    return `${getUploadPrefix(owner, uploadId)}${String(index).padStart(2, '0')}.${extension}`;
+}
+
+async function uploadImage(fileBuffer, { owner, uploadId, index, originalName, mimeType, metadata }) {
+    const blobName = buildUploadBlobName(owner, uploadId, index, originalName);
+    await createBlob(
+        blobName,
+        fileBuffer,
+        mimeType || getContentType(originalName),
+        metadata
+    );
+    return blobName;
+}
+
+async function listUploadImages(owner, uploadId) {
+    const prefix = getUploadPrefix(owner, uploadId);
+    const blobs = [];
+    for await (const blob of getContainerClient().listBlobsFlat({ prefix, includeMetadata: true })) {
+        blobs.push({
+            blobName: blob.name,
+            size: blob.properties.contentLength || 0,
+            mimeType: blob.properties.contentType || 'application/octet-stream',
+            createdOn: blob.properties.createdOn,
+            metadata: blob.metadata || {}
+        });
+    }
+    return blobs.sort((a, b) => a.blobName.localeCompare(b.blobName));
+}
+
+function isOwnedBlobName(owner, uploadId, blobName) {
+    const prefix = getUploadPrefix(owner, uploadId);
+    return typeof blobName === 'string' &&
+        blobName.startsWith(prefix) &&
+        !blobName.includes('..');
+}
+
+async function downloadBlob(blobName, owner, uploadId) {
+    if (!isOwnedBlobName(owner, uploadId, blobName)) {
+        const error = new Error('Blob is outside the upload prefix');
+        error.code = 'INVALID_UPLOAD_REFERENCE';
+        throw error;
+    }
+    return getContainerClient().getBlobClient(blobName).downloadToBuffer();
+}
+
+// Borra la carpeta completa de una subida. El prefijo lleva tenant, myuuid y
+// uploadId, así que solo puede alcanzar blobs de ese propietario.
+async function deleteUploadImages(owner, uploadId) {
+    const prefix = getUploadPrefix(owner, uploadId);
+    const containerClient = getContainerClient();
+    let deleted = 0;
+    for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+        await containerClient.deleteBlob(blob.name, { deleteSnapshots: 'include' });
+        deleted++;
+    }
+    return deleted;
 }
 
 function getContentType(filename) {
-    const ext = filename.split('.').pop().toLowerCase();
+    const ext = String(filename || '').split('.').pop().toLowerCase();
     const contentTypes = {
         'pdf': 'application/pdf',
         'doc': 'application/msword',
@@ -183,9 +142,10 @@ function getContentType(filename) {
 }
 
 module.exports = {
-    createBlobFile,
-    createBlobFileWithMetadata,
-    generateBlobReadUrl,
-    generatePreviewReadUrl,
-    isOwnedBlobUrl
+    deleteUploadImages,
+    downloadBlob,
+    getUploadPrefix,
+    isOwnedBlobName,
+    listUploadImages,
+    uploadImage
 }; 

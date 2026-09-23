@@ -398,8 +398,9 @@ class QueueService {
           requestInfo: requestInfo,
           model: model,
           iframeParams: data.iframeParams || {},
-          assetIds: data.assetIds || [],
-          imageUrls: data.assetIds?.length ? [] : (data.imageUrls || [])
+          // Solo viajan referencias (blobName, mimeType, name); el worker
+          // descarga los bytes justo antes de llamar al modelo.
+          imageUrls: data.imageUrls || []
         },
         applicationProperties: {
           requestType: 'diagnosis',

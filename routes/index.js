@@ -39,6 +39,7 @@ api.post('/patient/update', smartLimiter, followUpCtrl.processFollowUpAnswers)
 api.post('/medical/summarize', smartLimiter, summarizeCtrl.summarize)
 
 api.post('/medical/analyze', smartLimiter, multimodalCtrl.processMultimodalInput)
+api.delete('/medical/upload/:uploadId', smartLimiter, multimodalCtrl.deleteUpload)
 
 api.post('/internal/status/:ticketId', smartLimiter, systemStatusCtrl.getQueueStatus)
 

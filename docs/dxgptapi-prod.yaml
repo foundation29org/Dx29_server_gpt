@@ -1,0 +1,2325 @@
+{
+    "openapi": "3.0.1",
+    "info": {
+        "title": "DXGPT API",
+        "description": "API for DXGPT services",
+        "contact": {
+            "name": "DXGPT Support"
+        },
+        "version": "1.1"
+    },
+    "servers": [
+        {
+            "url": "https://dxgpt-apim.azure-api.net/api"
+        }
+    ],
+    "paths": {
+        "/diagnose": {
+            "post": {
+                "tags": [
+                    "Diagnosis"
+                ],
+                "summary": "Analyze medical description for possible disease diagnoses",
+                "description": "Analyzes a patient's medical description and returns a ranked differential diagnosis list.  \nThis unified endpoint supports model selection through the optional `model` parameter.\n\n**Available Models:**\n- **`gpt56terra`**: current default model (best quality/speed/cost balance), with WebSocket progress.\n- **`gpt54mini`**: previous compact default (backward compatibility), with WebSocket progress.\n- **`gpt5`**: multimodal model (text + images), with WebSocket progress.\n- **`gpt5mini`**: legacy compact model (backward compatibility), with WebSocket progress.\n- **`gpt5nano`**: ultra-compact model, with WebSocket progress.\n- **`gpt4o`**: legacy fast model (backward compatibility).\n- **`o3`**: legacy alias. Internally resolved to `gpt56terra`.\n\n**Model Selection Guidelines:**\n- Use **`gpt56terra`** for current standard and high-volume cases.\n- Use **`gpt5`** when image understanding is required.\n- Keep **`gpt54mini`**, **`gpt5mini`**, **`gpt5nano`**, and **`gpt4o`** for legacy/compatibility scenarios.\n- Keep **`o3`** only while migrating older clients; it maps to Terra.\n\n**Deployment note:** In APIM-hosted environments the server currently resolves every requested model to `gpt56terra`. Model selection is honored only when the API runs locally (`NODE_ENV=local`).\n\n**Intent Routing:** Before diagnosis, the request is classified as:\n- **`go`**: patient case ready for differential diagnosis.\n- **`explain`**: the text is a medical question; the UI may suggest Ask.\n- **`enrich`**: more clinical context would improve the differential.\n\nThese actions suggest a path and never block diagnosis. Set `forceDiagnosis` to `true` when the user explicitly chooses to continue.\n\n**WebSocket Flow for Long-Running Models:**\nWhen using `gpt56terra`, `gpt54mini`, `gpt5`, `gpt5mini`, or `gpt5nano`:\n1. Call `/pubsub/negotiate` to establish WebSocket connection.\n2. Send diagnosis request to `/diagnose` with the selected model.\n3. Receive immediate HTTP response with `result: \"processing\"`.\n4. Monitor WebSocket for progress events.\n5. Receive final result via WebSocket.\n\nSet `response_mode` to `direct` to wait for a synchronous HTTP response instead of using WebSocket.\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\nFor best results:\n- Provide relevant patient details (age, sex, main symptoms, onset/evolution).\n- Include relevant personal/family medical history where available.\n- Recommended length: **200-2000** characters.\n\n**Detailed Response Format:** For each suggested diagnosis, the system returns:\n- **Diagnosis**: condition name\n- **Description**: brief clinical summary\n- **Symptoms in common**: symptoms matching the condition\n- **Symptoms not in common**: symptoms that do not typically match\n\nThis format supports safer differential reasoning by showing both matching and conflicting evidence.\n\nThe response also includes language detection, anonymization metadata, and intent-routing fields (`queryType`, `intentAction`, `intentReason`, optional `suggestedPage`).\n\n**Using `diseases_list` parameter:** If you provide diseases in `diseases_list`, the system excludes them and proposes alternatives. This is useful when:\n- Initial diagnoses were not accurate and you want to explore alternatives.\n- You want a wider differential diagnosis.\n- You want to focus on less common conditions.\n\nExample input with `diseases_list`:\n```json\n{\n  \"description\": \"13-month-old patient. First focal seizure at three months. Multiple tonic-clonic seizures. Febrile seizures. One status epilepticus at eight months.\",\n  \"diseases_list\": \"Dravet syndrome, Lennox-Gastaut syndrome, Febrile seizures Plus (FS+)\",\n  \"myuuid\": \"01dd5910-de38-48df-9840-091bc918c943\"\n}\n```\n\n**Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description. If the optional parameter `lang` is not provided, the default language for responses will be English.\n\n**Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Importantly, age is NOT considered PII in this context and is preserved. All medical specifics (symptoms, diagnosis, treatment plans, and lab results) are maintained intact. The response provides both a text version with asterisks and an HTML-formatted version with blacked-out sections for visualization.\n\n**Queue System**: Requests may be queued during high traffic for any model. A queue status will be returned for tracking, including the selected processing region based on user timezone and model capacity.",
+                "operationId": "post-diagnose",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/DiagnoseRequest"
+                                    },
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "model": {
+                                                "enum": [
+                                                    "gpt56terra",
+                                                    "gpt54mini",
+                                                    "gpt5",
+                                                    "gpt5mini",
+                                                    "gpt5nano",
+                                                    "gpt4o",
+                                                    "o3"
+                                                ],
+                                                "type": "string",
+                                                "description": "Accepted for backward compatibility. In APIM deployments every value currently resolves to `gpt56terra`; model selection is honored only when the server runs with `NODE_ENV=local`. `o3` is a legacy alias for Terra.",
+                                                "default": "gpt56terra",
+                                                "example": "gpt56terra"
+                                            },
+                                            "response_mode": {
+                                                "enum": [
+                                                    "direct"
+                                                ],
+                                                "type": "string",
+                                                "description": "Set to `direct` to wait for a synchronous HTTP response. If omitted for a long-running model, the endpoint returns `processing` and sends the final result through WebSocket.",
+                                                "example": "direct"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "example": {
+                                "description": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head.",
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "timezone": "America/New_York",
+                                "diseases_list": "Migraine, Tension headache, Cluster headache",
+                                "model": "gpt56terra",
+                                "response_mode": "direct"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Diagnosis response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "oneOf": [
+                                        {
+                                            "$ref": "#/components/schemas/DiagnoseResponse"
+                                        },
+                                        {
+                                            "type": "object",
+                                            "properties": {
+                                                "result": {
+                                                    "type": "string",
+                                                    "example": "queued"
+                                                },
+                                                "queueInfo": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "ticketId": {
+                                                            "type": "string",
+                                                            "example": "ticket-123456"
+                                                        },
+                                                        "position": {
+                                                            "type": "integer",
+                                                            "example": 3
+                                                        },
+                                                        "estimatedWaitTime": {
+                                                            "type": "integer",
+                                                            "description": "Estimated wait time in minutes",
+                                                            "example": 5
+                                                        },
+                                                        "region": {
+                                                            "type": "string",
+                                                            "example": "WestUS"
+                                                        },
+                                                        "utilizationPercentage": {
+                                                            "type": "number",
+                                                            "format": "float",
+                                                            "example": 85.5
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ProcessingResponse"
+                                        }
+                                    ]
+                                },
+                                "example": {
+                                    "result": "success",
+                                    "data": [
+                                        {
+                                            "diagnosis": "Migraine",
+                                            "description": "A neurological condition characterized by recurrent moderate to severe headaches, often with associated symptoms like nausea, vomiting, and sensitivity to light and sound.",
+                                            "symptoms_in_common": [
+                                                "Throbbing headache",
+                                                "Light sensitivity",
+                                                "Nausea"
+                                            ],
+                                            "symptoms_not_in_common": [
+                                                "Visual auras",
+                                                "Vomiting",
+                                                "Sound sensitivity"
+                                            ]
+                                        }
+                                    ],
+                                    "anonymization": {
+                                        "hasPersonalInfo": true,
+                                        "anonymizedText": "Patient presents with headache for the past 3 weeks...",
+                                        "anonymizedTextHtml": "Patient presents with headache for the past 3 weeks..."
+                                    },
+                                    "detectedLang": "en"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "result": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid request format or content"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "result": "error",
+                                    "message": "Invalid request format or content"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/disease/info": {
+            "post": {
+                "tags": [
+                    "MedicalInfo"
+                ],
+                "summary": "Get information and questions about specific diseases",
+                "description": "Generate a set of questions, symptom lists, or information about a specific disease based on the `questionType` parameter.\n\nThe `questionType` parameter determines what type of content will be generated:\n\n**Type 0: Common Symptoms List**\n- Returns a comprehensive list of symptoms associated with the specified disease\n- Symptoms are ordered by probability (most common symptoms first)\n- Output is formatted as HTML with bulleted or numbered lists\n- Useful for patient education or symptom checking\n\n**Type 1: Detailed Disease Information**\n- Provides in-depth medical information about the disease\n- Content is oriented toward medical professionals\n- Covers pathophysiology, epidemiology, and clinical considerations\n- Output is formatted as HTML with appropriate headings and sections\n\n**Type 2: Diagnostic Testing Information**\n- Lists recommended diagnostic tests for the specified disease\n- May include information about test sensitivity, specificity, or interpretation\n- Output is formatted as HTML with organized sections\n- Useful for clinical decision support\n\n**Type 3: Differential Diagnosis Symptoms**\n- Requires `medicalDescription` with the patient's symptoms\n- Returns a prioritized list of potential symptoms NOT currently mentioned by the patient\n- These symptoms would help distinguish between the specified disease and other conditions\n- Returns only a numbered list ordered from most to least relevant\n- Response format is different: JSON array of symptom objects with `name` and `checked` status\n- Ideal for refining a diagnosis when initial symptoms are inconclusive\n\n**Type 4: Disease Match Analysis**\n- Requires `medicalDescription` with the patient's symptoms\n- Analyzes why the patient's description might support the specified disease as a diagnostic hypothesis\n- Returns three sections: findings supporting the hypothesis, key information to check, and findings that make the hypothesis less likely\n- Output is formatted as HTML with clear sections\n- Useful for explaining diagnostic reasoning without presenting a confirmed diagnosis\n\n**Type 5: Genetic Test Recommendations**\n- Requires `medicalDescription` with the patient's symptoms\n- Recommends genetic tests appropriate for the specified disease given the patient description\n- Output is formatted as HTML with organized sections\n- Useful as diagnostic support for possible genetic testing pathways\n\n**Type 6: Comparison with Alternative Diagnoses**\n- Requires `medicalDescription` with the patient's symptoms\n- Compares the specified disease with up to three of the most relevant alternative diagnoses\n- For each alternative, states the most useful clinical finding or diagnostic test to distinguish it from the specified disease\n- Output is formatted as HTML with organized sections\n- Useful when the differential needs to be narrowed against close alternatives\n\nNote that questionTypes **3, 4, 5, and 6** require the `medicalDescription` parameter.\n\n**Response Format:**\n- For questionType 3: Returns a structured JSON response with `type: \"differential\"` and an array of symptom objects\n- For other types: Returns a response with `type: \"general\"` and HTML-formatted content\n\nThe parameter `detectedLang` should be obtained from a previous call to `/diagnose` and is used to determine the language of the response. It replaces the `lang` parameter, which is no longer required.\n",
+                "operationId": "post-disease-info",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/QuestionsRequest"
+                            },
+                            "example": {
+                                "questionType": 1,
+                                "disease": "Multiple Sclerosis",
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "detectedLang": "en",
+                                "timezone": "America/New_York",
+                                "medicalDescription": "Patient presents with fatigue, numbness in limbs, and vision problems for the last 6 months."
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Generated questions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/QuestionsResponse"
+                                },
+                                "example": {
+                                    "result": "success",
+                                    "data": {
+                                        "type": "general",
+                                        "content": "<p>Common symptoms of Multiple Sclerosis include...</p>",
+                                        "symptoms": [
+                                            {
+                                                "name": "Double vision",
+                                                "checked": false
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request format or content",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "result": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid question type"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "result": "error",
+                                    "message": "Invalid question type"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/questions/followup": {
+            "post": {
+                "tags": [
+                    "Questions"
+                ],
+                "summary": "Generate follow-up questions to refine diagnosis",
+                "description": "Generate 5-8 follow-up questions when previous diagnoses from /diagnose don't match the patient's experience.\n\nThis endpoint is designed to be used as a refinement step after an initial diagnosis has been made but doesn't seem accurate.\nUnlike /questions/emergency (which is used before any diagnosis), this endpoint requires both the patient description AND a list of previously suggested diagnoses that didn't match the patient's condition.\n\n**Question Focus:** The system prioritizes questions that would help clarify or rule out the suggested conditions, focusing on symptoms or details that are commonly used to differentiate between them. The questions seek critical missing information, which may include:\n\n- Demographics: age, sex/gender, height, weight\n- Duration and progression of symptoms\n- Severity, frequency, and triggers\n- Associated symptoms not yet mentioned\n- Relevant medical history or pre-existing conditions\n- Family history if potentially relevant\n- Current medications and previous treatments tried\n- Potential risk factors or exposures\n- Red-flag signs (confusion, significant weakness, severe pain, etc.)\n- Immunization status or immunosuppression if indicated by the symptoms\n\nFor pediatric patients, questions are formulated as if speaking to a caregiver, including questions about developmental milestones, immunizations, and relevant birth/early childhood history.\n\n**Mode:**\n- **`general`** (default): 5-8 questions to differentiate against the diagnoses in `diseases` after the patient indicated that none of them match.\n- **`hypothesis`**: exactly 5 questions focused on supporting, weakening, or confirming one selected diagnostic hypothesis. In this mode, `diseases` should contain that hypothesis rather than a rejected differential list.\n\n**Typical workflow:**\n1. User provides initial patient description\n2. Call /diagnose to get initial diagnoses\n3. If diagnoses don't match patient experience, call /questions/followup with both the description and list of unsuitable diagnoses\n4. User answers these follow-up questions\n5. Call /patient/update to incorporate answers into an improved description\n6. Call /diagnose again with the enhanced description for a refined diagnosis\n\nThe `lang` parameter is optional - if not provided, the language will be automatically detected from the description.\nWhen provided, the follow-up questions will be returned in this language regardless of the language of the description.\n",
+                "operationId": "post-questions-followup",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FollowUpQuestionsRequest"
+                            },
+                            "example": {
+                                "description": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea.",
+                                "diseases": "Migraine, Tension headache, Cluster headache",
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "timezone": "America/New_York"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Generated follow-up questions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FollowUpQuestionsResponse"
+                                },
+                                "example": {
+                                    "result": "success",
+                                    "data": {
+                                        "questions": [
+                                            "What is your age and gender?",
+                                            "How long have you been experiencing these symptoms?",
+                                            "Do you have any prior medical conditions?"
+                                        ]
+                                    },
+                                    "detectedLang": "en"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/questions/emergency": {
+            "post": {
+                "tags": [
+                    "Questions"
+                ],
+                "summary": "Generate initial assessment questions for patients",
+                "description": "Generate 5-8 initial questions based on a patient's medical description before proceeding to diagnosis.\n\nThis endpoint is designed to be used as a first step in the diagnostic process when you only have a basic description from the patient.\nThe system analyzes the description and generates relevant questions to complete the patient's clinical profile.\n\n**Question Focus:** The questions seek critical missing information, which may include:\n- Demographics: age, sex/gender, height, weight\n- Duration and progression of symptoms\n- Severity, frequency, and triggers\n- Associated symptoms not yet mentioned\n- Relevant medical history or pre-existing conditions\n- Family history if potentially relevant\n- Current medications and previous treatments tried\n- Potential risk factors or exposures (travel, smoking, occupational hazards, etc.)\n- Red-flag signs (confusion, significant weakness, severe pain, etc.)\n- Immunization status or immunosuppression if indicated by the symptoms\n\nFor pediatric patients, questions are formulated as if speaking to a caregiver, including questions about developmental milestones, immunizations, and relevant birth/early childhood history.\n\n**Question Principles:**\n1. Focus first on missing demographic details if not already provided\n2. Gather specific details about mentioned symptoms (timing, severity, triggers)\n3. Explore related symptoms that haven't been mentioned\n4. Ask about relevant medical history, family history, and current medications\n5. Clear, concise, and easy for patients to understand\n6. Avoid medical jargon when possible\n\n**Typical workflow:**\n1. User provides initial patient description\n2. Call /questions/emergency to get clarifying questions\n3. User answers these questions\n4. Call /patient/update to incorporate answers into an improved description\n5. Call /diagnose with the enhanced description for better diagnostic accuracy\n\nThe `lang` parameter is optional - if not provided, the language will be automatically detected from the description.\nWhen provided, the questions will be returned in this language regardless of the language of the description.\n",
+                "operationId": "post-questions-emergency",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ERQuestionsRequest"
+                            },
+                            "example": {
+                                "description": "I've been experiencing fatigue and shortness of breath for the last two weeks, especially when climbing stairs.",
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "timezone": "America/New_York"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Generated ER questions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ERQuestionsResponse"
+                                },
+                                "example": {
+                                    "result": "success",
+                                    "data": {
+                                        "questions": [
+                                            "What is your age and gender?",
+                                            "Do you have any history of heart or lung conditions?",
+                                            "Are you experiencing any pain along with the shortness of breath?"
+                                        ]
+                                    },
+                                    "detectedLang": "en"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/patient/update": {
+            "post": {
+                "tags": [
+                    "Patient"
+                ],
+                "summary": "Process answers and enhance patient description",
+                "description": "Updates a patient's medical description by integrating the original description with new information from question answers.\n\nThis endpoint serves as a critical step between question generation and diagnosis:\n\n- After /questions/emergency: Processes answers to initial questions before the first diagnosis\n- After /questions/followup: Processes answers to follow-up questions when previous diagnoses didn't match\n\n**Updated Description:** The system creates a comprehensive, well-organized description that:\n1. Maintains all relevant information from the original description\n2. Seamlessly incorporates the new details from question answers\n3. Is written in first person, as if the patient is describing their symptoms\n4. Does not include the questions themselves, only the information\n5. Presents information in a clear, logical flow\n\n**Mode:**\n- **`general`** (default): merges answers into a first-person clinical narrative.\n- **`hypothesis`**: interprets short answers only in the context of their associated questions, preserves negative findings and explicitly unknown or unperformed tests, and does not infer facts that were not provided.\n\n**Typical workflow scenarios:**\n\nInitial diagnosis workflow:\n1. User provides basic patient description\n2. Call /questions/emergency to get initial questions\n3. User answers these questions\n4. Call /patient/update to create an enhanced description\n5. Call /diagnose with the enhanced description\n\nRefined diagnosis workflow:\n1. User provides patient description\n2. Call /diagnose to get initial diagnoses\n3. If diagnoses don't match, call /questions/followup\n4. User answers these follow-up questions\n5. Call /patient/update to integrate these answers\n6. Call /diagnose again with the improved description\n\nThe `lang` parameter is optional - if not provided, the language will be automatically detected.\nThe response includes an `updatedDescription` field with all relevant patient information incorporated in a coherent format.\n",
+                "operationId": "post-patient-update",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FollowUpAnswersRequest"
+                            },
+                            "example": {
+                                "description": "I've been experiencing persistent headache for the past 3 weeks, accompanied by sensitivity to light.",
+                                "answers": [
+                                    {
+                                        "question": "What is your age and gender?",
+                                        "answer": "I am a 35-year-old female."
+                                    }
+                                ],
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "timezone": "America/New_York"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Processed answers with updated patient description",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FollowUpAnswersResponse"
+                                },
+                                "example": {
+                                    "result": "success",
+                                    "data": {
+                                        "updatedDescription": "I'm a 35-year-old female experiencing persistent headache for the past 3 weeks. The headaches are throbbing in nature, primarily on the right side, and are accompanied by sensitivity to light. I've noticed that the headaches worsen after prolonged screen use and are partially relieved by over-the-counter pain medication."
+                                    },
+                                    "detectedLang": "en"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request format or content",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "result": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid request format or content"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "result": "error",
+                                    "message": "Invalid request format or content"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/medical/summarize": {
+            "post": {
+                "tags": [
+                    "Content"
+                ],
+                "summary": "Create concise summary of medical description",
+                "description": "Generate a concise summary of a medical description while preserving essential clinical information.\n\nThis endpoint analyzes a potentially verbose medical description and extracts the most relevant clinical details:\n- Symptoms and their duration/progression\n- Important medical history\n- Physical signs and examination findings\n- Other clinically relevant details\n\nThe summary removes redundant phrases, irrelevant personal details, and repetitive information, producing a shorter, clearer text that maintains the medical essence of the original description.\n\n**Use cases:** This service is particularly useful for:\n- Preparing clinical notes from lengthy patient descriptions\n- Focusing on medically relevant details before diagnosis\n- Creating concise reports for medical professionals\n\nThe `lang` parameter is optional - if not provided, the language will be automatically detected from the description.\nWhen provided, the summary will be returned in this language regardless of the input language.\n",
+                "operationId": "post-medical-summarize",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SummarizeRequest"
+                            },
+                            "example": {
+                                "description": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head.",
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "timezone": "America/New_York"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Summarized content",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SummarizeResponse"
+                                },
+                                "example": {
+                                    "result": "success",
+                                    "data": {
+                                        "summary": "40-year-old male with 3-week history of right-sided throbbing headaches, photophobia, and occasional nausea."
+                                    },
+                                    "detectedLang": "en"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request format or content",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "result": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid request format or content"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "result": "error",
+                                    "message": "Invalid request format or content"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/medical/analyze": {
+            "post": {
+                "tags": [
+                    "Multimodal"
+                ],
+                "summary": "Analyze multimodal medical input (text, documents, and images)",
+                "description": "Analyzes medical documents, images, and text to extract relevant clinical information and generate a comprehensive patient description, then continues into asynchronous diagnosis.\n\nThis unified endpoint processes various types of medical input:\n- **Documents**: PDF, DOC, DOCX, XLS, XLSX, TXT files containing medical records, lab results, or clinical notes\n- **Images**: JPG, PNG, TIFF, BMP, WEBP files of medical images, photos of documents, or visual symptoms\n- **Text**: Direct text input describing symptoms or medical history\n\nAt least one of `text`, `document`, or `image` is required. Every call creates a new upload; reuse it in `/diagnose` and `/disease/info` through the returned `uploadId`.\n\n**Processing Pipeline:**\n1. Extracts text from uploaded documents using OCR and document intelligence\n2. Classifies images as document-only, mixed, medical visual, or unknown\n3. Uses OCR-only for high-confidence document images, OCR plus vision for mixed images, and direct vision for medical, unknown, or failed routes\n4. Summarizes the combined text when it is longer than 1000 characters\n5. Starts diagnosis processing asynchronously with the current default model (`gpt56terra`)\n\n**Asynchronous Diagnosis Flow:**\n1. Call `/pubsub/negotiate` with the same `myuuid` to establish the WebSocket connection.\n2. Send the multimodal request to `/medical/analyze`.\n3. Receive an immediate HTTP response with `result: \"processing\"`, plus `description`, `uploadId`, `images`, `imageRouting`, `documents`, `isImageOnly`, `summarized`, `model`, and `correlationId`.\n4. Monitor WebSocket for progress events (`type: progress`, field `step`).\n5. Receive the final diagnosis via WebSocket (`type: result`), in the same payload shape as `/diagnose`.\n\n**File Limits:**\n- Maximum 5 documents per request\n- Maximum 5 images per request\n- Documents and images combined must not exceed 20 MB\n- Supported document formats: PDF, DOC, DOCX, XLS, XLSX, TXT\n- Supported image formats: JPG, PNG, TIFF, BMP, WEBP\n\n**Deployment note:** In APIM-hosted environments the server currently resolves every requested model to `gpt56terra`. Model selection is honored only when the API runs locally (`NODE_ENV=local`).\n\nThe `lang` parameter is optional - if not provided, the language will be automatically detected.\n",
+                "operationId": "post-medical-analyze",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AnalyzeRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Input accepted for asynchronous diagnosis processing",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProcessingResponse"
+                                },
+                                "example": {
+                                    "result": "processing",
+                                    "description": "Patient presents with persistent headache for the past 3 weeks.",
+                                    "uploadId": null,
+                                    "images": [],
+                                    "isImageOnly": false,
+                                    "summarized": false,
+                                    "model": "gpt56terra",
+                                    "imageRouting": [],
+                                    "documents": [],
+                                    "correlationId": "550e8400-e29b-41d4-a716-446655440000"
+                                }
+                            }
+                        },
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid multipart input, unsupported file, or missing text/document/image",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error during processing",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/medical/upload/{uploadId}": {
+            "delete": {
+                "tags": [
+                    "Multimodal"
+                ],
+                "summary": "Delete the stored images of an analysis",
+                "description": "Deletes every image kept for an `uploadId` returned by `/medical/analyze`, before the automatic 24-hour expiry.\n\nThe images live under a storage prefix built from the authenticated tenant or subscription, the caller's `myuuid` and the `uploadId`; all three must match for anything to be deleted. The call is idempotent: repeating it, or calling it for an expired or foreign upload, returns `deleted: 0`.\n\nSend `myuuid` in the JSON body. If an intermediary strips DELETE bodies, the same value is accepted as the `myuuid` query parameter.\n",
+                "operationId": "delete-medical-upload",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "description": "Upload identifier returned by /medical/analyze.",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "myuuid",
+                        "in": "query",
+                        "required": false,
+                        "description": "Fallback for the body field of the same name.",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "myuuid"
+                                ],
+                                "properties": {
+                                    "myuuid": {
+                                        "type": "string",
+                                        "format": "uuid",
+                                        "description": "Same anonymous user identifier used in /medical/analyze."
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Deletion completed (possibly with nothing to delete)",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "result": {
+                                            "type": "string",
+                                            "enum": [
+                                                "success"
+                                            ]
+                                        },
+                                        "deleted": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "description": "Number of image blobs removed."
+                                        },
+                                        "correlationId": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing tenant context, invalid myuuid or malformed uploadId",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Storage error while deleting",
+                        "headers": {
+                            "X-Correlation-Id": {
+                                "$ref": "#/components/headers/CorrelationId"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pubsub/negotiate": {
+            "post": {
+                "tags": [
+                    "WebSocket"
+                ],
+                "summary": "Negotiate WebSocket connection for real-time updates",
+                "description": "Establishes a WebSocket connection for real-time updates during diagnosis, Ask, and multimodal processing.\n\nThis endpoint is used for long-running requests (`gpt56terra`, `gpt54mini`, `gpt5`, `gpt5mini`, `gpt5nano`, and the legacy `o3` alias). The typical workflow is:\n\n1. Call this endpoint with a unique user ID (`myuuid`)\n2. Receive a WebSocket URL and access token\n3. Connect to the WebSocket using the provided credentials\n4. Send your request to `/diagnose`, `/ask`, or `/medical/analyze` with the same `myuuid`\n5. Receive real-time updates through the WebSocket:\n   - Progress updates with current step and percentage\n   - Queue status if the request is queued\n   - Final result when processing completes\n   - Error notifications if processing fails\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|medical_question|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as the HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n- **Queued**: `{\"type\":\"queued\",\"status\":\"queued\",\"queueInfo\":{...}}`\n\nThe connection remains active until processing is complete or an error occurs.\nClients should implement reconnection logic in case of network interruptions.\n\n`myuuid` is required and must be a UUID. The returned `hubName` is `diagnose` for all of these flows.\n",
+                "operationId": "post-pubsub-negotiate",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "myuuid"
+                                ],
+                                "properties": {
+                                    "myuuid": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-fA-F-]{36}$"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "WebSocket connection established successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "url": {
+                                            "type": "string",
+                                            "description": "WebSocket URL for connection",
+                                            "example": "wss://dxgpt-apim.azure-api.net/api/pubsub/negotiate"
+                                        },
+                                        "accessToken": {
+                                            "type": "string",
+                                            "description": "Access token for WebSocket authentication",
+                                            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                                        },
+                                        "userId": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "hubName": {
+                                            "type": "string",
+                                            "example": "diagnose"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "url": "wss://dxgpt-apim.azure-api.net/api/pubsub/negotiate",
+                                    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ask": {
+            "post": {
+                "tags": [
+                    "Medical Questions"
+                ],
+                "summary": "Answer general medical questions",
+                "description": "Answers general medical questions with concise, evidence-based educational information.\n\nThis endpoint is the Ask companion to `/diagnose`. Use it when the user is asking about a condition, medication, test, or other medical topic rather than submitting a patient case for differential diagnosis.\n\n**Intent Routing:** Before answering, the request is classified as:\n- **`explain`**: medical question; the system returns an educational `medicalAnswer`.\n- **`go`**: the text looks like a patient case ready for differential diagnosis; the UI may suggest Diagnose.\n- **`enrich`**: more clinical context would improve a differential; the UI may suggest Diagnose.\n\nThese actions suggest a path and never block the user. A patient case submitted to Ask may still return a routing suggestion (`suggestedPage: \"home\"`) instead of forcing a diagnosis. To run differential diagnosis, call `/diagnose` (set `forceDiagnosis` to `true` when the user explicitly chooses to continue).\n\n**Available Models:**\n- **`gpt56terra`**: current default model (best quality/speed/cost balance), with WebSocket progress.\n- **`gpt54mini`**: previous compact default (backward compatibility), with WebSocket progress.\n- **`gpt5`**: multimodal model (text + images), with WebSocket progress.\n- **`gpt5mini`**: legacy compact model (backward compatibility), with WebSocket progress.\n- **`gpt5nano`**: ultra-compact model, with WebSocket progress.\n- **`gpt4o`**: legacy fast model (backward compatibility).\n- **`o3`**: legacy alias. Internally resolved to `gpt56terra`.\n\n**Deployment note:** In APIM-hosted environments the server currently resolves every requested model to `gpt56terra`. Model selection is honored only when the API runs locally (`NODE_ENV=local`).\n\n**WebSocket Flow for Long-Running Models:**\nWhen using `gpt56terra`, `gpt54mini`, `gpt5`, `gpt5mini`, or `gpt5nano`:\n1. Call `/pubsub/negotiate` to establish WebSocket connection.\n2. Send the question to `/ask` with the selected model.\n3. Receive immediate HTTP response with `result: \"processing\"`.\n4. Monitor WebSocket for progress events.\n5. Receive final result via WebSocket.\n\nSet `response_mode` to `direct` to wait for a synchronous HTTP response instead of using WebSocket.\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|medical_question|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\n**Response:** A successful educational answer includes:\n- **`medicalAnswer`**: concise educational text in the same language as the question\n- **`data`**: empty array (Ask does not return a differential list)\n- language detection, anonymization metadata, and intent-routing fields (`queryType`, `intentAction`, `intentReason`, optional `suggestedPage`)\n\nThe answer does not diagnose the user. When the question describes symptoms, relevant urgent warning signs are included in the educational response.\n\n**Supported Languages**: The question can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input. If the optional parameter `lang` is not provided, the language is detected automatically.\n\n**Anonymization**: The response includes anonymized versions of the submitted text where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Age is NOT considered PII and is preserved.\n\n**Queue System**: Requests may be queued during high traffic for any model. A queue status will be returned for tracking, including the selected processing region based on user timezone and model capacity.\n",
+                "operationId": "6aae5124648a6f972174cdae",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant SaaS or hospital clients.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AskRequest"
+                            },
+                            "example": {
+                                "description": "What are the common side effects of metformin?",
+                                "myuuid": "550e8400-e29b-41d4-a716-446655440000",
+                                "lang": "en",
+                                "timezone": "Europe/Madrid",
+                                "model": "gpt56terra"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Medical answer, routing suggestion, queued request, or asynchronous processing acknowledgement",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "oneOf": [
+                                        {
+                                            "$ref": "#/components/schemas/AskResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/QueuedResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ProcessingResponse"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request format or missing required tenant/subscription information"
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key"
+                    },
+                    "429": {
+                        "description": "Too many requests"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "UploadId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Upload identifier returned by /medical/analyze. It is the only way to reference uploaded images: storage URLs and legacy assetIds are rejected. The upload expires 24 hours after the analysis."
+            },
+            "DiagnoseRequest": {
+                "required": [
+                    "description",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "maxLength": 8000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Patient's medical description",
+                        "example": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head."
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Language code. Optional; if omitted, the language is detected automatically.",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    },
+                    "diseases_list": {
+                        "maxLength": 1000,
+                        "type": "string",
+                        "description": "List of previously identified diseases (optional)",
+                        "example": "Migraine, Tension headache, Cluster headache"
+                    },
+                    "forceDiagnosis": {
+                        "type": "boolean",
+                        "description": "When true, explicitly continues to differential diagnosis after the user confirms that choice.",
+                        "default": false
+                    },
+                    "uploadId": {
+                        "$ref": "#/components/schemas/UploadId"
+                    }
+                }
+            },
+            "DiagnoseResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "enum": [
+                            "success",
+                            "error",
+                            "translation error",
+                            "unsupported_language",
+                            "queued",
+                            "processing"
+                        ],
+                        "type": "string",
+                        "description": "Status of the request",
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "diagnosis": {
+                                    "type": "string",
+                                    "example": "Migraine"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "symptoms_in_common": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "symptoms_not_in_common": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Response data (only when result is success)"
+                    },
+                    "anonymization": {
+                        "type": "object",
+                        "properties": {
+                            "hasPersonalInfo": {
+                                "type": "boolean",
+                                "example": true
+                            },
+                            "anonymizedText": {
+                                "type": "string",
+                                "example": "Patient presents with headache for the past 3 weeks..."
+                            },
+                            "anonymizedTextHtml": {
+                                "type": "string",
+                                "example": "Patient presents with headache for the past 3 weeks..."
+                            }
+                        }
+                    },
+                    "detectedLang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Language code returned by the /diagnose endpoint. This determines the language of the response. Required when a specific language output is needed.",
+                        "example": "en"
+                    },
+                    "model": {
+                        "type": "string",
+                        "example": "gpt56terra"
+                    },
+                    "queryType": {
+                        "type": "string",
+                        "enum": [
+                            "diagnostic",
+                            "general",
+                            "other"
+                        ]
+                    },
+                    "intentAction": {
+                        "type": "string",
+                        "enum": [
+                            "go",
+                            "explain",
+                            "enrich"
+                        ],
+                        "description": "Suggested next action. The classifier does not prevent the user from continuing to diagnosis."
+                    },
+                    "intentReason": {
+                        "type": "string",
+                        "enum": [
+                            "patient_case_ready",
+                            "medical_education",
+                            "known_condition_management",
+                            "medication_safety",
+                            "insufficient_patient_context",
+                            "missing_patient_data",
+                            "non_medical"
+                        ]
+                    },
+                    "suggestedPage": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                            "questions"
+                        ]
+                    },
+                    "inferredProfile": {
+                        "type": "object",
+                        "description": "Profile information inferred from the submitted text.",
+                        "additionalProperties": true
+                    },
+                    "queueInfo": {
+                        "type": "object",
+                        "properties": {
+                            "ticketId": {
+                                "type": "string",
+                                "example": "ticket-123456"
+                            },
+                            "position": {
+                                "type": "integer",
+                                "example": 3
+                            },
+                            "estimatedWaitTime": {
+                                "type": "integer",
+                                "description": "Estimated wait time in minutes",
+                                "example": 5
+                            },
+                            "region": {
+                                "type": "string",
+                                "example": "WestUS"
+                            },
+                            "utilizationPercentage": {
+                                "type": "number",
+                                "format": "float",
+                                "example": 85.5
+                            }
+                        },
+                        "description": "Queue information (only when result is queued)"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Additional error or translation status information."
+                    }
+                }
+            },
+            "AskRequest": {
+                "required": [
+                    "description",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "maxLength": 8000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Medical question or health-related text.",
+                        "example": "What are the common side effects of metformin?"
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Language code. Optional; if omitted, the language is detected automatically.",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User timezone used for regional routing.",
+                        "example": "Europe/Madrid"
+                    },
+                    "model": {
+                        "type": "string",
+                        "enum": [
+                            "gpt56terra",
+                            "gpt54mini",
+                            "gpt5",
+                            "gpt5mini",
+                            "gpt5nano",
+                            "gpt4o",
+                            "o3"
+                        ],
+                        "description": "Accepted for backward compatibility. APIM deployments currently resolve every value to `gpt56terra`; model selection is honored only with `NODE_ENV=local`.",
+                        "default": "gpt56terra",
+                        "example": "gpt56terra"
+                    },
+                    "response_mode": {
+                        "type": "string",
+                        "enum": [
+                            "direct"
+                        ],
+                        "description": "Set to `direct` to wait for the final response over HTTP instead of WebSocket."
+                    },
+                    "uploadId": {
+                        "$ref": "#/components/schemas/UploadId"
+                    }
+                }
+            },
+            "AskResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "type": "string",
+                        "enum": [
+                            "success",
+                            "error",
+                            "translation error",
+                            "unsupported_language"
+                        ],
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "array",
+                        "items": {},
+                        "description": "Empty for educational Ask responses."
+                    },
+                    "medicalAnswer": {
+                        "type": "string",
+                        "description": "Educational medical answer when the intent action is `explain`."
+                    },
+                    "sonarData": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": true
+                    },
+                    "anonymization": {
+                        "type": "object",
+                        "properties": {
+                            "hasPersonalInfo": {
+                                "type": "boolean"
+                            },
+                            "anonymizedText": {
+                                "type": "string"
+                            },
+                            "anonymizedTextHtml": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "detectedLang": {
+                        "type": "string"
+                    },
+                    "model": {
+                        "type": "string",
+                        "example": "sonar-pro"
+                    },
+                    "queryType": {
+                        "type": "string",
+                        "enum": [
+                            "general",
+                            "diagnostic",
+                            "other"
+                        ]
+                    },
+                    "intentAction": {
+                        "type": "string",
+                        "enum": [
+                            "explain",
+                            "go",
+                            "enrich"
+                        ]
+                    },
+                    "intentReason": {
+                        "type": "string",
+                        "enum": [
+                            "patient_case_ready",
+                            "medical_education",
+                            "known_condition_management",
+                            "medication_safety",
+                            "insufficient_patient_context",
+                            "missing_patient_data",
+                            "non_medical"
+                        ]
+                    },
+                    "suggestedPage": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                            "home"
+                        ]
+                    },
+                    "question": {
+                        "type": "string"
+                    },
+                    "inferredProfile": {
+                        "type": "object",
+                        "description": "Profile information inferred from the submitted text.",
+                        "additionalProperties": true
+                    }
+                }
+            },
+            "QueuedResponse": {
+                "type": "object",
+                "required": [
+                    "result",
+                    "queueInfo"
+                ],
+                "properties": {
+                    "result": {
+                        "type": "string",
+                        "enum": [
+                            "queued"
+                        ]
+                    },
+                    "queueInfo": {
+                        "type": "object",
+                        "properties": {
+                            "ticketId": {
+                                "type": "string"
+                            },
+                            "position": {
+                                "type": "integer"
+                            },
+                            "estimatedWaitTime": {
+                                "type": "integer"
+                            },
+                            "region": {
+                                "type": "string"
+                            },
+                            "model": {
+                                "type": "string"
+                            },
+                            "utilizationPercentage": {
+                                "type": "number",
+                                "format": "float"
+                            }
+                        }
+                    }
+                }
+            },
+            "ProcessingResponse": {
+                "type": "object",
+                "required": [
+                    "result",
+                    "correlationId"
+                ],
+                "properties": {
+                    "result": {
+                        "type": "string",
+                        "enum": [
+                            "processing"
+                        ]
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Normalized description submitted for asynchronous processing."
+                    },
+                    "uploadId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true,
+                        "description": "Reference to the stored images of this analysis. Null when no image is kept for the model (none uploaded, or all of them were converted to text). Send it back in /diagnose and /disease/info; the server decides which images reach the model."
+                    },
+                    "images": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MultimodalImage"
+                        }
+                    },
+                    "imageRouting": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MultimodalImageRoutingResult"
+                        }
+                    },
+                    "documents": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MultimodalDocumentResult"
+                        }
+                    },
+                    "isImageOnly": {
+                        "type": "boolean"
+                    },
+                    "summarized": {
+                        "type": "boolean"
+                    },
+                    "model": {
+                        "type": "string"
+                    },
+                    "correlationId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+                        "description": "Safe identifier for correlating the request with server telemetry."
+                    }
+                }
+            },
+            "QuestionsRequest": {
+                "required": [
+                    "questionType",
+                    "disease",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "questionType": {
+                        "maximum": 6,
+                        "minimum": 0,
+                        "type": "integer",
+                        "description": "Type of information to generate:\n- 0: Common symptoms\n- 1: Detailed disease information\n- 2: Diagnostic tests\n- 3: Missing differentiating symptoms (requires medicalDescription)\n- 4: Patient/disease match analysis (requires medicalDescription)\n- 5: Appropriate genetic tests (requires medicalDescription)\n- 6: Comparison with alternative diagnoses (requires medicalDescription)\n",
+                        "example": 1
+                    },
+                    "disease": {
+                        "maxLength": 200,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Disease to generate questions about",
+                        "example": "Multiple Sclerosis"
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Two-letter language code",
+                        "example": "en"
+                    },
+                    "detectedLang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Detected language code",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    },
+                    "medicalDescription": {
+                        "maxLength": 8000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Medical description (required for questionType 3, 4, 5 and 6)",
+                        "example": "Patient presents with fatigue, numbness in limbs, and vision problems for the last 6 months."
+                    },
+                    "uploadId": {
+                        "$ref": "#/components/schemas/UploadId"
+                    }
+                }
+            },
+            "QuestionsResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "enum": [
+                            "success",
+                            "error"
+                        ],
+                        "type": "string",
+                        "description": "Status of the request",
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "enum": [
+                                    "differential",
+                                    "general"
+                                ],
+                                "type": "string",
+                                "description": "Type of response data (differential for questionType 3, general for others)",
+                                "example": "general"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "HTML content with questions/answers (for general type)",
+                                "example": "<p>Common symptoms of Multiple Sclerosis include...</p>"
+                            },
+                            "symptoms": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "example": "Double vision"
+                                        },
+                                        "checked": {
+                                            "type": "boolean",
+                                            "example": false
+                                        }
+                                    }
+                                },
+                                "description": "List of symptoms (for differential type)"
+                            }
+                        },
+                        "description": "Response data"
+                    }
+                }
+            },
+            "FollowUpQuestionsRequest": {
+                "required": [
+                    "description",
+                    "diseases",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "maxLength": 8000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Patient's medical description",
+                        "example": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
+                    },
+                    "diseases": {
+                        "maxLength": 1000,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "List of suggested diseases that didn't match the patient's experience",
+                        "example": "Migraine, Tension headache, Cluster headache"
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the follow-up questions will be returned in this language.",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": [
+                            "general",
+                            "hypothesis"
+                        ],
+                        "default": "general",
+                        "description": "Question generation mode. `general` (default) differentiates against rejected diagnoses in `diseases`. `hypothesis` asks 5 questions to assess one selected diagnostic hypothesis."
+                    }
+                }
+            },
+            "FollowUpQuestionsResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "enum": [
+                            "success",
+                            "error",
+                            "translation error",
+                            "unsupported_language"
+                        ],
+                        "type": "string",
+                        "description": "Status of the request",
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "questions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "List of generated follow-up questions",
+                                "example": [
+                                    "What is your age and gender?",
+                                    "How long have you been experiencing these symptoms?",
+                                    "Do you have any prior medical conditions?"
+                                ]
+                            }
+                        }
+                    },
+                    "detectedLang": {
+                        "type": "string",
+                        "description": "Detected language of the patient's description",
+                        "example": "en"
+                    }
+                }
+            },
+            "ERQuestionsRequest": {
+                "required": [
+                    "description",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "maxLength": 8000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Patient's initial medical description",
+                        "example": "I've been experiencing fatigue and shortness of breath for the last two weeks, especially when climbing stairs."
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the questions will be returned in this language.",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    }
+                }
+            },
+            "ERQuestionsResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "enum": [
+                            "success",
+                            "error",
+                            "translation error",
+                            "unsupported_language"
+                        ],
+                        "type": "string",
+                        "description": "Status of the request",
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "questions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "List of generated initial questions",
+                                "example": [
+                                    "What is your age and gender?",
+                                    "Do you have any history of heart or lung conditions?",
+                                    "Are you experiencing any pain along with the shortness of breath?"
+                                ]
+                            }
+                        }
+                    },
+                    "detectedLang": {
+                        "type": "string",
+                        "description": "Detected language of the patient's description",
+                        "example": "en"
+                    }
+                }
+            },
+            "FollowUpAnswersRequest": {
+                "required": [
+                    "description",
+                    "answers",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "maxLength": 8000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Patient's initial medical description",
+                        "example": "I've been experiencing persistent headache for the past 3 weeks, accompanied by sensitivity to light."
+                    },
+                    "answers": {
+                        "type": "array",
+                        "items": {
+                            "required": [
+                                "question",
+                                "answer"
+                            ],
+                            "type": "object",
+                            "properties": {
+                                "question": {
+                                    "type": "string",
+                                    "description": "The follow-up question",
+                                    "example": "What is your age and gender?"
+                                },
+                                "answer": {
+                                    "type": "string",
+                                    "description": "The patient's answer to the question",
+                                    "example": "I am a 35-year-old female."
+                                }
+                            }
+                        },
+                        "description": "Array of questions and their corresponding answers"
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Two-letter language code",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": [
+                            "general",
+                            "hypothesis"
+                        ],
+                        "default": "general",
+                        "description": "Merge mode. `general` (default) writes a first-person narrative. `hypothesis` keeps short answers tied to their questions and does not infer missing facts."
+                    }
+                }
+            },
+            "FollowUpAnswersResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "enum": [
+                            "success",
+                            "error",
+                            "unsupported_language"
+                        ],
+                        "type": "string",
+                        "description": "Status of the request",
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "updatedDescription": {
+                                "type": "string",
+                                "description": "Updated medical description with incorporated follow-up answers",
+                                "example": "I'm a 35-year-old female experiencing persistent headache for the past 3 weeks. The headaches are throbbing in nature, primarily on the right side, and are accompanied by sensitivity to light. I've noticed that the headaches worsen after prolonged screen use and are partially relieved by over-the-counter pain medication."
+                            }
+                        },
+                        "description": "Response data (only when result is success)"
+                    },
+                    "detectedLang": {
+                        "type": "string",
+                        "description": "Detected language of the provided description",
+                        "example": "en"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Error message (only when result is error or unsupported_language)",
+                        "example": "An error occurred during translation"
+                    }
+                }
+            },
+            "SummarizeRequest": {
+                "required": [
+                    "description",
+                    "myuuid",
+                    "timezone"
+                ],
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "maxLength": 400000,
+                        "minLength": 10,
+                        "type": "string",
+                        "description": "Text to be summarized (medical description)",
+                        "example": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea. The pain is described as throbbing and is primarily located on the right side of the head."
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected. When provided, the summarized text will be returned in this language.",
+                        "example": "en"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    }
+                }
+            },
+            "SummarizeResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "enum": [
+                            "success",
+                            "error",
+                            "unsupported_language"
+                        ],
+                        "type": "string",
+                        "description": "Status of the request",
+                        "example": "success"
+                    },
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "summary": {
+                                "type": "string",
+                                "description": "The summarized text",
+                                "example": "40-year-old male with 3-week history of right-sided throbbing headaches, photophobia, and occasional nausea."
+                            }
+                        },
+                        "description": "Response data (only when result is success)"
+                    },
+                    "detectedLang": {
+                        "type": "string",
+                        "description": "Detected language of the provided text",
+                        "example": "en"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Error message (only when result is error or unsupported_language)",
+                        "example": "An error occurred during translation"
+                    }
+                }
+            },
+            "AnalyzeRequest": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "maxLength": 8000,
+                        "type": "string",
+                        "description": "Text input for analysis (optional if document or image is provided)",
+                        "example": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
+                    },
+                    "lang": {
+                        "maxLength": 8,
+                        "minLength": 2,
+                        "type": "string",
+                        "description": "Two-letter language code (ISO 639-1). Optional - if not provided, the language will be automatically detected.",
+                        "example": "en"
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string",
+                        "description": "Unique identifier for the user",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "User's timezone. Used to determine which regional endpoint will process the request. - If timezone contains \"america\" → North America region - If timezone contains \"europe\" → Europe region - If timezone contains \"asia\" → Asia region - If timezone contains \"africa\" → Africa region - If timezone contains \"australia\" or \"pacific\" → Oceania region - Otherwise → Default region\n",
+                        "example": "America/New_York"
+                    },
+                    "document": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "description": "Documents to analyze (PDF, Word, Excel or TXT), up to five files. Documents and images together must not exceed 20 MB.",
+                        "items": {
+                            "type": "string",
+                            "format": "binary"
+                        }
+                    },
+                    "image": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "description": "Images to analyze (JPG, PNG, TIFF, BMP or WEBP), up to five files. Documents and images together must not exceed 20 MB.",
+                        "items": {
+                            "type": "string",
+                            "format": "binary"
+                        }
+                    }
+                },
+                "required": [
+                    "myuuid"
+                ],
+                "anyOf": [
+                    {
+                        "required": [
+                            "text"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "document"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "image"
+                        ]
+                    }
+                ]
+            },
+            "MultimodalDocumentResult": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "status",
+                    "method",
+                    "attempts"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "succeeded",
+                            "failed"
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": [
+                            "txt",
+                            "document_intelligence"
+                        ]
+                    },
+                    "pages": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "durationMs": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "attempts": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "warnings": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "error": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "MultimodalImageRoutingResult": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "classification",
+                    "confidence",
+                    "hasDocumentText",
+                    "hasMedicalVisual",
+                    "route",
+                    "ocrTextUsed"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                    },
+                    "classification": {
+                        "type": "string",
+                        "enum": [
+                            "document_only",
+                            "contains_medical_visual",
+                            "unknown"
+                        ]
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                    },
+                    "hasDocumentText": {
+                        "type": "boolean"
+                    },
+                    "hasMedicalVisual": {
+                        "type": "boolean"
+                    },
+                    "route": {
+                        "type": "string",
+                        "enum": [
+                            "ocr_text",
+                            "vision"
+                        ]
+                    },
+                    "ocrTextUsed": {
+                        "type": "boolean"
+                    },
+                    "ocr": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/MultimodalDocumentResult"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "fallbackReason": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                            "classification_failed",
+                            "ocr_failed",
+                            "ocr_text_too_short",
+                            null
+                        ]
+                    }
+                }
+            },
+            "MultimodalImage": {
+                "type": "object",
+                "required": [
+                    "uploadId",
+                    "index",
+                    "name",
+                    "routing",
+                    "diagnosticUse"
+                ],
+                "description": "Image processed by an analysis. No storage URL is ever returned: the server reads the bytes itself when the image is needed. Only `routing: vision` images are stored; `ocr_text` images were converted to text inside `description`, are not stored and carry `uploadId`/`index` as null.",
+                "properties": {
+                    "uploadId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                    },
+                    "mimeType": {
+                        "type": "string"
+                    },
+                    "routing": {
+                        "type": "string",
+                        "enum": [
+                            "ocr_text",
+                            "vision"
+                        ]
+                    },
+                    "diagnosticUse": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+            "apiKeyHeader": {
+                "type": "apiKey",
+                "name": "Ocp-Apim-Subscription-Key",
+                "in": "header"
+            },
+            "apiKeyQuery": {
+                "type": "apiKey",
+                "name": "subscription-key",
+                "in": "query"
+            }
+        },
+        "headers": {
+            "CorrelationId": {
+                "description": "Request correlation identifier returned by DXGPT.",
+                "schema": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+                    "description": "Safe identifier for correlating the request with server telemetry."
+                }
+            }
+        }
+    },
+    "security": [
+        {
+            "apiKeyHeader": []
+        },
+        {
+            "apiKeyQuery": []
+        }
+    ]
+}

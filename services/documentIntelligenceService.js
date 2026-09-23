@@ -127,9 +127,16 @@ function createClient() {
   );
 }
 
-function failedDocumentResult(originalName, mimeType, errorMessage, attempts = 1) {
+function failedDocumentResult(
+  originalName,
+  mimeType,
+  errorMessage,
+  attempts = 1,
+  size
+) {
   return {
     name: originalName,
+    ...(Number.isFinite(size) ? { size } : {}),
     status: 'failed',
     method: mimeType === 'text/plain' ? 'txt' : 'document_intelligence',
     content: '',
@@ -144,6 +151,7 @@ function failedDocumentResult(originalName, mimeType, errorMessage, attempts = 1
 function toPublicDocumentResult(result) {
   return {
     name: result.name,
+    ...(Number.isFinite(result.size) ? { size: result.size } : {}),
     status: result.status,
     method: result.method,
     pages: result.pages || 0,
@@ -167,12 +175,25 @@ function normalizeDocumentError(error, fallbackMessage) {
   return normalized;
 }
 
-async function submitDocumentAnalysis(client, blobUrl, options = {}) {
+// Los bytes viajan dentro de la petición: Document Intelligence no necesita
+// leer del blob y no hace falta firmar ninguna URL.
+function buildAnalyzeSource({ fileBuffer, blobUrl }) {
+  if (Buffer.isBuffer(fileBuffer)) {
+    return { base64Source: fileBuffer.toString('base64') };
+  }
+  if (typeof blobUrl === 'string' && blobUrl) {
+    return { urlSource: blobUrl };
+  }
+  throw new Error('Document Intelligence needs a file buffer or a URL');
+}
+
+async function submitDocumentAnalysis(client, source, options = {}) {
   const {
     sleep = delay,
     random = Math.random,
-    maxAttempts = config.DOCUMENT_INTELLIGENCE_MAX_ATTEMPTS || DEFAULT_MAX_ATTEMPTS
+    maxAttempts = DEFAULT_MAX_ATTEMPTS
   } = options;
+  const body = buildAnalyzeSource(source);
   let lastError;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -181,7 +202,7 @@ async function submitDocumentAnalysis(client, blobUrl, options = {}) {
         .path('/documentModels/{modelId}:analyze', 'prebuilt-layout')
         .post({
           contentType: 'application/json',
-          body: { urlSource: blobUrl },
+          body,
           queryParameters: { outputContentFormat: 'markdown' }
         });
 
@@ -212,10 +233,10 @@ async function submitDocumentAnalysis(client, blobUrl, options = {}) {
   throw lastError;
 }
 
-async function analyzeWithDocumentIntelligence(blobUrl, options = {}) {
+async function analyzeWithDocumentIntelligence(source, options = {}) {
   const client = createClient();
   const startedAt = Date.now();
-  const submission = await submitDocumentAnalysis(client, blobUrl, options);
+  const submission = await submitDocumentAnalysis(client, source, options);
   let result;
 
   try {
@@ -255,10 +276,17 @@ async function analyzeWithDocumentIntelligence(blobUrl, options = {}) {
   };
 }
 
-async function extractDocument({ fileBuffer, originalName, mimeType, blobUrl }, options = {}) {
+async function extractDocument({
+  fileBuffer,
+  originalName,
+  mimeType,
+  blobUrl,
+  size
+}, options = {}) {
   if (mimeType === 'text/plain') {
     return {
       name: originalName,
+      ...(Number.isFinite(size) ? { size } : {}),
       status: 'succeeded',
       method: 'txt',
       content: Buffer.isBuffer(fileBuffer) ? fileBuffer.toString('utf-8') : String(fileBuffer || ''),
@@ -270,9 +298,10 @@ async function extractDocument({ fileBuffer, originalName, mimeType, blobUrl }, 
     };
   }
 
-  const analyzed = await analyzeWithDocumentIntelligence(blobUrl, options);
+  const analyzed = await analyzeWithDocumentIntelligence({ fileBuffer, blobUrl }, options);
   return {
     name: originalName,
+    ...(Number.isFinite(size) ? { size } : {}),
     status: 'succeeded',
     method: analyzed.method,
     content: analyzed.content,

@@ -123,14 +123,16 @@ docker build -t dxgpt-api:prod -f Dockerfile .
 
 ## OpenAPI Specification
 
-The project includes an OpenAPI specification that defines all the API endpoints. This specification is located in `docs/dxgpt-api.yaml`.
+The public contracts are the API Management exports `docs/dxgptapi-dev-yaml` and `docs/dxgptapi-prod.yaml`. Internal support endpoints live in `docs/internal-api.yaml`.
 
 ### Direct Swagger/OpenAPI Editing
 
-Instead of using JSDoc annotations, we work directly with the OpenAPI specification file. This gives more control and allows using visual editors:
+The published files are maintained as API Management exports. Edit the export that matches the environment, then validate it:
 
-1. **Edit OpenAPI File Directly**: Modify the `docs/dxgpt-api.yaml` file directly
-2. **Use Swagger Editor**: Import/export your specification at [Swagger Editor](https://editor.swagger.io)
+1. **Development**: `docs/dxgptapi-dev-yaml`
+2. **Production**: `docs/dxgptapi-prod.yaml`
+3. **Internal support API**: `docs/internal-api.yaml`
+4. **Swagger Editor**: import or export a specification at [Swagger Editor](https://editor.swagger.io)
 
 ### Validation
 
@@ -142,10 +144,7 @@ npm run validate-openapi
 
 ### Swagger UI
 
-There are two ways to view the API documentation:
-
-1. **Within the Main Application**: Documentation is available at the `/docs` endpoint when the server is running
-2. **Standalone Swagger UI Server**: Run a dedicated documentation server:
+Run the standalone Swagger UI server. It serves the development public contract:
 
 ```
 npm run swagger-ui
@@ -166,7 +165,7 @@ The cost tracking system allows calculating and storing the cost of AI operation
 - `er_questions` - Emergency questions
 - `process_follow_up` - Process follow-up answers
 - `summarize` - Summarize medical descriptions
-- `multimodal_detect_type` - Medical image type detection
+- `multimodal_detect_type` - Document/medical image routing classification
 - `multimodal_process_image` - Medical image processing
 - `multimodal_extract_document` - Azure Document Intelligence extraction
 
@@ -176,13 +175,20 @@ The cost tracking system allows calculating and storing the cost of AI operation
 - **Save on success**: Costs are saved only when the operation succeeds
 
 ### Supported Models
-- `gpt4o` - GPT-4 Omni (precio estándar)
-- `o3` - Modelo de razonamiento prolongado
-- `gpt5` - Multimodal (texto + imágenes)
-- `gpt5mini` - LLM rápido y económico
-- `gpt5nano` - LLM de muy bajo coste para detección/traducción ligeras
+- `gpt56terra` (`gpt-5.6-terra`) - Modelo multimodal principal para
+  diagnóstico y clasificación segura de imágenes
+- `gpt54mini` (`gpt-5.4-mini`) - Tareas auxiliares como intención,
+  anonimización, resumen e información de enfermedades
+- `gpt5` (`gpt-5`) - Modelo multimodal anterior, conservado para rutas
+  internas compatibles
+- `gpt5mini` (`gpt-5-mini`) - Modelo rápido y económico
+- `gpt5nano` (`gpt-5-nano`) - Detección y traducción ligeras
+- `gpt4o` - Ruta heredada de GPT-4 Omni
+- `o3` - Alias heredado; actualmente se resuelve a `gpt56terra`, no a un
+  deployment O3 independiente
 - `sonar` / `sonar-pro` / `sonar-reasoning-pro` - Perplexity con búsqueda web y citas
 
 Auxiliary services:
 - `translation_service` - Azure Translator (detection and translation)
-- `document_intelligence` - Azure Document Intelligence (Layout)
+- `document_intelligence` - Azure Document Intelligence (Layout), usado para
+  PDFs e imágenes exclusivamente documentales
