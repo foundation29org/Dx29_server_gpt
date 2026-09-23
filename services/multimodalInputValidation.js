@@ -4,6 +4,18 @@ const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 const MAX_TOTAL_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_DOCUMENT_FILES = 5;
 const MAX_IMAGE_FILES = 5;
+// Multer deja fieldSize en 1 MB si no se indica. `text` es el único campo
+// grande y hoy ya puede acercarse a ese tamaño; el tope sigue siendo el mismo.
+// Busboy rechaza el valor en cuanto lo alcanza, así que cabe 1 byte menos.
+const MAX_FIELD_SIZE_BYTES = 1024 * 1024;
+// text, lang, myuuid, timezone, model, iframeParams, y los que /analyze
+// parsea para rechazarlos (uploadId, assetIds, imageUrls). Por encima, el
+// defecto de Multer es Infinity.
+const MAX_NON_FILE_FIELDS = 12;
+// Busboy emite partsLimit al alcanzar el número, así que el tope queda uno
+// por encima del máximo válido: campos + documentos + imágenes.
+const MAX_MULTIPART_PARTS =
+  MAX_NON_FILE_FIELDS + MAX_DOCUMENT_FILES + MAX_IMAGE_FILES + 1;
 const SUPPORTED_DOCUMENT_TYPES = Object.freeze([
   'application/pdf',
   'application/msword',
@@ -229,7 +241,10 @@ function getSuccessfulSummary(summaryResult, statusCode) {
 
 module.exports = {
   MAX_DOCUMENT_FILES,
+  MAX_FIELD_SIZE_BYTES,
   MAX_IMAGE_FILES,
+  MAX_MULTIPART_PARTS,
+  MAX_NON_FILE_FIELDS,
   MAX_TOTAL_UPLOAD_BYTES,
   SUPPORTED_DOCUMENT_TYPES,
   SUPPORTED_IMAGE_TYPES,

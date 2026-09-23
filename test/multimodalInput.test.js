@@ -152,7 +152,12 @@ stubModule('../services/helpDiagnose', {
 });
 
 const { deleteUpload, processMultimodalInput } = require('../controllers/all/multimodalInput');
-const { validateUploadedFiles } = require('../services/multimodalInputValidation');
+const {
+  MAX_FIELD_SIZE_BYTES,
+  MAX_MULTIPART_PARTS,
+  MAX_NON_FILE_FIELDS,
+  validateUploadedFiles
+} = require('../services/multimodalInputValidation');
 
 const PNG = Buffer.from([
   0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
@@ -312,6 +317,68 @@ test('accepts the signatures of every supported file type', () => {
       [field]: [{ originalname, mimetype, buffer, size: buffer.length }]
     }), [], originalname);
   }
+});
+
+test('rejects a multipart body with more fields than the configured limit', async () => {
+  const fields = { ...validFields, text: 'Patient description' };
+  const extraFields = MAX_NON_FILE_FIELDS - Object.keys(fields).length + 1;
+  for (let index = 0; index < extraFields; index += 1) {
+    fields[`extra${index}`] = 'x';
+  }
+  const req = createMultipartRequest(fields);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'LIMIT_FIELD_COUNT');
+  assert.equal(state.diagnoseCalls.length, 0);
+});
+
+test('rejects a text field that reaches the 1 MB field size', async () => {
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'x'.repeat(MAX_FIELD_SIZE_BYTES)
+  });
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'LIMIT_FIELD_VALUE');
+  assert.equal(state.diagnoseCalls.length, 0);
+});
+
+test('accepts a text field one byte under the 1 MB field size', async () => {
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'x'.repeat(MAX_FIELD_SIZE_BYTES - 1)
+  });
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  // Pasa Multer (el tope de resumen es otro límite, más pequeño).
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.result, 'processing');
+  assert.equal(state.pubsubErrors[0].code, 'INPUT_TOO_LARGE');
+});
+
+test('rejects a multipart body that reaches the part limit', async () => {
+  const files = Array.from({ length: MAX_MULTIPART_PARTS }, () => ({
+    field: 'ignored',
+    name: '',
+    type: 'application/octet-stream',
+    content: 'x'
+  }));
+  const req = createMultipartRequest({}, files);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'LIMIT_PART_COUNT');
+  assert.equal(state.diagnoseCalls.length, 0);
 });
 
 test('rejects TIFF and BMP before they can reach the vision model', () => {

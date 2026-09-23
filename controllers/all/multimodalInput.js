@@ -11,7 +11,10 @@ const {
 } = require('../../services/aiUtils');
 const {
     MAX_DOCUMENT_FILES,
+    MAX_FIELD_SIZE_BYTES,
     MAX_IMAGE_FILES,
+    MAX_MULTIPART_PARTS,
+    MAX_NON_FILE_FIELDS,
     MAX_TOTAL_UPLOAD_BYTES,
     SUPPORTED_DOCUMENT_TYPES,
     SUPPORTED_IMAGE_TYPES,
@@ -47,7 +50,10 @@ const upload = multer({
     storage: createLimitedMemoryStorage(),
     limits: {
         // Tope por archivo; el total combinado lo impone LimitedMemoryStorage.
-        fileSize: MAX_TOTAL_UPLOAD_BYTES
+        fileSize: MAX_TOTAL_UPLOAD_BYTES,
+        fields: MAX_NON_FILE_FIELDS,
+        fieldSize: MAX_FIELD_SIZE_BYTES,
+        parts: MAX_MULTIPART_PARTS
     },
     fileFilter: function (req, file, cb) {
         const allowedTypes = [
