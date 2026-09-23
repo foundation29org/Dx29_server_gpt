@@ -30,9 +30,7 @@ const {
 // prebuilt-layout no acepta WEBP: intentar el OCR solo gasta un reintento.
 const OCR_SUPPORTED_IMAGE_TYPES = Object.freeze([
   'image/jpeg',
-  'image/png',
-  'image/tiff',
-  'image/bmp'
+  'image/png'
 ]);
 const UPLOAD_CONCURRENCY = 2;
 

@@ -58,7 +58,7 @@ const upload = multer({
         if (allowedTypes.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error(`Tipo de archivo no soportado. Tipos permitidos: PDF, Word, Excel, TXT, JPG, PNG, TIFF, BMP, WEBP`));
+            cb(new Error(`Tipo de archivo no soportado. Tipos permitidos: PDF, Word, Excel, TXT, JPG, PNG, WEBP`));
         }
     }
 });
@@ -281,6 +281,11 @@ const processMultimodalInput = async (req, res) => {
                 });
             }
 
+            // SWA corta el POST de la web a los ~45 s. Validado el multipart,
+            // se responde ya y el resultado (o el error) llega por Web PubSub,
+            // igual que el diagnóstico.
+            res.status(200).send({ result: 'processing', correlationId });
+
             let results = {
                 textInput: req.body.text || '',
                 documentAnalysis: null,
@@ -408,12 +413,13 @@ const processMultimodalInput = async (req, res) => {
                     ),
                     ...failedUpload.measurements
                 });
-                return res.status(400).json({
-                    result: 'error',
-                    error: 'No document could be processed',
-                    documents: publicDocuments,
-                    correlationId
-                });
+                await pubsubService.sendError(
+                    userId.toString(),
+                    new Error('No document could be processed'),
+                    'NO_DOCUMENT',
+                    { correlationId }
+                );
+                return undefined;
             }
 
             const mockReq = {
@@ -544,7 +550,7 @@ const processMultimodalInput = async (req, res) => {
                 ).length,
                 ...completedUpload.measurements
             });
-            res.status(200).send({
+            await pubsubService.sendPreprocessing(userId.toString(), {
                 result: 'processing',
                 description: description,
                 uploadId: results.uploadId,
@@ -621,20 +627,26 @@ const processMultimodalInput = async (req, res) => {
             }
         }
         
-        if (!res.headersSent) {
-            return res.status(statusCode).json({
-                result: 'error',
-                error: statusCode === 400
-                    ? error.message
-                    : 'Error procesando la entrada multimodal',
-                message: statusCode === 400
-                    ? error.message
-                    : 'Error procesando la entrada multimodal',
-                code: error.code,
-                correlationId
-            });
+        if (res.headersSent) {
+            await pubsubService.sendError(
+                String(req.body.myuuid),
+                error,
+                error.code || 'PROCESSING_ERROR',
+                { correlationId }
+            );
+            return undefined;
         }
-        return undefined;
+        return res.status(statusCode).json({
+            result: 'error',
+            error: statusCode === 400
+                ? error.message
+                : 'Error procesando la entrada multimodal',
+            message: statusCode === 400
+                ? error.message
+                : 'Error procesando la entrada multimodal',
+            code: error.code,
+            correlationId
+        });
     }
 };
 

@@ -35,6 +35,8 @@ const state = {
   imageClassificationError: null,
   documentContent: 'Extracted document content',
   documentPostCalls: 0,
+  preprocessingMessages: [],
+  pubsubErrors: [],
   documentPost: async () => ({
     status: '202',
     body: {}
@@ -94,7 +96,15 @@ stubModule('../services/email', { sendMailErrorGPTIP: async () => undefined });
 stubModule('../services/costTrackingService', {
   saveCostRecordBestEffort: async () => undefined
 });
-stubModule('../services/pubsubService', { sendProgress: async () => undefined });
+stubModule('../services/pubsubService', {
+  sendProgress: async () => undefined,
+  sendPreprocessing: async (userId, data) => {
+    state.preprocessingMessages.push({ userId, data });
+  },
+  sendError: async (userId, error, code) => {
+    state.pubsubErrors.push({ userId, message: error?.message, code });
+  }
+});
 stubModule('../services/aiUtils', {
   DEFAULT_AI_MODEL: 'gpt56terra',
   resolveDiagnoseModel: () => 'gpt56terra'
@@ -226,6 +236,21 @@ function createResponse() {
   };
 }
 
+// /medical/analyze responde "processing" nada más validar el multipart. El
+// resultado del preprocesado y cualquier error posterior van por Web PubSub.
+function published() {
+  return state.preprocessingMessages.at(-1)?.data;
+}
+
+function assertFailedOverSocket(res) {
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.responseCount, 1);
+  assert.equal(res.body.result, 'processing');
+  assert.equal(state.preprocessingMessages.length, 0);
+  assert.equal(state.pubsubErrors.length, 1);
+  assert.equal(state.pubsubErrors[0].userId, validFields.myuuid);
+}
+
 const validFields = {
   myuuid: '12345678-1234-1234-1234-123456789abc',
   lang: 'en',
@@ -256,6 +281,8 @@ test.beforeEach(() => {
     data: { summary: 'Valid summary' }
   });
   state.documentPost = async () => ({ status: '202', body: {} });
+  state.preprocessingMessages = [];
+  state.pubsubErrors = [];
 });
 
 test('accepts the signatures of every supported file type', () => {
@@ -270,8 +297,6 @@ test('accepts the signatures of every supported file type', () => {
     ['document', 'report.txt', 'text/plain', Buffer.from('Clinical text')],
     ['image', 'scan.jpg', 'image/jpeg', Buffer.from([0xFF, 0xD8, 0xFF])],
     ['image', 'scan.png', 'image/png', Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])],
-    ['image', 'scan.tiff', 'image/tiff', Buffer.from([0x49, 0x49, 0x2A, 0x00])],
-    ['image', 'scan.bmp', 'image/bmp', Buffer.from([0x42, 0x4D])],
     ['image', 'scan.webp', 'image/webp', Buffer.from('RIFF0000WEBP', 'ascii')]
   ];
 
@@ -279,6 +304,21 @@ test('accepts the signatures of every supported file type', () => {
     assert.deepEqual(validateUploadedFiles({
       [field]: [{ originalname, mimetype, buffer, size: buffer.length }]
     }), [], originalname);
+  }
+});
+
+test('rejects TIFF and BMP before they can reach the vision model', () => {
+  const samples = [
+    ['scan.tiff', 'image/tiff', Buffer.from([0x49, 0x49, 0x2A, 0x00])],
+    ['scan.bmp', 'image/bmp', Buffer.from([0x42, 0x4D])]
+  ];
+
+  for (const [originalname, mimetype, buffer] of samples) {
+    const errors = validateUploadedFiles({
+      image: [{ originalname, mimetype, buffer, size: buffer.length }]
+    });
+    assert.equal(errors.length, 1, originalname);
+    assert.equal(errors[0].reason, 'File type is not allowed in the image field');
   }
 });
 
@@ -342,9 +382,9 @@ test('never returns a storage URL or SAS to the client', async () => {
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.match(res.body.uploadId, UPLOAD_ID_PATTERN);
-  assert.deepEqual(res.body.images, [{
-    uploadId: res.body.uploadId,
+  assert.match(published().uploadId, UPLOAD_ID_PATTERN);
+  assert.deepEqual(published().images, [{
+    uploadId: published().uploadId,
     index: 0,
     name: 'scan.png',
     size: PNG.length,
@@ -352,8 +392,8 @@ test('never returns a storage URL or SAS to the client', async () => {
     routing: 'vision',
     diagnosticUse: true
   }]);
-  assert.equal(res.body.imageUrls, undefined);
-  assert.doesNotMatch(JSON.stringify(res.body), /https?:|sig=|blob\.core/);
+  assert.equal(published().imageUrls, undefined);
+  assert.doesNotMatch(JSON.stringify(published()), /https?:|sig=|blob\.core/);
 });
 
 test('classifies the image inline and stores its route in the same blob write', async () => {
@@ -378,12 +418,12 @@ test('classifies the image inline and stores its route in the same blob write', 
   assert.equal(state.classifiedImages.length, 1);
   assert.match(state.classifiedImages[0].url, /^data:image\/png;base64,/);
   assert.equal(state.imageUploads.length, 1);
-  assert.equal(state.imageUploads[0].options.uploadId, res.body.uploadId);
+  assert.equal(state.imageUploads[0].options.uploadId, published().uploadId);
   assert.equal(state.imageUploads[0].options.owner.tenantId, 'tenant-test');
   assert.equal(state.imageUploads[0].options.owner.myuuid, validFields.myuuid);
   assert.equal(state.imageUploads[0].options.metadata.routing, 'vision');
   assert.equal(state.imageUploads[0].options.metadata.classification, 'contains_medical_visual');
-  assert.equal(res.body.images[0].diagnosticUse, true);
+  assert.equal(published().images[0].diagnosticUse, true);
 });
 
 test('does not store document-only images: their text already lives in the description', async () => {
@@ -407,8 +447,8 @@ test('does not store document-only images: their text already lives in the descr
 
   assert.equal(res.statusCode, 200);
   assert.equal(state.imageUploads.length, 0);
-  assert.equal(res.body.uploadId, null);
-  assert.deepEqual(res.body.images, [{
+  assert.equal(published().uploadId, null);
+  assert.deepEqual(published().images, [{
     uploadId: null,
     index: null,
     name: 'lab-report.png',
@@ -460,8 +500,7 @@ test('fails the whole request when an image cannot be stored', async () => {
 
   await processMultimodalInput(req, res);
 
-  assert.equal(res.statusCode, 500);
-  assert.equal(res.responseCount, 1);
+  assertFailedOverSocket(res);
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
@@ -596,7 +635,7 @@ test('rejects files whose combined size exceeds 20 MB', async () => {
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
-test('returns one 400 response when every document fails and there is nothing else to diagnose', async () => {
+test('sends one socket error when every document fails and there is nothing else to diagnose', async () => {
   state.documentPost = async () => {
     const error = new Error('InvalidContent');
     error.code = 'InvalidContent';
@@ -613,10 +652,9 @@ test('returns one 400 response when every document fails and there is nothing el
 
   await processMultimodalInput(req, res);
 
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.responseCount, 1);
-  assert.equal(res.body.error, 'No document could be processed');
-  assert.equal(res.body.documents[0].status, 'failed');
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'NO_DOCUMENT');
+  assert.equal(state.pubsubErrors[0].message, 'No document could be processed');
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
@@ -653,8 +691,8 @@ test('continues to Diagnose when one document fails and another succeeds', async
   assert.equal(state.diagnoseCalls.length, 1);
   assert.match(state.diagnoseCalls[0].description, /good\.pdf/);
   assert.doesNotMatch(state.diagnoseCalls[0].description, /--- Documento 1: bad\.pdf ---/);
-  assert.equal(res.body.documents[0].status, 'failed');
-  assert.equal(res.body.documents[1].status, 'succeeded');
+  assert.equal(published().documents[0].status, 'failed');
+  assert.equal(published().documents[1].status, 'succeeded');
 });
 
 test('continues to Diagnose from patient text when the only document fails', async () => {
@@ -680,7 +718,7 @@ test('continues to Diagnose from patient text when the only document fails', asy
   assert.equal(res.statusCode, 200);
   assert.equal(state.diagnoseCalls.length, 1);
   assert.match(state.diagnoseCalls[0].description, /Patient with fever/);
-  assert.equal(res.body.documents[0].status, 'failed');
+  assert.equal(published().documents[0].status, 'failed');
 });
 
 test('does not continue to Diagnose when summarization returns an error', async () => {
@@ -696,8 +734,7 @@ test('does not continue to Diagnose when summarization returns an error', async 
 
   await processMultimodalInput(req, res);
 
-  assert.equal(res.statusCode, 500);
-  assert.equal(res.responseCount, 1);
+  assertFailedOverSocket(res);
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
@@ -712,8 +749,8 @@ test('passes valid parsed text to Diagnose and returns processing once', async (
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.responseCount, 1);
-  assert.equal(res.body.result, 'processing');
-  assert.equal(res.body.summarized, false);
+  assert.equal(published().result, 'processing');
+  assert.equal(published().summarized, false);
   assert.equal(state.diagnoseCalls.length, 1);
   assert.equal(
     state.diagnoseCalls[0].description,
@@ -738,14 +775,14 @@ test('keeps image-only input on the direct vision path to Diagnose', async () =>
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.responseCount, 1);
-  assert.equal(res.body.isImageOnly, true);
-  assert.equal(res.body.summarized, false);
+  assert.equal(published().isImageOnly, true);
+  assert.equal(published().summarized, false);
   assert.equal(state.diagnoseCalls.length, 1);
   assert.equal(state.documentPostCalls, 0);
-  assert.equal(state.diagnoseCalls[0].uploadId, res.body.uploadId);
+  assert.equal(state.diagnoseCalls[0].uploadId, published().uploadId);
   assert.equal(state.diagnoseCalls[0].imageUrls, undefined);
   assert.equal(state.diagnoseCalls[0].assetIds, undefined);
-  assert.equal(res.body.images[0].url, undefined);
+  assert.equal(published().images[0].url, undefined);
   assert.equal(
     state.diagnoseCalls[0].description,
     'Patient with medical imaging findings that require diagnostic interpretation'
@@ -775,9 +812,9 @@ test('converts a high-confidence document-only image to text without sending it 
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.images.length, 1);
-  assert.equal(res.body.imageRouting[0].route, 'ocr_text');
-  assert.equal(res.body.isImageOnly, false);
+  assert.equal(published().images.length, 1);
+  assert.equal(published().imageRouting[0].route, 'ocr_text');
+  assert.equal(published().isImageOnly, false);
   assert.equal(state.documentPostCalls, 1);
   // Sin imágenes para visión no hay subida ni referencia para Diagnose.
   assert.equal(state.imageUploads.length, 0);
@@ -811,8 +848,8 @@ test('adds OCR text while keeping a mixed medical image on direct vision', async
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.imageRouting[0].route, 'vision');
-  assert.equal(res.body.imageRouting[0].ocrTextUsed, true);
+  assert.equal(published().imageRouting[0].route, 'vision');
+  assert.equal(published().imageRouting[0].ocrTextUsed, true);
   assert.equal(state.documentPostCalls, 1);
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
   assert.match(
@@ -841,10 +878,10 @@ test('falls back to direct vision when image classification fails', async () => 
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.imageRouting[0].classification, 'unknown');
-  assert.equal(res.body.imageRouting[0].route, 'vision');
+  assert.equal(published().imageRouting[0].classification, 'unknown');
+  assert.equal(published().imageRouting[0].route, 'vision');
   assert.equal(
-    res.body.imageRouting[0].fallbackReason,
+    published().imageRouting[0].fallbackReason,
     'classification_failed'
   );
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
@@ -878,8 +915,8 @@ test('falls back to direct vision when OCR of a document image fails', async () 
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.imageRouting[0].route, 'vision');
-  assert.equal(res.body.imageRouting[0].fallbackReason, 'ocr_failed');
+  assert.equal(published().imageRouting[0].route, 'vision');
+  assert.equal(published().imageRouting[0].fallbackReason, 'ocr_failed');
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
 });
 
@@ -911,9 +948,9 @@ test('keeps a mixed image on vision when its additive OCR fails', async () => {
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.imageRouting[0].route, 'vision');
-  assert.equal(res.body.imageRouting[0].ocrTextUsed, false);
-  assert.equal(res.body.imageRouting[0].fallbackReason, 'ocr_failed');
+  assert.equal(published().imageRouting[0].route, 'vision');
+  assert.equal(published().imageRouting[0].ocrTextUsed, false);
+  assert.equal(published().imageRouting[0].fallbackReason, 'ocr_failed');
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
 });
 
@@ -940,10 +977,10 @@ test('keeps a mixed image on vision when its OCR text is too short', async () =>
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.imageRouting[0].route, 'vision');
-  assert.equal(res.body.imageRouting[0].ocrTextUsed, false);
+  assert.equal(published().imageRouting[0].route, 'vision');
+  assert.equal(published().imageRouting[0].ocrTextUsed, false);
   assert.equal(
-    res.body.imageRouting[0].fallbackReason,
+    published().imageRouting[0].fallbackReason,
     'ocr_text_too_short'
   );
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
@@ -984,7 +1021,7 @@ test('summarizes the combined patient text and document-image OCR over 1000 char
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.summarized, true);
+  assert.equal(published().summarized, true);
   assert.match(summarizedInput, /^x{100}/);
   assert.match(summarizedInput, /Laboratory findings/);
   assert.equal(
@@ -1028,7 +1065,7 @@ test('summarizes mixed-image OCR while retaining the original image', async () =
   await processMultimodalInput(req, res);
 
   assert.equal(res.statusCode, 200);
-  assert.equal(res.body.summarized, true);
+  assert.equal(published().summarized, true);
   assert.match(summarizedInput, /Mixed image report findings/);
   assert.match(
     state.diagnoseCalls[0].description,
@@ -1050,8 +1087,7 @@ test('does not report processing when Diagnose rejects the request', async () =>
 
   await processMultimodalInput(req, res);
 
-  assert.equal(res.statusCode, 500);
-  assert.equal(res.responseCount, 1);
+  assertFailedOverSocket(res);
   assert.equal(state.diagnoseCalls.length, 1);
 });
 

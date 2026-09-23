@@ -1,12 +1,58 @@
+const { isIP } = require('node:net');
 const rateLimit = require('express-rate-limit');
 const insights = require('../services/insights')
 
-// app.js usa trust proxy, así que req.ip ya es el cliente. El header crudo
-// lo puede rotar cualquiera y no debe servir como clave del límite.
+function getHeader(req, name) {
+    return req.headers[name.toLowerCase()];
+}
+
+// Una sola IP, sin puerto ni lista. ::ffff:1.2.3.4 se queda en 1.2.3.4.
+function singleIp(value) {
+    if (Array.isArray(value)) {
+        return value.length === 1 ? singleIp(value[0]) : null;
+    }
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const candidate = value.trim();
+    if (!candidate || candidate.includes(',')) {
+        return null;
+    }
+    if (isIP(candidate) === 0) {
+        return null;
+    }
+    const mapped = candidate.toLowerCase().startsWith('::ffff:')
+        ? candidate.slice('::ffff:'.length)
+        : '';
+    if (mapped && isIP(mapped) === 4) {
+        return mapped;
+    }
+    return candidate;
+}
+
+// Con trust proxy = 1, req.ip es el último salto (el front de App Service,
+// la misma IP para todo el mundo). La IP del visitante llega en X-Client-IP,
+// que APIM escribe pisando lo que mandara el cliente. Sin esa cabecera se usa
+// la primera IP válida de X-Forwarded-For: en este despliegue es el visitante,
+// porque los saltos de Azure y Cloudflare llevan puerto y no son una IP.
 function clientIp(req) {
-    return req.ip ||
-        req.connection?.remoteAddress ||
-        '127.0.0.1';
+    const fromGateway = singleIp(getHeader(req, 'x-client-ip'));
+    if (fromGateway) {
+        return fromGateway;
+    }
+
+    const forwarded = getHeader(req, 'x-forwarded-for');
+    if (typeof forwarded === 'string') {
+        for (const part of forwarded.split(',')) {
+            const ip = singleIp(part);
+            if (ip) {
+                return ip;
+            }
+        }
+    }
+
+    return singleIp(req.socket?.remoteAddress || req.connection?.remoteAddress) ||
+        'unknown';
 }
 
 // Rate limiter para DxGPT interno (mantiene configuración actual)
@@ -107,10 +153,6 @@ const smartLimiter = (req, res, next) => {
     }
 };
 
-function getHeader(req, name) {
-    return req.headers[name.toLowerCase()];
-}
-
 const healthLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, // 5 minutos
     max: 310, // límite por IP
@@ -137,10 +179,9 @@ const healthLimiter = rateLimit({
 
 
 
-module.exports = { 
-    clientIp,
-    needsLimiter, 
+module.exports = {
+    needsLimiter,
     healthLimiter,
-    smartLimiter, 
+    smartLimiter,
     externalLimiter
 };

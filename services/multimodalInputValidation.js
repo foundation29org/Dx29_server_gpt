@@ -12,11 +12,12 @@ const SUPPORTED_DOCUMENT_TYPES = Object.freeze([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'text/plain'
 ]);
+// TIFF y BMP no entran: los modelos de visión solo leen JPEG, PNG y WEBP.
+// Un TIFF de varias páginas tampoco se puede convertir a una sola imagen
+// sin perder hojas; el camino para un escáner es el PDF.
 const SUPPORTED_IMAGE_TYPES = Object.freeze([
   'image/jpeg',
   'image/png',
-  'image/tiff',
-  'image/bmp',
   'image/webp'
 ]);
 
@@ -25,9 +26,6 @@ const SIGNATURES = {
   ole: Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]),
   jpeg: Buffer.from([0xFF, 0xD8, 0xFF]),
   png: Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
-  tiffLittleEndian: Buffer.from([0x49, 0x49, 0x2A, 0x00]),
-  tiffBigEndian: Buffer.from([0x4D, 0x4D, 0x00, 0x2A]),
-  bmp: Buffer.from([0x42, 0x4D]),
   riff: Buffer.from([0x52, 0x49, 0x46, 0x46]),
   webp: Buffer.from([0x57, 0x45, 0x42, 0x50]),
   zipLocal: Buffer.from([0x50, 0x4B, 0x03, 0x04]),
@@ -117,11 +115,6 @@ function matchesDeclaredType(file) {
       return startsWith(buffer, SIGNATURES.jpeg);
     case 'image/png':
       return startsWith(buffer, SIGNATURES.png);
-    case 'image/tiff':
-      return startsWith(buffer, SIGNATURES.tiffLittleEndian) ||
-        startsWith(buffer, SIGNATURES.tiffBigEndian);
-    case 'image/bmp':
-      return startsWith(buffer, SIGNATURES.bmp);
     case 'image/webp':
       return startsWith(buffer, SIGNATURES.riff) &&
         startsWith(buffer, SIGNATURES.webp, 8);
@@ -146,10 +139,10 @@ function validateUploadedFiles(files = {}) {
   }
 
   for (const file of uploadedFiles) {
-    const belongsToField = file.fieldName === 'image'
-      ? file.mimetype.startsWith('image/')
-      : !file.mimetype.startsWith('image/');
-    if (!belongsToField) {
+    const allowedInField = file.fieldName === 'image'
+      ? SUPPORTED_IMAGE_TYPES.includes(file.mimetype)
+      : SUPPORTED_DOCUMENT_TYPES.includes(file.mimetype);
+    if (!allowedInField) {
       errors.push({
         field: `${file.fieldName}[${file.index}]`,
         filename: file.originalname,

@@ -40,6 +40,21 @@ class PubSubService {
     }
   }
 
+  // El preprocesado de /medical/analyze. No es el diagnóstico: el cliente
+  // mantiene el socket abierto y espera después el type 'result'.
+  async sendPreprocessing(userId, data) {
+    try {
+      await this.client.sendToUser(userId, {
+        type: 'preprocessing',
+        status: 'ready',
+        data,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error(`Error sending preprocessing to user ${userId}:`, error);
+    }
+  }
+
   // Enviar resultado final exitoso
   async sendResult(userId, result) {
     try {
@@ -56,13 +71,19 @@ class PubSubService {
   }
 
   // Enviar error al cliente
-  async sendError(userId, error, errorCode = null) {
+  async sendError(userId, error, errorCode = null, extra = {}) {
     try {
       await this.client.sendToUser(userId, {
         type: 'error',
         status: 'error',
         message: error.message || error,
         code: errorCode,
+        data: {
+          message: error.message || String(error || ''),
+          code: errorCode,
+          type: errorCode,
+          correlationId: extra.correlationId || ''
+        },
         timestamp: new Date().toISOString()
       });
     } catch (sendError) {
