@@ -88,6 +88,42 @@ function getHeader(req, name) {
 
 const PRODUCT_SUMMARY_MIN_CHARS = 1000;
 
+// No corta el análisis: solo avisa. Document Intelligence no tiene timeout y
+// el clasificador puede tardar ~6 min en el peor caso; sin datos reales de
+// duración no se puede fijar un límite sin provocar falsos fallos.
+const SLOW_ANALYSIS_ALERT_MS = 90000;
+
+function startSlowAnalysisWatch(context) {
+    const timer = setTimeout(() => {
+        const upload = getUploadObservability(context.files);
+        const elapsedMs = Date.now() - context.startedAt;
+        insights.trackEvent('MultimodalAnalysisSlow', {
+            correlationId: context.correlationId,
+            tenantId: context.tenantId || '',
+            subscriptionId: context.subscriptionId || '',
+            ...upload.properties
+        }, {
+            elapsedMs,
+            ...upload.measurements
+        });
+        Promise.resolve(serviceEmail.sendMailErrorGPTIP(
+            context.lang || 'en',
+            'Multimodal analysis still running after 90 s',
+            {
+                correlationId: context.correlationId,
+                elapsedMs,
+                ...upload.properties,
+                ...upload.measurements
+            },
+            context.tenantId,
+            context.subscriptionId
+        )).catch((error) => {
+            console.error('Error sending slow multimodal analysis email:', error);
+        });
+    }, SLOW_ANALYSIS_ALERT_MS);
+    return () => clearTimeout(timer);
+}
+
 const REJECTION_FIELD_BY_CODE = Object.freeze({
     INVALID_UPLOAD_OWNER: 'myuuid'
 });
@@ -238,6 +274,7 @@ const processMultimodalInput = async (req, res) => {
         header_language: req.headers['accept-language'],
         correlationId
     };
+    let stopSlowWatch = null;
     try {
         await parseMultipart(req, res);
 
@@ -285,6 +322,14 @@ const processMultimodalInput = async (req, res) => {
             // se responde ya y el resultado (o el error) llega por Web PubSub,
             // igual que el diagnóstico.
             res.status(200).send({ result: 'processing', correlationId });
+            stopSlowWatch = startSlowAnalysisWatch({
+                correlationId,
+                tenantId,
+                subscriptionId,
+                lang: req.body.lang,
+                files: req.files,
+                startedAt: requestStartedAt
+            });
 
             let results = {
                 textInput: req.body.text || '',
@@ -647,6 +692,8 @@ const processMultimodalInput = async (req, res) => {
             code: error.code,
             correlationId
         });
+    } finally {
+        stopSlowWatch?.();
     }
 };
 
