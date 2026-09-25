@@ -32,8 +32,9 @@ stubModule('../config', {
 stubModule('@azure-rest/ai-document-intelligence', {
   default: () => ({
     path: () => ({
-      post: async () => {
+      post: async (request) => {
         state.posts += 1;
+        state.lastBody = request?.body;
         if (typeof state.post === 'function') {
           return state.post();
         }
@@ -63,6 +64,7 @@ const {
 
 test.beforeEach(() => {
   state.posts = 0;
+  state.lastBody = null;
   state.isUnexpected = false;
   state.post = null;
   state.poll = null;
@@ -188,6 +190,55 @@ test('does not submit a second analysis when polling fails', async () => {
       error.attempts === 1
   );
   assert.equal(state.posts, 1);
+});
+
+test('converts a legacy .doc to PDF before Document Intelligence', async () => {
+  const pdf = Buffer.from('%PDF-1.7 converted');
+  const conversions = [];
+  const result = await extractDocument({
+    fileBuffer: Buffer.from([0xD0, 0xCF, 0x11, 0xE0]),
+    originalName: 'informe.doc',
+    mimeType: 'application/msword'
+  }, {
+    gotenbergUrl: 'http://gotenberg.test/',
+    fetchImpl: async (url, init) => {
+      conversions.push({ url, file: init.body.get('files') });
+      return new Response(pdf, { status: 200 });
+    }
+  });
+
+  assert.equal(result.status, 'succeeded');
+  assert.equal(conversions.length, 1);
+  assert.equal(conversions[0].url, 'http://gotenberg.test/forms/libreoffice/convert');
+  assert.equal(conversions[0].file.name, 'document.doc');
+  assert.deepEqual(state.lastBody, { base64Source: pdf.toString('base64') });
+});
+
+test('fails a legacy .doc without calling Document Intelligence when Gotenberg is missing', async () => {
+  await assert.rejects(
+    extractDocument({
+      fileBuffer: Buffer.from([0xD0, 0xCF, 0x11, 0xE0]),
+      originalName: 'informe.doc',
+      mimeType: 'application/msword'
+    }, { gotenbergUrl: '' }),
+    (error) => error.code === 'LEGACY_DOC_CONVERSION_UNAVAILABLE'
+  );
+  assert.equal(state.posts, 0);
+});
+
+test('fails a legacy .doc when Gotenberg cannot convert it', async () => {
+  await assert.rejects(
+    extractDocument({
+      fileBuffer: Buffer.from([0xD0, 0xCF, 0x11, 0xE0]),
+      originalName: 'informe.doc',
+      mimeType: 'application/msword'
+    }, {
+      gotenbergUrl: 'http://gotenberg.test',
+      fetchImpl: async () => new Response('bad file', { status: 400 })
+    }),
+    (error) => error.code === 'LEGACY_DOC_CONVERSION_FAILED' && error.statusCode === 400
+  );
+  assert.equal(state.posts, 0);
 });
 
 test('keeps original document order with limited concurrency', async () => {

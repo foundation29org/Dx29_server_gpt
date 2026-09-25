@@ -25,7 +25,9 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const {
   loadImageDataUrls,
   resolveDiagnosticImages,
-  validateUploadReferenceFields
+  validateCaseText,
+  validateUploadReferenceFields,
+  withImageContext
 } = require('./multimodalUploadService');
 
 const defaultModel = DEFAULT_AI_MODEL;
@@ -430,11 +432,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
       forwardTranslationDurationMs = 0;
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Azure Translator únicamente (sin LLM) — se cobra por carácter
-        translationChars += (data.description ? data.description.length : 0);
-        const fwdStart1 = Date.now();
-        englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
-        forwardTranslationDurationMs += (Date.now() - fwdStart1);
+        // Con imágenes la descripción puede venir vacía; el traductor la rechaza.
+        if (data.description?.trim()) {
+          // Azure Translator únicamente (sin LLM) — se cobra por carácter
+          translationChars += data.description.length;
+          const fwdStart1 = Date.now();
+          englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
+          forwardTranslationDurationMs += (Date.now() - fwdStart1);
+        }
         if (englishDiseasesList) {
           translationChars += (data.diseases_list ? data.diseases_list.length : 0);
           const fwdStart2 = Date.now();
@@ -1149,12 +1154,13 @@ ${medicalQuestionForModel}
 
     // 2. FASE ÚNICA: Obtener diagnósticos completos en una sola llamada
 
+    const promptDescription = withImageContext(englishDescription, data.imageUrls);
     let helpDiagnosePrompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
-        .replace("{{description}}", englishDescription)
+        .replace("{{description}}", promptDescription)
         .replace("{{previous_diagnoses}}", englishDiseasesList) :
       PROMPTS.diagnosis.withoutDiseases
-        .replace("{{description}}", englishDescription);
+        .replace("{{description}}", promptDescription);
     console.log('Calling IA for full diagnoses');
     let requestBody;
     if (model === 'gpt5nano') {
@@ -1362,7 +1368,8 @@ ${medicalQuestionForModel}
     let anonymizedDescription = '';
     let anonymizedDescriptionEnglish = '';
 
-    if (parsedResponse.length > 0) {
+    // Con imágenes la descripción puede venir vacía: no hay nada que anonimizar.
+    if (parsedResponse.length > 0 && englishDescription?.trim()) {
       const anonymStartMs = Date.now();
       anonymizedResult = await anonymizeText(englishDescription, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
       const anonymElapsedMs = Date.now() - anonymStartMs;
@@ -2012,15 +2019,7 @@ function validateDiagnoseRequest(data) {
     return errors;
   }
 
-  if (!data.description) {
-    errors.push({ field: 'description', reason: 'Field is required' });
-  } else if (typeof data.description !== 'string') {
-    errors.push({ field: 'description', reason: 'Must be a string' });
-  } else if (data.description.length < 10) {
-    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
-  } else if (data.description.length > 8000) {
-    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
-  }
+  validateCaseText(data.description, 'description', data, errors);
 
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });

@@ -1,5 +1,4 @@
 const multer = require('multer');
-const config = require('../../config');
 const summarizeCtrl = require('../../services/summarizeService');
 const insights = require('../../services/insights');
 const serviceEmail = require('../../services/email');
@@ -34,6 +33,7 @@ const {
     toPublicDocumentResult,
     mapWithConcurrency,
     isRetryableDocumentError,
+    LEGACY_WORD_MIME_TYPE,
     DEFAULT_CONCURRENCY
 } = require('../../services/documentIntelligenceService');
 const {
@@ -198,17 +198,38 @@ function trackMultimodalInputRejected({
     });
 }
 
+// Mide cuánto se usa el .doc antiguo para decidir si se deja de aceptar.
+function trackLegacyWordDocument(file, context, startedAt, error) {
+    if (file.mimetype !== LEGACY_WORD_MIME_TYPE) {
+        return;
+    }
+    insights.trackEvent('LegacyWordDocumentProcessed', {
+        correlationId: context.correlationId,
+        tenantId: context.tenantId || '',
+        subscriptionId: context.subscriptionId || '',
+        status: error ? 'failed' : 'succeeded',
+        errorCode: error?.code || ''
+    }, {
+        durationMs: Date.now() - startedAt,
+        uploadedBytes: file.size || 0
+    });
+}
+
 // Los documentos se procesan solo en memoria: nada los vuelve a leer después
 // de extraer su texto, así que no se guardan en blob.
 async function extractUploadedDocument(file, context) {
+    const startedAt = Date.now();
     try {
-        return await extractDocument({
+        const result = await extractDocument({
             fileBuffer: file.buffer,
             originalName: file.originalname,
             mimeType: file.mimetype,
             size: file.size
         });
+        trackLegacyWordDocument(file, context, startedAt);
+        return result;
     } catch (error) {
+        trackLegacyWordDocument(file, context, startedAt, error);
         insights.error({
             message: 'Document extraction failed',
             error: error.message,
@@ -348,7 +369,7 @@ const processMultimodalInput = async (req, res) => {
                 documents: []
             };
 
-            // Extraer documentos tradicionales (PDF, Word, Excel y TXT).
+            // Extraer documentos tradicionales (PDF, DOC, DOCX, XLSX y TXT).
             if (req.files && req.files.document) {
                 if (userId) {
                     await pubsubService.sendProgress(userId.toString(), 'extract_documents', 'Extracting documents...', 5);
@@ -487,26 +508,9 @@ const processMultimodalInput = async (req, res) => {
                 query: req.query
             };
 
+            // Con solo imágenes la descripción queda vacía: Diagnose la acepta
+            // porque llega con uploadId. El clasificador ve el texto real.
             let description = '';
-
-            let descriptionImage = '';
-            if(hasImage){
-                const translateText = require('../../services/translation');
-                const baseText = 'Patient with medical imaging findings that require diagnostic interpretation';
-                try {
-                    let endpoint =  {
-                        name: 'westeurope',
-                        url: 'https://api.cognitive.microsofttranslator.com',
-                        key: config.translationKey, // West Europe
-                        region: 'westeurope'
-                      };
-                    descriptionImage = await translateText.translateInvert(baseText, req.body.lang || 'en', endpoint);
-                } catch (error) {
-                    console.error('Error en translateInvert:', error);
-                    // Fallback al texto original si falla la traducción
-                    descriptionImage = baseText;
-                }
-            }
 
             if (hasPatient || hasDoc) {
                 const combinedInputLength = combinedInput.trim().length;
@@ -543,13 +547,6 @@ const processMultimodalInput = async (req, res) => {
                     // Si es corto, usar directamente el combinedInput
                     description = combinedInput;
                 }
-                
-                // Si también hay imagen, añadirla
-                if (hasImage) {
-                    description += '\n\n' + descriptionImage;
-                }
-            } else if (hasImage) {
-                description = descriptionImage;
             }
             
             const summarized = (hasPatient || hasDoc) && combinedInput.trim().length > PRODUCT_SUMMARY_MIN_CHARS;
@@ -570,7 +567,9 @@ const processMultimodalInput = async (req, res) => {
                 // Solo si queda alguna imagen para visión; /diagnose vuelve a
                 // filtrar por ruta al listar la subida.
                 uploadId: hasImage ? results.uploadId : undefined,
-                isImageOnly: isImageOnly
+                isImageOnly: isImageOnly,
+                forceDiagnosis: req.body.forceDiagnosis === true
+                    || req.body.forceDiagnosis === 'true'
             };
             await callDiagnoses(diagnoseData, requestInfo);
             const completedUpload = getUploadObservability(req.files);
@@ -733,7 +732,8 @@ async function callDiagnoses(data, requestInfo) {
             timezone: data.timezone || 'UTC',
             model: data.model || DEFAULT_AI_MODEL,
             iframeParams: data.iframeParams || {},
-            ...(data.uploadId ? { uploadId: data.uploadId } : {})
+            ...(data.uploadId ? { uploadId: data.uploadId } : {}),
+            ...(data.forceDiagnosis ? { forceDiagnosis: true } : {})
         },
         headers: requestInfo.headers,
         get: (header) => requestInfo.headers[header.toLowerCase()],

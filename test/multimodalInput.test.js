@@ -304,7 +304,6 @@ test('accepts the signatures of every supported file type', () => {
     ['document', 'report.pdf', 'application/pdf', Buffer.from('%PDF-1.7')],
     ['document', 'report.doc', 'application/msword', ole],
     ['document', 'report.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', Buffer.concat([zip, Buffer.from('word/document.xml')])],
-    ['document', 'report.xls', 'application/vnd.ms-excel', ole],
     ['document', 'report.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', Buffer.concat([zip, Buffer.from('xl/workbook.xml')])],
     ['document', 'report.txt', 'text/plain', Buffer.from('Clinical text')],
     ['image', 'scan.jpg', 'image/jpeg', Buffer.from([0xFF, 0xD8, 0xFF])],
@@ -379,6 +378,19 @@ test('rejects a multipart body that reaches the part limit', async () => {
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.code, 'LIMIT_PART_COUNT');
   assert.equal(state.diagnoseCalls.length, 0);
+});
+
+test('rejects legacy Excel: Document Intelligence cannot read it', () => {
+  const ole = Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+  const errors = validateUploadedFiles({
+    document: [{
+      originalname: 'report.xls',
+      mimetype: 'application/vnd.ms-excel',
+      buffer: ole,
+      size: ole.length
+    }]
+  });
+  assert.equal(errors.length, 1);
 });
 
 test('rejects TIFF and BMP before they can reach the vision model', () => {
@@ -732,6 +744,35 @@ test('sends one socket error when every document fails and there is nothing else
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
+test('tracks every legacy .doc so its usage can be measured', async () => {
+  const previousUrl = process.env.GOTENBERG_URL;
+  delete process.env.GOTENBERG_URL;
+  try {
+    const req = createMultipartRequest(validFields, [{
+      field: 'document',
+      name: 'informe.doc',
+      type: 'application/msword',
+      content: Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0x00])
+    }]);
+    const res = createResponse();
+
+    await processMultimodalInput(req, res);
+
+    const events = state.insightEvents.filter(
+      (event) => event.name === 'LegacyWordDocumentProcessed'
+    );
+    assert.equal(events.length, 1);
+    assert.equal(events[0].properties.status, 'failed');
+    assert.equal(events[0].properties.errorCode, 'LEGACY_DOC_CONVERSION_UNAVAILABLE');
+    assert.equal(state.documentPostCalls, 0);
+    assert.equal(state.pubsubErrors[0].code, 'NO_DOCUMENT');
+  } finally {
+    if (previousUrl !== undefined) {
+      process.env.GOTENBERG_URL = previousUrl;
+    }
+  }
+});
+
 test('continues to Diagnose when one document fails and another succeeds', async () => {
   state.documentPost = async (payload) => {
     const content = Buffer.from(payload?.body?.base64Source || '', 'base64').toString();
@@ -858,10 +899,9 @@ test('keeps image-only input on the direct vision path to Diagnose', async () =>
   assert.equal(state.diagnoseCalls[0].imageUrls, undefined);
   assert.equal(state.diagnoseCalls[0].assetIds, undefined);
   assert.equal(published().images[0].url, undefined);
-  assert.equal(
-    state.diagnoseCalls[0].description,
-    'Patient with medical imaging findings that require diagnostic interpretation'
-  );
+  // El analyze no inventa texto: Diagnose recibe la descripción vacía.
+  assert.equal(state.diagnoseCalls[0].description, '');
+  assert.equal(published().description, '');
 });
 
 test('converts a high-confidence document-only image to text without sending it to Terra', async () => {

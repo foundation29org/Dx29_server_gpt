@@ -6,6 +6,7 @@ const insights = require('./insights');
 const {
   loadImageDataUrls,
   resolveDiagnosticImages,
+  validateCaseText,
   validateUploadReferenceFields
 } = require('./multimodalUploadService');
 
@@ -60,15 +61,7 @@ function validateQuestionRequest(data) {
   
     // Validar medicalDescription para las preguntas adaptadas al caso
     if ([3, 4, 5, 6].includes(data.questionType)) {
-      if (!data.medicalDescription) {
-        errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3, 4, 5 or 6' });
-      } else if (typeof data.medicalDescription !== 'string') {
-        errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
-      } else if (data.medicalDescription.length < 10) {
-        errors.push({ field: 'medicalDescription', reason: 'Must be at least 10 characters' });
-      } else if (data.medicalDescription.length > 8000) {
-        errors.push({ field: 'medicalDescription', reason: 'Must not exceed 8000 characters' });
-      }
+      validateCaseText(data.medicalDescription, 'medicalDescription', data, errors);
     }
   
     // Verificar patrones sospechosos

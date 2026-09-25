@@ -2,7 +2,11 @@
 
 const crypto = require('node:crypto');
 const blobFiles = require('./blobFiles');
-const { MAX_IMAGE_FILES, UUID_PATTERN } = require('./multimodalInputValidation');
+const {
+  MAX_IMAGE_FILES,
+  MIN_TEXT_CHARS_WITHOUT_IMAGES,
+  UUID_PATTERN
+} = require('./multimodalInputValidation');
 
 // Una subida = un uploadId = una carpeta en el blob. El cliente solo guarda
 // el id; el servidor lista la carpeta con su propia credencial, lee la ruta
@@ -50,8 +54,28 @@ function normalizeOwner(context = {}) {
   return owner;
 }
 
+function hasUploadReference(data) {
+  return data?.uploadId !== undefined && data?.uploadId !== null && data?.uploadId !== '';
+}
+
+// Si la subida no existe o caducó, resolveDiagnosticImages responde
+// INVALID_UPLOAD_REFERENCE, así que relajar el mínimo aquí no deja pasar
+// texto corto sin imágenes.
+function validateCaseText(value, field, data, errors) {
+  const hasUpload = hasUploadReference(data);
+  if (value === undefined || value === null || (value === '' && !hasUpload)) {
+    errors.push({ field, reason: 'Field is required' });
+  } else if (typeof value !== 'string') {
+    errors.push({ field, reason: 'Must be a string' });
+  } else if (!hasUpload && value.length < MIN_TEXT_CHARS_WITHOUT_IMAGES) {
+    errors.push({ field, reason: `Must be at least ${MIN_TEXT_CHARS_WITHOUT_IMAGES} characters` });
+  } else if (value.length > 8000) {
+    errors.push({ field, reason: 'Must not exceed 8000 characters' });
+  }
+}
+
 function validateUploadReferenceFields(data, errors) {
-  if (data.uploadId !== undefined && data.uploadId !== null && data.uploadId !== '') {
+  if (hasUploadReference(data)) {
     if (!isValidUploadId(data.uploadId)) {
       errors.push({ field: 'uploadId', reason: 'Must be a valid upload UUID' });
     }
@@ -69,6 +93,19 @@ function validateUploadReferenceFields(data, errors) {
       });
     }
   }
+}
+
+// Solo para el prompt de diagnóstico, nunca para el clasificador. Con historia
+// e imágenes la frase no empeora (MedReaMM n=250); como único texto, junto a
+// imágenes sin historia, baja el R@1 de 35% a 27%.
+const IMAGE_CONTEXT_TEXT = 'Patient with medical imaging findings that require diagnostic interpretation';
+
+function withImageContext(text, images) {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (!Array.isArray(images) || images.length === 0 || trimmed.length < MIN_TEXT_CHARS_WITHOUT_IMAGES) {
+    return text;
+  }
+  return `${trimmed}\n\n${IMAGE_CONTEXT_TEXT}`;
 }
 
 // Los metadatos de blob solo admiten ASCII y claves tipo identificador.
@@ -242,5 +279,8 @@ module.exports = {
   storeClassifiedImage,
   toDataUrl,
   toPublicImage,
-  validateUploadReferenceFields
+  IMAGE_CONTEXT_TEXT,
+  validateCaseText,
+  validateUploadReferenceFields,
+  withImageContext
 };

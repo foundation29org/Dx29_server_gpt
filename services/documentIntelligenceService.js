@@ -6,7 +6,10 @@ const config = require('../config');
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_CONCURRENCY = 2;
 const MAX_RETRY_DELAY_MS = 8000;
+const LEGACY_WORD_MIME_TYPE = 'application/msword';
+const GOTENBERG_TIMEOUT_MS = 45000;
 const NON_RETRYABLE_CODES = new Set([
+  'LEGACY_DOC_CONVERSION_UNAVAILABLE',
   'InvalidContent',
   'InvalidRequest',
   'InvalidArgument',
@@ -276,6 +279,37 @@ async function analyzeWithDocumentIntelligence(source, options = {}) {
   };
 }
 
+// Document Intelligence no lee el Word antiguo (OLE). Gotenberg lo abre con
+// LibreOffice: son ficheros de usuarios anónimos, así que tiene que ser un
+// servicio interno y sin salida a internet.
+async function convertLegacyWordToPdf(fileBuffer, {
+  gotenbergUrl = process.env.GOTENBERG_URL,
+  fetchImpl = fetch
+} = {}) {
+  const baseUrl = String(gotenbergUrl || '').replace(/\/+$/, '');
+  if (!baseUrl) {
+    const error = new Error('Legacy .doc conversion is not configured');
+    error.code = 'LEGACY_DOC_CONVERSION_UNAVAILABLE';
+    throw error;
+  }
+
+  const form = new FormData();
+  // Gotenberg elige el conversor por la extensión; el nombre real no hace falta.
+  form.append('files', new Blob([fileBuffer], { type: LEGACY_WORD_MIME_TYPE }), 'document.doc');
+  const response = await fetchImpl(`${baseUrl}/forms/libreoffice/convert`, {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(GOTENBERG_TIMEOUT_MS)
+  });
+  if (!response.ok) {
+    const error = new Error(`Legacy .doc conversion failed (${response.status})`);
+    error.code = 'LEGACY_DOC_CONVERSION_FAILED';
+    error.statusCode = response.status;
+    throw error;
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
 async function extractDocument({
   fileBuffer,
   originalName,
@@ -298,7 +332,10 @@ async function extractDocument({
     };
   }
 
-  const analyzed = await analyzeWithDocumentIntelligence({ fileBuffer, blobUrl }, options);
+  const analyzeSource = mimeType === LEGACY_WORD_MIME_TYPE
+    ? { fileBuffer: await convertLegacyWordToPdf(fileBuffer, options) }
+    : { fileBuffer, blobUrl };
+  const analyzed = await analyzeWithDocumentIntelligence(analyzeSource, options);
   return {
     name: originalName,
     ...(Number.isFinite(size) ? { size } : {}),
@@ -320,6 +357,7 @@ module.exports = {
   mapWithConcurrency,
   isRetryableDocumentError,
   getRetryDelayMs,
+  LEGACY_WORD_MIME_TYPE,
   DEFAULT_CONCURRENCY,
   DEFAULT_MAX_ATTEMPTS
 };

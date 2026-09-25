@@ -36,16 +36,56 @@ stubModule('../services/blobFiles', {
 });
 
 const {
+  IMAGE_CONTEXT_TEXT,
   decodeImageMetadata,
   encodeImageMetadata,
   listUploadImages,
   loadImageDataUrls,
   resolveDiagnosticImages,
   storeClassifiedImage,
-  validateUploadReferenceFields
+  validateCaseText,
+  validateUploadReferenceFields,
+  withImageContext
 } = require('../services/multimodalUploadService');
 
 const UPLOAD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+function caseTextErrors(value, extra = {}) {
+  const errors = [];
+  validateCaseText(value, 'description', extra, errors);
+  return errors.map((error) => error.reason);
+}
+
+test('case text keeps the 10 character minimum without an upload', () => {
+  assert.deepEqual(caseTextErrors('fiebre'), ['Must be at least 10 characters']);
+  assert.deepEqual(caseTextErrors(''), ['Field is required']);
+  assert.deepEqual(caseTextErrors('fiebre alta'), []);
+  assert.deepEqual(caseTextErrors('x'.repeat(8001)), ['Must not exceed 8000 characters']);
+});
+
+test('image context is appended to a clinical history that comes with images', () => {
+  const images = [{ blobName: 'a.png' }];
+  assert.equal(withImageContext('fever and cough', images), `fever and cough\n\n${IMAGE_CONTEXT_TEXT}`);
+  assert.equal(withImageContext('fever and cough', []), 'fever and cough');
+  assert.equal(withImageContext('fever and cough', undefined), 'fever and cough');
+});
+
+test('image context is not added to empty or short text', () => {
+  const images = [{ blobName: 'a.png' }];
+  assert.equal(withImageContext('', images), '');
+  assert.equal(withImageContext('   ', images), '   ');
+  assert.equal(withImageContext('fiebre', images), 'fiebre');
+});
+
+test('case text may be short or empty when it comes with an upload', () => {
+  const withUpload = { uploadId: UPLOAD_ID };
+  assert.deepEqual(caseTextErrors('fiebre', withUpload), []);
+  assert.deepEqual(caseTextErrors('', withUpload), []);
+  assert.deepEqual(caseTextErrors(undefined, withUpload), ['Field is required']);
+  assert.deepEqual(caseTextErrors(42, withUpload), ['Must be a string']);
+  assert.deepEqual(caseTextErrors('x'.repeat(8001), withUpload), ['Must not exceed 8000 characters']);
+});
+
 const owner = {
   myuuid: '12345678-1234-1234-1234-123456789abc',
   tenantId: 'tenant-test'

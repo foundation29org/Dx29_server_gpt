@@ -4,6 +4,9 @@ const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 const MAX_TOTAL_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_DOCUMENT_FILES = 5;
 const MAX_IMAGE_FILES = 5;
+// Sin imágenes, un texto más corto no es un caso clínico. Con imágenes de
+// visión el texto puede ser corto o estar vacío: la evidencia es la imagen.
+const MIN_TEXT_CHARS_WITHOUT_IMAGES = 10;
 // Multer deja fieldSize en 1 MB si no se indica. `text` es el único campo
 // grande y hoy ya puede acercarse a ese tamaño; el tope sigue siendo el mismo.
 // Busboy rechaza el valor en cuanto lo alcanza, así que cabe 1 byte menos.
@@ -20,7 +23,6 @@ const SUPPORTED_DOCUMENT_TYPES = Object.freeze([
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'text/plain'
 ]);
@@ -115,7 +117,6 @@ function matchesDeclaredType(file) {
     case 'application/pdf':
       return hasSignatureWithin(buffer, SIGNATURES.pdf, 1024);
     case 'application/msword':
-    case 'application/vnd.ms-excel':
       return startsWith(buffer, SIGNATURES.ole);
     case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
       return hasZipSignature(buffer) && containsAscii(buffer, 'word/');
@@ -246,6 +247,7 @@ module.exports = {
   MAX_MULTIPART_PARTS,
   MAX_NON_FILE_FIELDS,
   MAX_TOTAL_UPLOAD_BYTES,
+  MIN_TEXT_CHARS_WITHOUT_IMAGES,
   SUPPORTED_DOCUMENT_TYPES,
   SUPPORTED_IMAGE_TYPES,
   UUID_PATTERN,
