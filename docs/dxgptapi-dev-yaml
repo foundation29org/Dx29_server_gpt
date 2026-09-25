@@ -1222,10 +1222,124 @@
                     }
                 }
             }
+        },
+        "/speech/transcribe": {
+            "post": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Transcribe dictated audio to text",
+                "description": "Transcribes one microphone recording to text. The spoken language is detected automatically and the transcript is returned in that language.\n\nPass `language` (ISO 639-1, two letters, typically the interface language) as a hint. It steers detection on short or unclear clips. Audio spoken in a different language is still transcribed as spoken; the hint does not translate.\n\nThe audio is clinical data. It is forwarded to gpt-4o-transcribe in the EU Data Zone, kept in memory only for the request, and is not stored.\n\n**File limits:**\n- Exactly one file, form field `audio`\n- Maximum 10 MB\n- Formats: WebM, Ogg, MP4, M4A, MP3, WAV\n\nAn empty `text` means no speech was detected.",
+                "operationId": "post-speech-transcribe",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "description": "Tenant identifier for multi-tenant data segmentation. Required for SaaS/hospital clients, optional for marketplace clients.\n",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "audio"
+                                ],
+                                "properties": {
+                                    "audio": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "Audio recording. WebM, Ogg, MP4, M4A, MP3 or WAV, up to 10 MB."
+                                    },
+                                    "language": {
+                                        "type": "string",
+                                        "pattern": "^[a-z]{2}$",
+                                        "description": "Optional ISO 639-1 hint for language detection, for example `es` or `en`. Any other value is ignored.",
+                                        "example": "es"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Transcript. `text` is empty when no speech was detected.",
+                        "headers": {
+                            "Cache-Control": {
+                                "schema": {
+                                    "type": "string",
+                                    "example": "no-store"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {
+                                            "type": "string",
+                                            "description": "Transcript in the spoken language, or an empty string."
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "text": "Hola, a ver si funciona la transcripción."
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing audio or a malformed multipart body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SpeechError"
+                                },
+                                "example": {
+                                    "message": "Missing audio"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key"
+                    },
+                    "413": {
+                        "description": "Audio larger than 10 MB"
+                    },
+                    "415": {
+                        "description": "Unsupported audio format"
+                    },
+                    "429": {
+                        "description": "Too many requests"
+                    },
+                    "502": {
+                        "description": "The transcription service failed"
+                    },
+                    "503": {
+                        "description": "Transcription service not configured"
+                    }
+                }
+            }
         }
     },
     "components": {
         "schemas": {
+            "SpeechError": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    }
+                }
+            },
             "UploadId": {
                 "type": "string",
                 "format": "uuid",
