@@ -150,20 +150,11 @@ test('stores the routing decision without the original filename', () => {
   }
   assert.equal(metadata.originalname, undefined);
   const decoded = decodeImageMetadata(metadata);
-  assert.equal(decoded.originalName, '');
   assert.equal(decoded.routing, 'ocr_text');
   assert.equal(decoded.classification.classification, 'document_only');
   assert.equal(decoded.classification.confidence, 0.98);
   assert.equal(decoded.classification.hasDocumentText, true);
   assert.equal(decoded.classification.hasMedicalVisual, false);
-});
-
-test('still reads a filename left by an older upload', () => {
-  const decoded = decodeImageMetadata({
-    originalname: encodeURIComponent('Captura de pantalla · análisis.png'),
-    routing: 'vision'
-  });
-  assert.equal(decoded.originalName, 'Captura de pantalla · análisis.png');
 });
 
 test('unknown or missing metadata falls open to vision', () => {

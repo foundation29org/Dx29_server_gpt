@@ -44,7 +44,9 @@ const SIGNATURES = {
   webp: Buffer.from([0x57, 0x45, 0x42, 0x50]),
   zipLocal: Buffer.from([0x50, 0x4B, 0x03, 0x04]),
   zipEmpty: Buffer.from([0x50, 0x4B, 0x05, 0x06]),
-  zipSpanned: Buffer.from([0x50, 0x4B, 0x07, 0x08])
+  zipSpanned: Buffer.from([0x50, 0x4B, 0x07, 0x08]),
+  utf16le: Buffer.from([0xFF, 0xFE]),
+  utf16be: Buffer.from([0xFE, 0xFF])
 };
 
 function hasUploadedFiles(files, fieldName) {
@@ -85,30 +87,54 @@ function containsAscii(buffer, text) {
   return buffer.includes(Buffer.from(text, 'ascii'));
 }
 
-function isValidText(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length === 0 || buffer.includes(0x00)) {
-    return false;
+function decodeTextBytes(buffer) {
+  if (startsWith(buffer, SIGNATURES.utf16le)) {
+    return new TextDecoder('utf-16le').decode(buffer);
   }
-
+  if (startsWith(buffer, SIGNATURES.utf16be)) {
+    return new TextDecoder('utf-16be').decode(buffer);
+  }
+  if (buffer.includes(0x00)) {
+    return null;
+  }
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
   } catch {
-    return false;
+    // ANSI del Bloc de notas antiguo y de exportaciones de programas viejos.
+    return new TextDecoder('windows-1252').decode(buffer);
+  }
+}
+
+// Windows-1252 acepta casi cualquier byte, así que lo que separa un TXT de un
+// binario renombrado son los caracteres de control (C0 y C1) del resultado.
+function decodeText(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return null;
+  }
+  const text = decodeTextBytes(buffer);
+  if (text === null) {
+    return null;
   }
 
-  let disallowedControlBytes = 0;
-  for (const byte of buffer) {
-    if (
-      byte < 0x20 &&
-      byte !== 0x09 &&
-      byte !== 0x0A &&
-      byte !== 0x0C &&
-      byte !== 0x0D
-    ) {
-      disallowedControlBytes += 1;
+  let disallowedControlChars = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    const isC0 = code < 0x20 &&
+      code !== 0x09 &&
+      code !== 0x0A &&
+      code !== 0x0C &&
+      code !== 0x0D;
+    if (isC0 || (code >= 0x80 && code <= 0x9F)) {
+      disallowedControlChars += 1;
     }
   }
-  return disallowedControlBytes <= Math.max(4, Math.floor(buffer.length * 0.01));
+  return disallowedControlChars <= Math.max(4, Math.floor(text.length * 0.01))
+    ? text
+    : null;
+}
+
+function isValidText(buffer) {
+  return decodeText(buffer) !== null;
 }
 
 function matchesDeclaredType(file) {
@@ -216,7 +242,31 @@ function validateParsedMultimodalInput(body = {}, files = {}) {
     });
   }
 
+  if (body.iframeParams !== undefined && parseIframeParams(body.iframeParams) === null) {
+    errors.push({
+      field: 'iframeParams',
+      reason: 'Must be a JSON object'
+    });
+  }
+
   return errors;
+}
+
+// En multipart todos los campos llegan como texto; /diagnose exige un objeto.
+// Devuelve null si no es un objeto JSON. El contenido lo valida /diagnose.
+function parseIframeParams(value) {
+  if (value === undefined || value === '') {
+    return {};
+  }
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
 }
 
 function getSuccessfulSummary(summaryResult, statusCode) {
@@ -251,7 +301,9 @@ module.exports = {
   SUPPORTED_DOCUMENT_TYPES,
   SUPPORTED_IMAGE_TYPES,
   UUID_PATTERN,
+  decodeText,
   getSuccessfulSummary,
+  parseIframeParams,
   validateParsedMultimodalInput,
   validateUploadedFiles
 };

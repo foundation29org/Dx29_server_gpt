@@ -691,6 +691,22 @@ test('rejects binary content disguised as a TXT document', async () => {
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
+test('accepts TXT in ANSI and UTF-16 but not binary without NUL bytes', () => {
+  const text = 'Niño de 8 años con fiebre';
+  const validate = (buffer) => validateUploadedFiles({
+    document: [{ originalname: 'notes.txt', mimetype: 'text/plain', buffer, size: buffer.length }]
+  });
+
+  assert.deepEqual(validate(Buffer.from(text, 'latin1')), []);
+  assert.deepEqual(validate(Buffer.concat([
+    Buffer.from([0xFF, 0xFE]),
+    Buffer.from(text, 'utf16le')
+  ])), []);
+
+  const binary = Buffer.from(Array.from({ length: 64 }, (_, index) => 0x81 + (index % 16)));
+  assert.equal(validate(binary).length, 1);
+});
+
 test('rejects files whose combined size exceeds 20 MB', async () => {
   const createJpeg = (size) => {
     const content = Buffer.alloc(size);
@@ -873,6 +889,56 @@ test('passes valid parsed text to Diagnose and returns processing once', async (
     'Patient with fever and a persistent cough'
   );
   assert.equal(state.diagnoseCalls[0].model, 'gpt56terra');
+});
+
+test('passes iframeParams sent as a multipart JSON string to Diagnose as an object', async () => {
+  const req = createMultipartRequest({
+    ...validFields,
+    text: 'Patient with fever and a persistent cough',
+    iframeParams: JSON.stringify({ centro: 'H1', ambito: 'urgencias' })
+  });
+
+  await processMultimodalInput(req, createResponse());
+
+  assert.deepEqual(state.diagnoseCalls[0].iframeParams, { centro: 'H1', ambito: 'urgencias' });
+});
+
+test('rejects iframeParams that are not a JSON object before any processing', async () => {
+  for (const iframeParams of ['{not json', '["centro"]', '42']) {
+    const res = createResponse();
+    await processMultimodalInput(createMultipartRequest({
+      ...validFields,
+      text: 'Patient with fever and a persistent cough',
+      iframeParams
+    }), res);
+
+    assert.equal(res.statusCode, 400, iframeParams);
+    assert.deepEqual(res.body.details, [{ field: 'iframeParams', reason: 'Must be a JSON object' }]);
+  }
+  assert.equal(state.diagnoseCalls.length, 0);
+});
+
+test('tells the client when Diagnose queued the request: the result will not arrive over the socket', async () => {
+  const queueInfo = { ticketId: validFields.myuuid, position: 3, estimatedWaitTime: 2 };
+  state.diagnose = async (req, res) => res.status(200).send({ result: 'queued', queueInfo });
+
+  await processMultimodalInput(createMultipartRequest({
+    ...validFields,
+    text: 'Patient with fever and a persistent cough'
+  }), createResponse());
+
+  assert.equal(published().isQueued, true);
+  assert.deepEqual(published().queueInfo, queueInfo);
+});
+
+test('does not mark a normal request as queued', async () => {
+  await processMultimodalInput(createMultipartRequest({
+    ...validFields,
+    text: 'Patient with fever and a persistent cough'
+  }), createResponse());
+
+  assert.equal(published().isQueued, undefined);
+  assert.equal(published().queueInfo, undefined);
 });
 
 test('keeps image-only input on the direct vision path to Diagnose', async () => {

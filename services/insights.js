@@ -17,7 +17,7 @@ function error(message, properties = {}) {
     } else if (typeof message === 'object' && message !== null) {
       // No serializar el objeto entero: arrastra cuerpos de petición,
       // cabeceras y trazas al texto de la excepción.
-      const summary = [message.message, message.error]
+      const summary = [message.message, message.error, message.error?.message]
         .filter((value) => typeof value === 'string' && value.trim());
       stringException = [...new Set(summary)].join(' | ') ||
         'Unhandled error';
@@ -40,7 +40,10 @@ function error(message, properties = {}) {
         'code',
         'statusCode',
         'mimeType',
-        'retryable'
+        'retryable',
+        'operation',
+        'model',
+        'type'
       ];
       safeFields.forEach((field) => {
         if (message[field] !== undefined && message[field] !== null) {

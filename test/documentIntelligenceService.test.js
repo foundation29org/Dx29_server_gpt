@@ -91,6 +91,26 @@ test('reads TXT locally without calling Document Intelligence', async () => {
   assert.equal(state.posts, 0);
 });
 
+test('reads TXT saved as ANSI or UTF-16 with the right characters', async () => {
+  const text = 'Niño de 8 años con fiebre';
+  const samples = [
+    ['utf8-bom', Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(text, 'utf8')])],
+    ['ansi', Buffer.from(text, 'latin1')],
+    ['utf16le', Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(text, 'utf16le')])],
+    ['utf16be', Buffer.concat([Buffer.from([0xFE, 0xFF]), Buffer.from(text, 'utf16le').swap16()])]
+  ];
+
+  for (const [label, fileBuffer] of samples) {
+    const result = await extractDocument({
+      fileBuffer,
+      originalName: 'notes.txt',
+      mimeType: 'text/plain'
+    });
+    assert.equal(result.content, text, label);
+  }
+  assert.equal(state.posts, 0);
+});
+
 test('does not retry corrupt or invalid document content', async () => {
   state.post = async () => {
     const error = new Error('InvalidContent');

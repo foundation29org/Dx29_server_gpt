@@ -19,6 +19,7 @@ const {
     SUPPORTED_IMAGE_TYPES,
     UUID_PATTERN,
     getSuccessfulSummary,
+    parseIframeParams,
     validateParsedMultimodalInput,
     validateUploadedFiles
 } = require('../../services/multimodalInputValidation');
@@ -344,6 +345,7 @@ const processMultimodalInput = async (req, res) => {
                     correlationId
                 });
             }
+            req.body.iframeParams = parseIframeParams(req.body.iframeParams);
 
             // SWA corta el POST de la web a los ~45 s. Validado el multipart,
             // se responde ya y el resultado (o el error) llega por Web PubSub,
@@ -571,7 +573,7 @@ const processMultimodalInput = async (req, res) => {
                 forceDiagnosis: req.body.forceDiagnosis === true
                     || req.body.forceDiagnosis === 'true'
             };
-            await callDiagnoses(diagnoseData, requestInfo);
+            const diagnoseResult = await callDiagnoses(diagnoseData, requestInfo);
             const completedUpload = getUploadObservability(req.files);
             insights.trackEvent('MultimodalAnalysisCompleted', {
                 correlationId,
@@ -620,7 +622,12 @@ const processMultimodalInput = async (req, res) => {
                 isImageOnly: isImageOnly,
                 summarized: summarized,
                 model: model,
-                correlationId
+                correlationId,
+                // Con cola, el resultado no llega por PubSub: el cliente
+                // consulta el ticket, igual que en /diagnose.
+                ...(diagnoseResult?.result === 'queued'
+                    ? { isQueued: true, queueInfo: diagnoseResult.queueInfo }
+                    : {})
             });
     } catch (error) {
         console.error('Error en processMultimodalInput:', {

@@ -15,12 +15,22 @@ function getContainerClient() {
     return blobServiceClient.getContainerClient(containerName);
 }
 
+// Una vez por proceso; si falla, el siguiente upload lo reintenta.
+let containerReady = null;
+function ensureContainer(containerClient) {
+    if (!containerReady) {
+        containerReady = containerClient.createIfNotExists().catch((error) => {
+            containerReady = null;
+            throw error;
+        });
+    }
+    return containerReady;
+}
+
 async function createBlob(blobName, data, contentType, metadata) {
     try {
         const containerClient = getContainerClient();
-        
-        // Crear el contenedor si no existe
-        await containerClient.createIfNotExists();
+        await ensureContainer(containerClient);
         
         const blockBlobClient = containerClient.getBlockBlobClient(blobName);
         
@@ -40,8 +50,8 @@ function safePathSegment(value) {
     return String(value).trim().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-// El prefijo del propietario sale de las cabeceras autenticadas, nunca del
-// body: es lo que impide que un cliente liste o lea ficheros de otro tenant.
+// El tenant llega en X-Tenant-Id, que elige el cliente; no es un secreto.
+// Lo que aísla una subida es el uploadId (UUID v4) junto con el myuuid.
 function getOwnerPrefix({ tenantId, subscriptionId } = {}) {
     if (tenantId) {
         return `tenants/${safePathSegment(tenantId)}/`;

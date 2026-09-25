@@ -2,6 +2,7 @@
 
 const { default: createDocumentIntelligenceClient, getLongRunningPoller, isUnexpected } = require('@azure-rest/ai-document-intelligence');
 const config = require('../config');
+const { decodeText } = require('./multimodalInputValidation');
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_CONCURRENCY = 2;
@@ -323,7 +324,9 @@ async function extractDocument({
       ...(Number.isFinite(size) ? { size } : {}),
       status: 'succeeded',
       method: 'txt',
-      content: Buffer.isBuffer(fileBuffer) ? fileBuffer.toString('utf-8') : String(fileBuffer || ''),
+      content: Buffer.isBuffer(fileBuffer)
+        ? (decodeText(fileBuffer) ?? fileBuffer.toString('utf-8'))
+        : String(fileBuffer || ''),
       pages: 0,
       durationMs: 0,
       attempts: 1,

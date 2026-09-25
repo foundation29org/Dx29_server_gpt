@@ -122,16 +122,9 @@ function encodeImageMetadata({ routing, classification }) {
 }
 
 function decodeImageMetadata(metadata = {}) {
-  let originalName = '';
-  try {
-    originalName = decodeURIComponent(metadata.originalname || '');
-  } catch {
-    originalName = metadata.originalname || '';
-  }
   const routing = IMAGE_ROUTES.includes(metadata.routing) ? metadata.routing : 'vision';
   const confidence = Number(metadata.confidence);
   return {
-    originalName,
     routing,
     classification: {
       classification: metadata.classification || 'unknown',
@@ -149,7 +142,7 @@ function toImageRecord(uploadId, index, blob) {
     uploadId,
     index,
     blobName: blob.blobName,
-    name: decoded.originalName || blob.blobName.split('/').pop(),
+    name: blob.blobName.split('/').pop(),
     size: blob.size,
     mimeType: blob.mimeType,
     routing: decoded.routing,
