@@ -92,7 +92,8 @@ stubModule('../services/blobFiles', {
 });
 stubModule('../services/insights', {
   error: () => undefined,
-  trackEvent: (name, properties) => state.insightEvents.push({ name, properties })
+  trackEvent: (name, properties, measurements) =>
+    state.insightEvents.push({ name, properties, measurements })
 });
 stubModule('../services/email', {
   sendMailErrorGPTIP: async (lang, subject, info) => {
@@ -130,6 +131,11 @@ stubModule('../services/multimodalImageClassifierService', {
     hasMedicalVisual: false,
     error: error.message
   }),
+  isNotMedicalImage: (classification) =>
+    classification.classification === 'not_medical' &&
+    classification.hasDocumentText === false &&
+    classification.hasMedicalVisual === false &&
+    classification.confidence >= 0.9,
   shouldExtractDocumentText: (classification) =>
     classification.classification === 'document_only' &&
     classification.hasDocumentText === true &&
@@ -1001,6 +1007,66 @@ test('converts a high-confidence document-only image to text without sending it 
   assert.equal(state.imageUploads.length, 0);
   assert.equal(state.diagnoseCalls[0].uploadId, undefined);
   assert.match(state.diagnoseCalls[0].description, /Potassium 6\.1 mmol\/L/);
+});
+
+const NOT_MEDICAL = {
+  classification: 'not_medical',
+  confidence: 0.97,
+  hasDocumentText: false,
+  hasMedicalVisual: false,
+  evidence: ['company logo']
+};
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+  0x66, 0x61, 0x6B, 0x65
+]);
+
+test('stops before Diagnose when the only upload is a non-medical image', async () => {
+  state.imageClassification = NOT_MEDICAL;
+  const res = createResponse();
+
+  await processMultimodalInput(createMultipartRequest(validFields, [{
+    field: 'image', name: 'logo.png', type: 'image/png', content: PNG_BYTES
+  }]), res);
+
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'NO_MEDICAL_IMAGE');
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.equal(state.imageUploads.length, 0);
+  assert.equal(state.documentPostCalls, 0);
+  const failed = state.insightEvents.find((event) => event.name === 'MultimodalAnalysisFailed');
+  assert.equal(failed.properties.phase, 'classify_images');
+  assert.equal(failed.measurements.notMedicalImages, 1);
+});
+
+test('diagnoses from the text and drops a non-medical image uploaded with it', async () => {
+  state.imageClassification = NOT_MEDICAL;
+
+  await processMultimodalInput(createMultipartRequest({
+    ...validFields,
+    text: 'Patient with fever and a persistent cough'
+  }, [{
+    field: 'image', name: 'logo.png', type: 'image/png', content: PNG_BYTES
+  }]), createResponse());
+
+  assert.equal(state.diagnoseCalls.length, 1);
+  assert.equal(state.diagnoseCalls[0].uploadId, undefined);
+  assert.equal(state.imageUploads.length, 0);
+  assert.equal(published().uploadId, null);
+  assert.equal(published().imageRouting[0].route, 'not_medical');
+  assert.equal(published().images[0].diagnosticUse, false);
+});
+
+test('keeps a low-confidence non-medical image on direct vision', async () => {
+  state.imageClassification = { ...NOT_MEDICAL, confidence: 0.6 };
+
+  await processMultimodalInput(createMultipartRequest(validFields, [{
+    field: 'image', name: 'photo.png', type: 'image/png', content: PNG_BYTES
+  }]), createResponse());
+
+  assert.equal(state.diagnoseCalls.length, 1);
+  assert.equal(published().imageRouting[0].route, 'vision');
+  assert.equal(state.imageUploads.length, 1);
 });
 
 test('adds OCR text while keeping a mixed medical image on direct vision', async () => {

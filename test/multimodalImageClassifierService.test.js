@@ -26,10 +26,65 @@ delete require.cache[
 const {
   CLASSIFICATIONS,
   classifyImage,
+  isNotMedicalImage,
   normalizeClassification,
   shouldExtractDocumentText,
   shouldExtractMixedDocumentText
 } = require('../services/multimodalImageClassifierService');
+
+test('discards a high-confidence non-medical image', () => {
+  const result = normalizeClassification({
+    classification: CLASSIFICATIONS.NOT_MEDICAL,
+    confidence: 0.97,
+    has_document_text: false,
+    has_medical_visual: false,
+    evidence: ['company logo']
+  });
+
+  assert.equal(isNotMedicalImage(result), true);
+  assert.equal(shouldExtractDocumentText(result), false);
+});
+
+test('keeps a low-confidence non-medical image for vision', () => {
+  const result = normalizeClassification({
+    classification: CLASSIFICATIONS.NOT_MEDICAL,
+    confidence: 0.89,
+    has_document_text: false,
+    has_medical_visual: false,
+    evidence: []
+  });
+
+  assert.equal(isNotMedicalImage(result), false);
+});
+
+test('downgrades a non-medical label that also reports medical content to unknown', () => {
+  for (const flags of [
+    { has_document_text: false, has_medical_visual: true },
+    { has_document_text: true, has_medical_visual: false }
+  ]) {
+    const result = normalizeClassification({
+      classification: CLASSIFICATIONS.NOT_MEDICAL,
+      confidence: 0.99,
+      ...flags,
+      evidence: []
+    });
+
+    assert.equal(result.classification, CLASSIFICATIONS.UNKNOWN);
+    assert.equal(isNotMedicalImage(result), false);
+  }
+});
+
+test('never discards an unknown image', () => {
+  const result = normalizeClassification({
+    classification: CLASSIFICATIONS.UNKNOWN,
+    confidence: 0.99,
+    has_document_text: false,
+    has_medical_visual: false,
+    evidence: []
+  });
+
+  assert.equal(isNotMedicalImage(result), false);
+});
 
 function responseWith(value) {
   return {

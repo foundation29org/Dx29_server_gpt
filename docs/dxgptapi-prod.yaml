@@ -2202,6 +2202,7 @@
                         "enum": [
                             "document_only",
                             "contains_medical_visual",
+                            "not_medical",
                             "unknown"
                         ]
                     },
@@ -2220,7 +2221,8 @@
                         "type": "string",
                         "enum": [
                             "ocr_text",
-                            "vision"
+                            "vision",
+                            "not_medical"
                         ]
                     },
                     "ocrTextUsed": {
@@ -2255,7 +2257,7 @@
                     "routing",
                     "diagnosticUse"
                 ],
-                "description": "Image processed by an analysis. No storage URL is ever returned: the server reads the bytes itself when the image is needed. Only `routing: vision` images are stored; `ocr_text` images were converted to text inside `description`, are not stored and carry `uploadId`/`index` as null.",
+                "description": "Image processed by an analysis. No storage URL is ever returned: the server reads the bytes itself when the image is needed. Only `routing: vision` images are stored; `ocr_text` images were converted to text inside `description` and `not_medical` images were discarded; neither is stored and both carry `uploadId`/`index` as null.",
                 "properties": {
                     "uploadId": {
                         "type": "string",
@@ -2282,7 +2284,8 @@
                         "type": "string",
                         "enum": [
                             "ocr_text",
-                            "vision"
+                            "vision",
+                            "not_medical"
                         ]
                     },
                     "diagnosticUse": {

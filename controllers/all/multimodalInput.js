@@ -417,7 +417,8 @@ const processMultimodalInput = async (req, res) => {
             }
 
             // Documento puro -> OCR sin imagen. Imagen mixta -> OCR + imagen.
-            // Imagen médica pura, desconocida o con OCR fallido -> visión.
+            // Imagen no médica -> descartada. Imagen médica pura, desconocida
+            // o con OCR fallido -> visión.
             if ((req.files?.image || []).length > 0) {
                 if (userId) {
                     await pubsubService.sendProgress(
@@ -491,6 +492,32 @@ const processMultimodalInput = async (req, res) => {
                     userId.toString(),
                     new Error('No document could be processed'),
                     'NO_DOCUMENT',
+                    { correlationId }
+                );
+                return undefined;
+            }
+
+            const notMedicalImages = publicImageRouting.filter(
+                (image) => image.route === 'not_medical'
+            ).length;
+            if (notMedicalImages > 0 && !hasDoc && !hasPatient && !hasImage) {
+                const failedUpload = getUploadObservability(req.files);
+                insights.trackEvent('MultimodalAnalysisFailed', {
+                    correlationId,
+                    tenantId: tenantId || '',
+                    subscriptionId: subscriptionId || '',
+                    phase: 'classify_images',
+                    statusCode: 400,
+                    ...failedUpload.properties
+                }, {
+                    durationMs: Date.now() - requestStartedAt,
+                    notMedicalImages,
+                    ...failedUpload.measurements
+                });
+                await pubsubService.sendError(
+                    userId.toString(),
+                    new Error('No medical image to analyze'),
+                    'NO_MEDICAL_IMAGE',
                     { correlationId }
                 );
                 return undefined;
@@ -610,6 +637,7 @@ const processMultimodalInput = async (req, res) => {
                 imageFallbacks: publicImageRouting.filter(
                     (image) => !!image.fallbackReason
                 ).length,
+                notMedicalImages,
                 ...completedUpload.measurements
             });
             await pubsubService.sendPreprocessing(userId.toString(), {

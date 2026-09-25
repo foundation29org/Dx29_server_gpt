@@ -12,6 +12,7 @@ const {
 const {
   classifyImage,
   fallbackClassification,
+  isNotMedicalImage,
   shouldExtractDocumentText,
   shouldExtractMixedDocumentText
 } = require('./multimodalImageClassifierService');
@@ -89,8 +90,9 @@ async function saveDocumentExtractionCost(documents, context, source) {
   });
 }
 
-// Documento puro -> OCR sin imagen. Imagen mixta -> OCR + imagen. Imagen
-// médica pura, duda, fallo del clasificador u OCR insuficiente -> visión.
+// Documento puro -> OCR sin imagen. Imagen mixta -> OCR + imagen. Imagen no
+// médica -> se descarta. Imagen médica pura, duda, fallo del clasificador u
+// OCR insuficiente -> visión.
 async function classifyAndRouteImages(files, context) {
   return mapWithConcurrency(
     files,
@@ -112,6 +114,17 @@ async function classifyAndRouteImages(files, context) {
           tenantId: context.tenantId,
           subscriptionId: context.subscriptionId
         });
+      }
+
+      if (isNotMedicalImage(classification)) {
+        return {
+          file,
+          classification,
+          route: 'not_medical',
+          useExtractedText: false,
+          fallbackReason: null,
+          extraction: null
+        };
       }
 
       const isDocumentOnly = shouldExtractDocumentText(classification);
@@ -265,6 +278,9 @@ async function saveImageClassificationCost(routedImages, context) {
         (result) => result.route === 'vision' &&
           result.useExtractedText !== true
       ).length,
+      notMedicalRoutes: routedImages.filter(
+        (result) => result.route === 'not_medical'
+      ).length,
       unknownClassifications: routedImages.filter(
         (result) => result.classification.classification === 'unknown'
       ).length
@@ -274,8 +290,9 @@ async function saveImageClassificationCost(routedImages, context) {
   });
 }
 
-// Imagen convertida a texto: aparece en la respuesta para que el cliente sepa
-// qué se hizo con ella, pero no existe en blob ni tiene referencia reutilizable.
+// Imagen convertida a texto o descartada por no médica: aparece en la
+// respuesta para que el cliente sepa qué se hizo con ella, pero no existe en
+// blob ni tiene referencia reutilizable.
 function unstoredImage(result) {
   return {
     uploadId: null,

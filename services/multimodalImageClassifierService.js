@@ -9,6 +9,7 @@ const {
 const CLASSIFICATIONS = Object.freeze({
   DOCUMENT_ONLY: 'document_only',
   CONTAINS_MEDICAL_VISUAL: 'contains_medical_visual',
+  NOT_MEDICAL: 'not_medical',
   UNKNOWN: 'unknown'
 });
 
@@ -58,12 +59,18 @@ even if the same canvas also contains substantial report text. Small labels,
 arrows, measurements, and image annotations belong to the medical visual and
 must not cause it to be treated as a text-only document.
 
+Return not_medical only when the image clearly has no possible clinical
+relevance: logos, icons, illustrations, memes, landscapes, animals, food,
+objects, or screenshots of non-health content. A photograph showing any part of
+a person (face, skin, eyes, mouth, nails, hair, limbs, a wound), a medication,
+a medical device, or any health-related text is never not_medical.
+
 Set has_document_text=true only for substantial standalone clinical prose,
 forms, tables, or laboratory values worth extracting with OCR. Keep it false
 for labels, arrows, measurements, legends, and annotations alone.
 
 Return unknown whenever the distinction is uncertain. Prefer unknown over
-document_only.`;
+document_only and over not_medical.`;
 
 function stripJsonFence(value) {
   return String(value || '')
@@ -90,11 +97,14 @@ function normalizeClassification(raw) {
     !hasMedicalVisual;
   const consistentMedical = classification === CLASSIFICATIONS.CONTAINS_MEDICAL_VISUAL &&
     hasMedicalVisual;
+  const consistentNotMedical = classification === CLASSIFICATIONS.NOT_MEDICAL &&
+    !hasDocumentText &&
+    !hasMedicalVisual;
   const consistentUnknown = classification === CLASSIFICATIONS.UNKNOWN;
 
   if (
     !validConfidence ||
-    (!consistentDocument && !consistentMedical && !consistentUnknown)
+    (!consistentDocument && !consistentMedical && !consistentNotMedical && !consistentUnknown)
   ) {
     return {
       classification: CLASSIFICATIONS.UNKNOWN,
@@ -143,6 +153,18 @@ function shouldExtractMixedDocumentText(
       CLASSIFICATIONS.CONTAINS_MEDICAL_VISUAL &&
     classification.hasDocumentText === true &&
     classification.hasMedicalVisual === true &&
+    Number(classification.confidence) >= threshold;
+}
+
+// Una imagen descartada no llega a Terra: igual que document_only, solo con
+// confianza alta. Ante la duda (unknown) la imagen sigue yendo a visión.
+function isNotMedicalImage(
+  classification,
+  threshold = getImageClassifierConfidence()
+) {
+  return classification?.classification === CLASSIFICATIONS.NOT_MEDICAL &&
+    classification.hasDocumentText === false &&
+    classification.hasMedicalVisual === false &&
     Number(classification.confidence) >= threshold;
 }
 
@@ -221,6 +243,7 @@ module.exports = {
   CLASSIFICATIONS,
   classifyImage,
   fallbackClassification,
+  isNotMedicalImage,
   normalizeClassification,
   shouldExtractDocumentText,
   shouldExtractMixedDocumentText
