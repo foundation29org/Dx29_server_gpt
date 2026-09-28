@@ -1,5 +1,59 @@
+const { isIP } = require('node:net');
 const rateLimit = require('express-rate-limit');
 const insights = require('../services/insights')
+
+function getHeader(req, name) {
+    return req.headers[name.toLowerCase()];
+}
+
+// Una sola IP, sin puerto ni lista. ::ffff:1.2.3.4 se queda en 1.2.3.4.
+function singleIp(value) {
+    if (Array.isArray(value)) {
+        return value.length === 1 ? singleIp(value[0]) : null;
+    }
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const candidate = value.trim();
+    if (!candidate || candidate.includes(',')) {
+        return null;
+    }
+    if (isIP(candidate) === 0) {
+        return null;
+    }
+    const mapped = candidate.toLowerCase().startsWith('::ffff:')
+        ? candidate.slice('::ffff:'.length)
+        : '';
+    if (mapped && isIP(mapped) === 4) {
+        return mapped;
+    }
+    return candidate;
+}
+
+// Con trust proxy = 1, req.ip es el último salto (el front de App Service,
+// la misma IP para todo el mundo). La IP del visitante llega en X-Client-IP,
+// que APIM escribe pisando lo que mandara el cliente. Sin esa cabecera se usa
+// la primera IP válida de X-Forwarded-For: en este despliegue es el visitante,
+// porque los saltos de Azure y Cloudflare llevan puerto y no son una IP.
+function clientIp(req) {
+    const fromGateway = singleIp(getHeader(req, 'x-client-ip'));
+    if (fromGateway) {
+        return fromGateway;
+    }
+
+    const forwarded = getHeader(req, 'x-forwarded-for');
+    if (typeof forwarded === 'string') {
+        for (const part of forwarded.split(',')) {
+            const ip = singleIp(part);
+            if (ip) {
+                return ip;
+            }
+        }
+    }
+
+    return singleIp(req.socket?.remoteAddress || req.connection?.remoteAddress) ||
+        'unknown';
+}
 
 // Rate limiter para DxGPT interno (mantiene configuración actual)
 const needsLimiter = rateLimit({
@@ -10,18 +64,15 @@ const needsLimiter = rateLimit({
         message: 'Too many requests, please try again later.'
     },
     keyGenerator: function (req) {
-        return req.headers['x-forwarded-for'] || 
-               req.connection.remoteAddress || 
-               req.ip || 
-               '127.0.0.1';
+        return clientIp(req);
     },
     handler: (req, res, next, options) => {
         console.warn('Rate limit exceeded:', {
-            ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
+            ip: clientIp(req),
             timestamp: new Date()
         });
         let infoError = {
-            ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
+            ip: clientIp(req),
             message: options.message
         }
         insights.error(infoError);
@@ -40,10 +91,7 @@ const externalLimiter = rateLimit({
     keyGenerator: function (req) {
         const tenantId = getHeader(req, 'x-tenant-id');
         const myuuid = req.body?.myuuid || req.query?.myuuid;
-        const ip = req.headers['x-forwarded-for'] || 
-                   req.connection.remoteAddress || 
-                   req.ip || 
-                   '127.0.0.1';
+        const ip = clientIp(req);
         
         if (myuuid) {
             // Si hay myuuid, usar sesión (con o sin tenantId)
@@ -64,13 +112,13 @@ const externalLimiter = rateLimit({
         console.warn('External rate limit exceeded:', {
             tenantId: getHeader(req, 'x-tenant-id'),
             myuuid: req.body?.myuuid || req.query?.myuuid,
-            ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
+            ip: clientIp(req),
             timestamp: new Date()
         });
         let infoError = {
             tenantId: getHeader(req, 'x-tenant-id'),
             myuuid: req.body?.myuuid || req.query?.myuuid,
-            ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
+            ip: clientIp(req),
             message: options.message
         }
         insights.error(infoError);
@@ -105,10 +153,6 @@ const smartLimiter = (req, res, next) => {
     }
 };
 
-function getHeader(req, name) {
-    return req.headers[name.toLowerCase()];
-}
-
 const healthLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, // 5 minutos
     max: 310, // límite por IP
@@ -117,18 +161,15 @@ const healthLimiter = rateLimit({
         message: 'Too many requests to /health, please try again later'
     },
     keyGenerator: function (req) {
-        return req.headers['x-forwarded-for'] || 
-               req.connection.remoteAddress || 
-               req.ip || 
-               '127.0.0.1';
+        return clientIp(req);
     },
     handler: (req, res, next, options) => {
         console.warn('Rate limit exceeded for /health:', {
-            ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
+            ip: clientIp(req),
             timestamp: new Date()
         });
         let infoError = {
-            ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || '127.0.0.1',
+            ip: clientIp(req),
             message: options.message
         }
         insights.error(infoError);
@@ -138,9 +179,9 @@ const healthLimiter = rateLimit({
 
 
 
-module.exports = { 
-    needsLimiter, 
+module.exports = {
+    needsLimiter,
     healthLimiter,
-    smartLimiter, 
+    smartLimiter,
     externalLimiter
 };

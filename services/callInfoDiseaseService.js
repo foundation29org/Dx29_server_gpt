@@ -3,6 +3,12 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
+const {
+  loadImageDataUrls,
+  resolveDiagnosticImages,
+  validateCaseText,
+  validateUploadReferenceFields
+} = require('./multimodalUploadService');
 
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
@@ -55,15 +61,7 @@ function validateQuestionRequest(data) {
   
     // Validar medicalDescription para las preguntas adaptadas al caso
     if ([3, 4, 5, 6].includes(data.questionType)) {
-      if (!data.medicalDescription) {
-        errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3, 4, 5 or 6' });
-      } else if (typeof data.medicalDescription !== 'string') {
-        errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
-      } else if (data.medicalDescription.length < 10) {
-        errors.push({ field: 'medicalDescription', reason: 'Must be at least 10 characters' });
-      } else if (data.medicalDescription.length > 8000) {
-        errors.push({ field: 'medicalDescription', reason: 'Must not exceed 8000 characters' });
-      }
+      validateCaseText(data.medicalDescription, 'medicalDescription', data, errors);
     }
   
     // Verificar patrones sospechosos
@@ -92,6 +90,8 @@ function validateQuestionRequest(data) {
         }
       }
     }
+
+    validateUploadReferenceFields(data, errors);
   
     return errors;
   }
@@ -174,6 +174,28 @@ async function callInfoDisease(req, res) {
   
       // Sanitizar los datos
       const sanitizedData = sanitizeQuestionData(req.body);
+      try {
+        sanitizedData.imageUrls = await resolveDiagnosticImages(req.body, {
+          myuuid: sanitizedData.myuuid,
+          tenantId,
+          subscriptionId
+        });
+        delete sanitizedData.uploadId;
+      } catch (uploadError) {
+        insights.error({
+          message: uploadError.message,
+          code: uploadError.code,
+          endpoint: 'callInfoDisease',
+          tenantId,
+          subscriptionId,
+          myuuid: sanitizedData.myuuid
+        });
+        return res.status(uploadError.httpStatus || 400).send({
+          result: 'error',
+          message: 'Invalid or expired image reference',
+          code: uploadError.code
+        });
+      }
   
       const answerFormat = 'Return ONLY the HTML content without any introductory text, explanations, or markdown formatting. Use only <p>, <li>, </ul>, and <span> tags. Use <strong> for titles. Do not include any text before or after the HTML.';
   
@@ -264,20 +286,17 @@ async function callInfoDisease(req, res) {
         ],
         reasoning_effort: "low"
       };
-      if (sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0) {
-        const imagePrompts = sanitizedData.imageUrls.map((image, index) => 
-          { 
-            return {
-              type: "image_url",
-              image_url: {
-                url: image.url
-              }
-            }
-          }
-        );
-
-        requestBody.messages[0].content.push(...imagePrompts);
-      }
+      const visionImages = await loadImageDataUrls(sanitizedData.imageUrls, {
+        myuuid: sanitizedData.myuuid,
+        tenantId,
+        subscriptionId
+      });
+      requestBody.messages[0].content.push(...visionImages.map((image) => ({
+        type: "image_url",
+        image_url: {
+          url: image.url
+        }
+      })));
     }
 
       aiStartTime = Date.now();

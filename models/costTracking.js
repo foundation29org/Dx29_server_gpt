@@ -24,7 +24,7 @@ const CostTrackingSchema = new Schema({
   operation: {
     type: String,
     required: true,
-    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'emergency_questions', 'process-follow-up'],
+    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'multimodal_extract_document', 'emergency_questions', 'process-follow-up'],
     index: true
   },
 
@@ -76,7 +76,8 @@ const CostTrackingSchema = new Schema({
         'medical_question_check', // Verificación de pregunta médica
         'general_medical_response', // Verificación de escenario clínico
         'emergency_questions', // Verificación de escenario clínico
-        'document_intelligence' // Lectura/analítica de documentos (Azure Document Intelligence)
+        'document_intelligence', // Lectura/analítica de documentos (Azure Document Intelligence)
+        'image_classification' // Enrutamiento documento/imagen médica
       ]
     },
     cost: {
