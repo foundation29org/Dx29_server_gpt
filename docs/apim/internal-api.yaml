@@ -457,4 +457,62 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
+  /internal/speech/transcribe:
+    post:
+      summary: Transcribe dictated audio to text
+      description: Tenant-only. Audio is kept in memory for the request and not stored.
+      tags:
+        - Speech
+      security:
+        - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - audio
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: WebM, Ogg, MP4, M4A, MP3 or WAV, up to 10 MB.
+                language:
+                  type: string
+                  pattern: "^[a-z]{2}$"
+                myuuid:
+                  type: string
+                timezone:
+                  type: string
+      responses:
+        "200":
+          description: Transcript. `text` is empty when no speech was detected.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  text:
+                    type: string
+        "400":
+          description: Missing or invalid audio
+        "403":
+          description: Missing X-Tenant-Id
+        "413":
+          description: Audio larger than 10 MB
+        "415":
+          description: Unsupported audio format
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+        "502":
+          description: Transcription failed
+        "503":
+          description: Transcription service not configured
 tags: []

@@ -1,12 +1,16 @@
 'use strict'
 
 // Transcribe el audio dictado en el cliente con gpt-4o-transcribe (EU Data Zone).
-// El audio solo vive en memoria durante la petición; no se guarda ni se registra.
+// El audio solo vive en memoria durante la petición; no se guarda. Solo se registra el coste.
 
 const axios = require('axios')
 const multer = require('multer')
 const config = require('../../config')
 const insights = require('../../services/insights')
+const CostTrackingService = require('../../services/costTrackingService')
+const { calculateTranscriptionPrice } = require('../../services/costUtils')
+
+const TRANSCRIBE_MODEL = 'gpt4o-transcribe'
 
 // ~10 min de Opus a 128 kbps; el límite de la API es 25 MB.
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -35,7 +39,7 @@ const hasSpeech = (text) => /[\p{L}\p{N}]/u.test(text)
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_AUDIO_BYTES, files: 1, fields: 1 },
+  limits: { fileSize: MAX_AUDIO_BYTES, files: 1, fields: 3 },
   fileFilter: (req, file, cb) => {
     if (AUDIO_EXTENSIONS[baseMimeType(file.mimetype)]) {
       cb(null, true)
@@ -61,7 +65,33 @@ function transcriptionEndpoint() {
   }
 }
 
+function saveTranscriptionCost({ tenantId, body, usage, durationMs, success, error }) {
+  const price = calculateTranscriptionPrice(usage)
+  const stage = {
+    name: 'speech_transcription',
+    cost: price.totalCost,
+    tokens: { input: price.inputTokens, output: price.outputTokens, total: price.totalTokens },
+    model: TRANSCRIBE_MODEL,
+    duration: durationMs,
+    success
+  }
+  const data = {
+    myuuid: body?.myuuid || 'unknown',
+    tenantId,
+    lang: languageHint(body?.language) || 'unknown',
+    timezone: body?.timezone || 'unknown'
+  }
+  const failure = error ? { message: error.message, code: String(error.response?.status || '') } : null
+  return CostTrackingService.saveSimpleOperationCostBestEffort(data, 'speech_transcribe', stage, success ? 'success' : 'error', failure)
+}
+
 async function transcribe(req, res) {
+  // Solo tenants. La barrera real es APIM: esta ruta no está en la API pública.
+  const tenantId = req.headers['x-tenant-id']
+  if (!tenantId) {
+    return res.status(403).send({ message: 'Speech transcription is only available to tenants' })
+  }
+
   const endpoint = transcriptionEndpoint()
   if (!endpoint) {
     return res.status(503).send({ message: 'Transcription service not configured' })
@@ -85,16 +115,19 @@ async function transcribe(req, res) {
   const language = languageHint(req.body?.language)
   if (language) form.append('language', language)
 
+  const startedAt = Date.now()
   try {
     const { data } = await axios.post(endpoint.url, form, {
       headers: { 'api-key': endpoint.apiKey },
       timeout: TRANSCRIBE_TIMEOUT_MS,
       maxBodyLength: MAX_AUDIO_BYTES * 2
     })
+    saveTranscriptionCost({ tenantId, body: req.body, usage: data?.usage, durationMs: Date.now() - startedAt, success: true })
     const text = (data?.text || '').trim()
     res.set('Cache-Control', 'no-store')
     return res.status(200).send({ text: hasSpeech(text) ? text : '' })
   } catch (error) {
+    saveTranscriptionCost({ tenantId, body: req.body, durationMs: Date.now() - startedAt, success: false, error })
     insights.error({
       message: 'Audio transcription failed',
       error: error.message,

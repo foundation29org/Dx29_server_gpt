@@ -96,6 +96,31 @@ function calculatePrice(usage, model = 'gpt54mini') {
   };
 }
 
+// gpt-4o-transcribe factura el audio de entrada aparte del texto (prompt/idioma) y de la salida.
+const TRANSCRIBE_PRICING = {
+  audioInput: 0.006,  // $6.00 per 1M audio tokens
+  textInput: 0.0025,  // $2.50 per 1M text tokens
+  output: 0.01        // $10.00 per 1M tokens
+};
+
+function calculateTranscriptionPrice(usage = {}) {
+  const inputTokens = usage.input_tokens || 0;
+  const outputTokens = usage.output_tokens || 0;
+  const details = usage.input_token_details || {};
+  const audioTokens = details.audio_tokens ?? inputTokens;
+  const textTokens = details.text_tokens ?? 0;
+  const totalCost = (audioTokens / 1000) * TRANSCRIBE_PRICING.audioInput +
+    (textTokens / 1000) * TRANSCRIBE_PRICING.textInput +
+    (outputTokens / 1000) * TRANSCRIBE_PRICING.output;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: usage.total_tokens ?? (inputTokens + outputTokens),
+    totalCost: parseFloat(totalCost.toFixed(6))
+  };
+}
+
 function formatCost(cost) {
   return `$${cost.toFixed(6)}`; // Siempre en dólares con 6 decimales
 }
@@ -108,6 +133,7 @@ function calculateTokens(text, model = 'gpt4o') {
 
 module.exports = {
   calculatePrice,
+  calculateTranscriptionPrice,
   formatCost,
   calculateTokens
 }; 

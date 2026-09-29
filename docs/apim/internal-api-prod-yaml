@@ -1,0 +1,835 @@
+{
+    "openapi": "3.0.1",
+    "info": {
+        "title": "DXGPT Support API",
+        "description": "API de endpoints de soporte, feedback y monitoreo de DXGPT",
+        "version": "1.0"
+    },
+    "servers": [{
+        "url": "https://dxgpt-apim.azure-api.net/api/internal"
+    }],
+    "paths": {
+        "/langs": {
+            "get": {
+                "tags": ["Languages"],
+                "summary": "Get list of supported languages",
+                "description": "Returns a list of all available languages",
+                "operationId": "get-langs",
+                "responses": {
+                    "200": {
+                        "description": "List of available languages",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/Language"
+                                    }
+                                },
+                                "example": [{
+                                    "code": "en",
+                                    "name": "English"
+                                }]
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/homesupport": {
+            "post": {
+                "tags": ["Support"],
+                "summary": "Submit support message from users",
+                "description": "Submit a support message from users",
+                "operationId": "post-homesupport",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SupportRequest"
+                            },
+                            "example": {
+                                "email": "string",
+                                "message": "string"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Message sent successfully"
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/status/{ticketId}": {
+            "post": {
+                "tags": ["Queue"],
+                "summary": "Check status of queued diagnose request",
+                "description": "Get the status of a request in the processing queue",
+                "operationId": "post-status-ticketid",
+                "parameters": [{
+                    "name": "ticketId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Queue status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "enum": ["pending", "processing", "completed", "failed"],
+                                            "type": "string"
+                                        },
+                                        "position": {
+                                            "type": "integer"
+                                        },
+                                        "estimatedTime": {
+                                            "type": "integer",
+                                            "description": "Estimated time in seconds"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "status": "pending",
+                                    "position": 0,
+                                    "estimatedTime": 0
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/getSystemStatus": {
+            "get": {
+                "tags": ["System"],
+                "summary": "Get overall system status and health",
+                "description": "Retrieve the current status of the system and its components",
+                "operationId": "get-getsystemstatus",
+                "responses": {
+                    "200": {
+                        "description": "System status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SystemStatusResponse"
+                                },
+                                "example": {
+                                    "status": "online",
+                                    "services": {}
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "tags": ["System"],
+                "summary": "Simple health check endpoint",
+                "description": "Simple health check endpoint to verify the API is running",
+                "operationId": "get-health",
+                "responses": {
+                    "200": {
+                        "description": "System healthy",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "ok"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "status": "ok"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/opinion": {
+            "post": {
+                "tags": ["Feedback"],
+                "summary": "Send user feedback on diagnosis accuracy",
+                "description": "Submit user feedback about diagnosis results.",
+                "operationId": "post-opinion",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/OpinionRequest"
+                            },
+                            "example": {
+                                "value": "string",
+                                "myuuid": "string",
+                                "vote": "up",
+                                "lang": "string",
+                                "isNewModel": true,
+                                "topRelatedConditions": [{
+                                    "name": "string"
+                                }]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Opinion sent",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OpinionResponse"
+                                },
+                                "example": {
+                                    "send": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/generalfeedback": {
+            "post": {
+                "tags": ["Feedback"],
+                "summary": "Submit general application feedback",
+                "description": "Submit general feedback about the application.",
+                "operationId": "post-generalfeedback",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/GeneralFeedbackRequest"
+                            },
+                            "example": {
+                                "value": {
+                                    "pregunta1": 0,
+                                    "pregunta2": 0,
+                                    "userType": "string",
+                                    "moreFunct": "string",
+                                    "freeText": "string",
+                                    "email": "string"
+                                },
+                                "myuuid": "string",
+                                "lang": "string"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Feedback sent",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GeneralFeedbackResponse"
+                                },
+                                "example": {
+                                    "status": "success"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/permalink/{id}": {
+            "get": {
+                "summary": "get permalink",
+                "operationId": "get-permalink",
+                "parameters": [{
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": ""
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/permalink": {
+            "post": {
+                "summary": "permalink",
+                "operationId": "permalink",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/speech/transcribe": {
+            "post": {
+                "tags": ["Speech"],
+                "summary": "Transcribe dictated audio to text",
+                "description": "Tenant-only. Transcribes one microphone recording to text. The spoken language is detected automatically. Pass `language` (ISO 639-1) as a hint. Audio is kept in memory for the request and is not stored.\n\n**File limits:** exactly one file, form field `audio`, maximum 10 MB. Formats: WebM, Ogg, MP4, M4A, MP3, WAV.\n\nAn empty `text` means no speech was detected.",
+                "operationId": "post-speech-transcribe",
+                "parameters": [{
+                    "name": "X-Tenant-Id",
+                    "in": "header",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": ["audio"],
+                                "type": "object",
+                                "properties": {
+                                    "audio": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "Audio recording. WebM, Ogg, MP4, M4A, MP3 or WAV, up to 10 MB."
+                                    },
+                                    "language": {
+                                        "pattern": "^[a-z]{2}$",
+                                        "type": "string",
+                                        "description": "Optional ISO 639-1 hint, for example `es` or `en`.",
+                                        "example": "es"
+                                    },
+                                    "myuuid": {
+                                        "type": "string"
+                                    },
+                                    "timezone": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Transcript. `text` is empty when no speech was detected.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "example": {
+                                        "text": "Hola, a ver si funciona la transcripción."
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing or invalid audio"
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing X-Tenant-Id"
+                    },
+                    "413": {
+                        "description": "Audio larger than 10 MB"
+                    },
+                    "415": {
+                        "description": "Unsupported audio format"
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Transcription failed"
+                    },
+                    "503": {
+                        "description": "Transcription service not configured"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Language": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "example": "en"
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "English"
+                    }
+                }
+            },
+            "SupportRequest": {
+                "required": ["email", "message"],
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "message": {
+                        "type": "string"
+                    }
+                }
+            },
+            "OpinionRequest": {
+                "required": ["value", "myuuid", "vote", "isNewModel"],
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "maxLength": 10000,
+                        "type": "string"
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string"
+                    },
+                    "vote": {
+                        "enum": ["up", "down"],
+                        "type": "string"
+                    },
+                    "lang": {
+                        "maxLength": 2,
+                        "minLength": 2,
+                        "type": "string"
+                    },
+                    "isNewModel": {
+                        "type": "boolean"
+                    },
+                    "topRelatedConditions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "maxLength": 200,
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "OpinionResponse": {
+                "type": "object",
+                "properties": {
+                    "send": {
+                        "type": "boolean",
+                        "example": true
+                    }
+                }
+            },
+            "GeneralFeedbackRequest": {
+                "required": ["value", "myuuid"],
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "required": ["pregunta1", "pregunta2", "userType", "moreFunct"],
+                        "type": "object",
+                        "properties": {
+                            "pregunta1": {
+                                "maximum": 5,
+                                "minimum": 0,
+                                "type": "number"
+                            },
+                            "pregunta2": {
+                                "maximum": 5,
+                                "minimum": 0,
+                                "type": "number"
+                            },
+                            "userType": {
+                                "maxLength": 100,
+                                "type": "string"
+                            },
+                            "moreFunct": {
+                                "maxLength": 1000,
+                                "type": "string"
+                            },
+                            "freeText": {
+                                "maxLength": 2000,
+                                "type": "string"
+                            },
+                            "email": {
+                                "type": "string",
+                                "format": "email"
+                            }
+                        }
+                    },
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string"
+                    },
+                    "lang": {
+                        "maxLength": 2,
+                        "minLength": 2,
+                        "type": "string"
+                    }
+                }
+            },
+            "GeneralFeedbackResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "example": "success"
+                    }
+                }
+            },
+            "SystemStatusResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "enum": ["online", "degraded", "offline"],
+                        "type": "string"
+                    },
+                    "services": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "enum": ["online", "degraded", "offline"],
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+            "apiKeyHeader": {
+                "type": "apiKey",
+                "name": "Ocp-Apim-Subscription-Key",
+                "in": "header"
+            },
+            "apiKeyQuery": {
+                "type": "apiKey",
+                "name": "subscription-key",
+                "in": "query"
+            }
+        }
+    },
+    "security": [{
+        "apiKeyHeader": []
+    }, {
+        "apiKeyQuery": []
+    }]
+}

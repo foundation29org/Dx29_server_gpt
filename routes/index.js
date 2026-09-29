@@ -57,8 +57,8 @@ api.post('/internal/questionsfeedback', smartLimiter, questionsFeedbackCtrl.send
 api.post('/internal/permalink', smartLimiter, permalinkCtrl.createPermalink)
 api.get('/internal/permalink/:id', smartLimiter, permalinkCtrl.getPermalink)
 
-// Dictado por voz: audio -> texto
-api.post('/speech/transcribe', smartLimiter, speechTranscribeCtrl.transcribe)
+// Dictado por voz: audio -> texto. Solo tenants, no forma parte de la API pública.
+api.post('/internal/speech/transcribe', smartLimiter, speechTranscribeCtrl.transcribe)
 
 // Rutas de Azure Web PubSub
 api.use('/pubsub', smartLimiter, pubsubRoutes)

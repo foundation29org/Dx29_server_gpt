@@ -19,7 +19,5 @@ APIM.MD
 docs*
 !docs/
 docs/*
-!docs/internal-api.yaml
-!docs/dxgptapi-dev-yaml
-!docs/dxgptapi-prod.yaml
+!docs/apim
 deploy*
