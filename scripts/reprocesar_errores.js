@@ -65,7 +65,7 @@ const reprocesarErrores = async (req, res) => {
             iframeParams: errorData.iframeParams || {}
           },
           null, // requestInfo
-          'o3', // modelo
+          'gpt56terra', // modelo
           errorData.myuuid,
           null // region
         );

@@ -1,13 +1,12 @@
 const express = require('express');
 const swaggerUi = require('swagger-ui-express');
-const YAML = require('yaml');
 const fs = require('fs');
 const path = require('path');
 
-// Cargar la especificación OpenAPI desde el archivo YAML
-const openApiPath = path.join(__dirname, '../docs/dxgpt-api.yaml');
+// Contrato público de desarrollo exportado desde API Management (JSON).
+const openApiPath = path.join(__dirname, '../docs/dxgptapi-dev-yaml');
 const fileContents = fs.readFileSync(openApiPath, 'utf8');
-const swaggerSpec = YAML.parse(fileContents);
+const swaggerSpec = JSON.parse(fileContents);
 
 // Crear una app Express simple para servir Swagger UI
 const app = express();

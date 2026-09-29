@@ -1,6 +1,7 @@
 const insights = require('./insights');
 const OpinionStats = require('../models/opinionstats');
 const serviceEmail = require('./email');
+const { resolveDiagnoseModel } = require('./aiUtils');
 
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
@@ -148,6 +149,7 @@ async function opinion(req, res) {
 
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
+    sanitizedData.versionModel = resolveDiagnoseModel(sanitizedData.versionModel);
     sanitizedData.version = req.body.version || 'unknown';
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;

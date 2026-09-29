@@ -6,8 +6,10 @@
 const express = require('express');
 const compression = require('compression');
 const bodyParser = require('body-parser');
+const { correlationMiddleware } = require('./services/requestCorrelation');
 const app = express();
 app.set('trust proxy', 1);
+app.use(correlationMiddleware);
 app.use(compression());
 const api = require('./routes');
 const cors = require('cors');
@@ -17,7 +19,8 @@ if (isLocal) {
   app.use(cors({
     origin: '*', // O pon la URL de tu frontend, ej: 'http://localhost:4200'
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Ocp-Apim-Subscription-Key', 'X-MS-AUTH-TOKEN', 'X-Tenant-Id', 'x-subscription-id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Ocp-Apim-Subscription-Key', 'X-MS-AUTH-TOKEN', 'X-Tenant-Id', 'x-subscription-id', 'X-Correlation-Id'],
+    exposedHeaders: ['X-Correlation-Id'],
   }));
 }
 

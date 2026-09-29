@@ -1,6 +1,7 @@
 'use strict'
 
 const { callAiWithFailover, detectLanguageWithRetry } = require('./aiUtils');
+const { MIN_TEXT_CHARS_WITHOUT_IMAGES: MIN_DETECTABLE_CHARS } = require('./multimodalInputValidation');
 
 /**
  * Smart language detection with tiered strategy:
@@ -21,6 +22,12 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   const content = typeof text === 'string' ? text : '';
   const length = content.length;
   const dataRequest = { tenantId, subscriptionId, myuuid };
+  // Solo llega texto tan corto cuando acompaña a imágenes ("fiebre" o nada).
+  // Con una palabra el detector acierta por casualidad y Azure rechaza el
+  // texto vacío tras 6 reintentos; el idioma de la página es más fiable.
+  if (content.trim().length < MIN_DETECTABLE_CHARS) {
+    return { lang: langHint || 'en', modelUsed: 'fallback_hint', usage: null, durationMs: 0, azureCharsBilled: 0 };
+  }
   // Short: Azure detect
   if (length < 1000) {
     try {

@@ -22,9 +22,10 @@ const DiagnoseSessionSchema = new Schema({
     default: {}
   },
   question: {
+    // Vacío en los casos de solo imagen: la evidencia está en la subida.
     originalText: {
       type: String,
-      required: true
+      default: ''
     },
     detectedLanguage: {
       type: String,
@@ -52,10 +53,26 @@ const DiagnoseSessionSchema = new Schema({
       required: true,
       enum: ['diagnostic', 'error', 'non-diagnostic', 'general', 'medical', 'other' ]
     },
+    intentAction: {
+      type: String,
+      enum: ['go', 'explain', 'enrich']
+    },
+    intentReason: {
+      type: String,
+      enum: [
+        'patient_case_ready',
+        'medical_education',
+        'known_condition_management',
+        'medication_safety',
+        'insufficient_patient_context',
+        'missing_patient_data',
+        'non_medical'
+      ]
+    },
     model: {
       type: String,
       required: true,
-      default: 'o3-dxgpt'
+      default: 'gpt56terra'
     }
   },
   timezone: {

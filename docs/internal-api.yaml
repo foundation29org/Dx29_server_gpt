@@ -1,0 +1,460 @@
+openapi: 3.0.0
+info:
+  title: DXGPT Support API
+  version: 1.0.0
+  description: API de endpoints de soporte, feedback y monitoreo de DXGPT
+servers:
+  - url: /api
+    description: DXGPT server API base path
+components:
+  securitySchemes:
+    ApimSubscription:
+      type: apiKey
+      in: header
+      name: Ocp-Apim-Subscription-Key
+      description: API Management subscription key for authenticating requests
+  schemas:
+    Language:
+      type: object
+      properties:
+        code:
+          type: string
+          example: en
+        name:
+          type: string
+          example: English
+    SupportRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        message:
+          type: string
+      required:
+        - email
+        - message
+    OpinionRequest:
+      type: object
+      properties:
+        value:
+          type: string
+          maxLength: 10000
+        myuuid:
+          type: string
+          pattern: "^[0-9a-fA-F-]{36}$"
+        vote:
+          type: string
+          enum: [up, down]
+        lang:
+          type: string
+          minLength: 2
+          maxLength: 2
+        versionModel:
+          type: string
+          description: Model version for the feedback
+          example: "gpt-5-mini"
+        topRelatedConditions:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                maxLength: 200
+      required:
+        - value
+        - myuuid
+        - vote
+        - versionModel
+    OpinionResponse:
+      type: object
+      properties:
+        send:
+          type: boolean
+          example: true
+    GeneralFeedbackRequest:
+      type: object
+      properties:
+        value:
+          type: object
+          properties:
+            pregunta1:
+              type: number
+              minimum: 0
+              maximum: 5
+            pregunta2:
+              type: number
+              minimum: 0
+              maximum: 5
+            userType:
+              type: string
+              maxLength: 100
+            moreFunct:
+              type: string
+              maxLength: 1000
+            freeText:
+              type: string
+              maxLength: 2000
+            email:
+              type: string
+              format: email
+          required:
+            - pregunta1
+            - pregunta2
+            - userType
+            - moreFunct
+        myuuid:
+          type: string
+          pattern: "^[0-9a-fA-F-]{36}$"
+        lang:
+          type: string
+          minLength: 2
+          maxLength: 2
+      required:
+        - value
+        - myuuid
+    GeneralFeedbackResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+    SystemStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - online
+            - degraded
+            - offline
+        services:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+              - online
+              - degraded
+              - offline
+  responses:
+    UnauthorizedError:
+      description: Invalid or missing subscription key
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Invalid or missing subscription key
+    TooManyRequestsError:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Too many requests, please try again later
+paths:
+  /internal/langs:
+    get:
+      summary: Get list of supported languages
+      description: Returns a list of all available languages
+      tags:
+        - Languages
+      security:
+        - ApimSubscription: []
+      responses:
+        "200":
+          description: List of available languages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Language"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/homesupport:
+    post:
+      summary: Submit support message from users
+      description: Submit a support message from users
+      tags:
+        - Support
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupportRequest"
+      responses:
+        "200":
+          description: Message sent successfully
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/status/{ticketId}:
+    post:
+      summary: Check status of queued diagnose request
+      description: Get the status of a request in the processing queue
+      tags:
+        - Queue
+      security:
+        - ApimSubscription: []
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - pending
+                      - processing
+                      - completed
+                      - failed
+                  position:
+                    type: integer
+                  estimatedTime:
+                    type: integer
+                    description: Estimated time in seconds
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/getSystemStatus:
+    get:
+      summary: Get overall system status and health
+      description: Retrieve the current status of the system and its components
+      tags:
+        - System
+      security:
+        - ApimSubscription: []
+      responses:
+        "200":
+          description: System status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatusResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/health:
+    get:
+      summary: Simple health check endpoint
+      description: Simple health check endpoint to verify the API is running
+      tags:
+        - System
+      security:
+        - ApimSubscription: []
+      responses:
+        "200":
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/opinion:
+    post:
+      summary: Send user feedback on diagnosis accuracy
+      description: Submit user feedback about diagnosis results.
+      tags:
+        - Feedback
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpinionRequest"
+      responses:
+        "200":
+          description: Opinion sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpinionResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/generalfeedback:
+    post:
+      summary: Submit general application feedback
+      description: Submit general feedback about the application.
+      tags:
+        - Feedback
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneralFeedbackRequest"
+      responses:
+        "200":
+          description: Feedback sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneralFeedbackResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/questionsfeedback:
+    post:
+      summary: Submit feedback about a generated medical answer
+      tags:
+        - Feedback
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - myuuid
+                - type
+                - helpful
+              properties:
+                myuuid:
+                  type: string
+                  format: uuid
+                type:
+                  type: string
+                  maxLength: 100
+                helpful:
+                  type: boolean
+                comments:
+                  type: string
+                  maxLength: 4000
+                email:
+                  type: string
+                  format: email
+                question:
+                  type: string
+                  maxLength: 8000
+                answerHtml:
+                  type: string
+                  maxLength: 200000
+                references:
+                  type: array
+                  items: {}
+                detectedLang:
+                  type: string
+                  minLength: 2
+                  maxLength: 8
+                model:
+                  type: string
+                  maxLength: 200
+      responses:
+        "200":
+          description: Feedback stored
+        "400":
+          description: Invalid feedback
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/permalink:
+    post:
+      summary: Create a diagnosis permalink
+      tags:
+        - Permalinks
+      security:
+        - ApimSubscription: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - medicalDescription
+                - anonymizedDescription
+                - diagnoses
+                - lang
+                - createdDate
+                - myuuid
+              properties:
+                medicalDescription:
+                  type: string
+                anonymizedDescription:
+                  type: string
+                diagnoses:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: object
+                    additionalProperties: true
+                lang:
+                  type: string
+                createdDate:
+                  type: string
+                  format: date-time
+                myuuid:
+                  type: string
+      responses:
+        "201":
+          description: Permalink created
+        "400":
+          description: Missing or invalid fields
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+  /internal/permalink/{id}:
+    get:
+      summary: Retrieve a diagnosis permalink
+      tags:
+        - Permalinks
+      security:
+        - ApimSubscription: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Permalink retrieved
+        "404":
+          description: Permalink not found
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+tags: []

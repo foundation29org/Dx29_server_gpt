@@ -7,10 +7,12 @@ const { jsonrepair } = require('jsonrepair');
 
 // Detectar si es deployment self-hosted (sin APIM)
 const isSelfHosted = config.IS_SELF_HOSTED || false;
-const DEFAULT_AI_MODEL = 'gpt54mini';
+const DEFAULT_AI_MODEL = 'gpt56terra';
 const ROUTING_MODEL_ALIASES = {
   gpt4o: 'gpt4o',
-  o3: 'o3',
+  // Compatibilidad durante el despliegue: clientes antiguos que aún envíen
+  // "o3" reciben Terra; ya no existe una ruta avanzada en el producto.
+  o3: DEFAULT_AI_MODEL,
   gpt5nano: 'gpt5nano',
   'gpt-5-nano': 'gpt5nano',
   gpt5mini: 'gpt5mini',
@@ -18,15 +20,17 @@ const ROUTING_MODEL_ALIASES = {
   gpt54mini: 'gpt54mini',
   'gpt-5.4-mini': 'gpt54mini',
   gpt5: 'gpt5',
-  'gpt-5': 'gpt5'
+  'gpt-5': 'gpt5',
+  gpt56terra: 'gpt56terra',
+  'gpt-5.6-terra': 'gpt56terra'
 };
 const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt4o: 'gpt4o',
-  o3: 'o3',
   gpt5nano: 'gpt-5-nano',
   gpt5mini: 'gpt-5-mini',
   gpt54mini: 'gpt-5.4-mini',
-  gpt5: 'gpt-5'
+  gpt5: 'gpt-5',
+  gpt56terra: 'gpt-5.6-terra'
 };
 
 // Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
@@ -66,17 +70,17 @@ const modelConfig = {
     apiVersion: '2025-01-01-preview',
     path: '/openai/deployments/gpt-5-nano/chat/completions'
   },
-  'o3': {
+  'gpt-5.6-terra': {
     apiVersion: '2025-04-01-preview',
-    path: '/openai/responses'
+    path: '/openai/deployments/gpt-5.6-terra/chat/completions'
   }
 };
 
 /**
  * Construye la URL completa de Azure OpenAI para un endpoint específico
  * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
- * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, o3)
- * @returns {Object} - { url, apiKey } o null si no está configurado
+ * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, gpt-5.6-terra)
+ * @returns {Object} - { url, apiKey, region, deployment } o null
  */
 function buildAzureOpenAIEndpoint(region, model) {
   const regionConfig = regionToAzureOpenAI[region];
@@ -95,7 +99,9 @@ function buildAzureOpenAIEndpoint(region, model) {
   const url = `${regionConfig.baseUrl}${modelCfg.path}?api-version=${modelCfg.apiVersion}`;
   return {
     url,
-    apiKey: regionConfig.apiKey
+    apiKey: regionConfig.apiKey,
+    region,
+    deployment: model
   };
 }
 
@@ -225,36 +231,6 @@ const endpointsMap = {
       buildAzureOpenAIEndpoint('as2', 'gpt4o')
     ]
   },
-  o3: {
-    asia: [
-      buildAzureOpenAIEndpoint('as1', 'o3'),
-      buildAzureOpenAIEndpoint('as2', 'o3')
-    ],
-    europe: [
-      buildAzureOpenAIEndpoint('eu1', 'o3'),
-      buildAzureOpenAIEndpoint('us1', 'o3')
-    ],
-    northamerica: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('us2', 'o3')
-    ],
-    southamerica: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('us2', 'o3')
-    ],
-    africa: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('as2', 'o3')
-    ],
-    oceania: [
-      buildAzureOpenAIEndpoint('as2', 'o3'),
-      buildAzureOpenAIEndpoint('us1', 'o3')
-    ],
-    other: [
-      buildAzureOpenAIEndpoint('us1', 'o3'),
-      buildAzureOpenAIEndpoint('as2', 'o3')
-    ]
-  },
   gpt5nano: {
     asia: [
       buildAzureOpenAIEndpoint('eu1', 'gpt-5-nano'),
@@ -374,12 +350,53 @@ const endpointsMap = {
       buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
       buildAzureOpenAIEndpoint('as2', 'gpt-5')
     ]
+  },
+  gpt56terra: {
+    asia: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    europe: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra')
+    ],
+    northamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    southamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    africa: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra')
+    ],
+    oceania: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-terra')
+    ],
+    other: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra')
+    ]
   }
 };
+
+function aliasRoutingModel(model) {
+  const key = String(model || '').trim();
+  return ROUTING_MODEL_ALIASES[key] || key;
+}
 
 function normalizeRoutingModel(model) {
   const normalized = ROUTING_MODEL_ALIASES[(model || '').toString().trim()];
   return normalized || DEFAULT_AI_MODEL;
+}
+
+function resolveDiagnoseModel(requestedModel) {
+  return process.env.NODE_ENV === 'local'
+    ? normalizeRoutingModel(requestedModel)
+    : DEFAULT_AI_MODEL;
 }
 
 function getEndpointsByTimezone(timezone, model = DEFAULT_AI_MODEL) {
@@ -414,30 +431,111 @@ function getEndpointsByTimezone(timezone, model = DEFAULT_AI_MODEL) {
   return endpoints;
 }
 
-async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, dataRequest = null) {
-  const RETRY_DELAY = 1000;
+function getResponseHeader(headers, name) {
+  if (!headers) return undefined;
+  if (typeof headers.get === 'function') return headers.get(name);
+  return headers[name] ?? headers[name.toLowerCase()];
+}
+
+function getRetryDelayMs(error, retryCount) {
+  const headers = error.response?.headers;
+  const retryAfterMs = Number(getResponseHeader(headers, 'retry-after-ms'));
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+    return Math.min(retryAfterMs, 10000);
+  }
+
+  const retryAfterSeconds = Number(getResponseHeader(headers, 'retry-after'));
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+    return Math.min(retryAfterSeconds * 1000, 10000);
+  }
+
+  return Math.min(1000 * (2 ** retryCount), 10000);
+}
+
+function isRetryableEndpointError(error) {
+  const statusCode = Number(error.response?.status);
+  if (!statusCode) return true;
+  return [401, 403, 404, 408, 409, 425, 429].includes(statusCode) ||
+    statusCode >= 500;
+}
+
+function getEndpointHost(endpoint) {
+  try {
+    return new URL(endpoint?.url).hostname;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function buildFailureTelemetry(
+  endpoint,
+  nextEndpoint,
+  error,
+  normalizedModel,
+  retryCount,
+  timeoutMs,
+  willRetry
+) {
+  return {
+    model: String(normalizedModel),
+    endpointRegion: String(endpoint?.region || 'unknown'),
+    endpointHost: getEndpointHost(endpoint),
+    nextEndpointRegion: String(nextEndpoint?.region || 'none'),
+    statusCode: String(error.response?.status || 'network'),
+    errorCode: String(error.code || error.name || 'unknown'),
+    retryCount: String(retryCount),
+    timeoutMs: String(timeoutMs),
+    willRetry: String(willRetry)
+  };
+}
+
+function safelyTrackEvent(name, properties) {
+  try {
+    insights.trackEvent(name, properties);
+  } catch (telemetryError) {
+    console.error(`No se pudo registrar el evento ${name}:`, telemetryError.message);
+  }
+}
+
+function safelyTrackError(message, properties) {
+  try {
+    insights.error(message, properties);
+  } catch (telemetryError) {
+    console.error('No se pudo registrar el error en Application Insights:', telemetryError.message);
+  }
+}
+
+async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, _dataRequest = null) {
   const normalizedModel = normalizeRoutingModel(model);
+  const timeoutMs = config.AZURE_OPENAI_TIMEOUT_MS || 180000;
 
   const endpoints = getEndpointsByTimezone(timezone, normalizedModel);
   const endpoint = endpoints[retryCount];
   
   // Si el endpoint es null (no configurado), intentar el siguiente
   if (!endpoint || !endpoint.url || !endpoint.apiKey) {
+    const hasNextEndpoint = retryCount < endpoints.length - 1;
+    const properties = {
+      model: String(normalizedModel),
+      endpointRegion: String(endpoint?.region || 'unknown'),
+      retryCount: String(retryCount),
+      willRetry: String(hasNextEndpoint)
+    };
+    safelyTrackEvent('AiEndpointConfigurationMissing', properties);
     if (retryCount < endpoints.length - 1) {
-      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, dataRequest);
+      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, _dataRequest);
     }
-    throw new Error(`No hay endpoints configurados para modelo ${normalizedModel} en región ${timezone}`);
+    const configurationError = new Error(
+      `No hay endpoints configurados para modelo ${normalizedModel} en región ${timezone}`
+    );
+    safelyTrackEvent('AiAllEndpointsFailed', properties);
+    safelyTrackError('All AI endpoints failed', properties);
+    throw configurationError;
   }
 
   try {
-    // Preparar el body
-    // Para o3, el endpoint /openai/responses requiere el campo 'model' en el body
-    // Para otros modelos (chat completions), el modelo está en la URL, así que lo removemos
     const requestBodyCopy = { ...requestBody };
-    const isO3Endpoint = endpoint.url.includes('/openai/responses');
-    
-    if (!isO3Endpoint && requestBodyCopy.model) {
-      // Solo remover 'model' si NO es el endpoint de o3
+    if (requestBodyCopy.model) {
       delete requestBodyCopy.model;
     }
 
@@ -445,31 +543,53 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
       headers: {
         'Content-Type': 'application/json',
         'api-key': endpoint.apiKey
-      }
+      },
+      timeout: timeoutMs
     });
     return response;
   } catch (error) {
     const statusCode = error.response?.status;
-    const errorDetails = error.response?.data || null;
-    const shouldRetry = statusCode !== 400 && retryCount < endpoints.length - 1;
-
-    insights.error({
-      message: `Fallo AI endpoint ${endpoint.url}`,
-      error: error.message,
-      statusCode,
-      errorDetails,
+    const nextEndpoint = endpoints[retryCount + 1];
+    const retryableError = isRetryableEndpointError(error);
+    const shouldRetry = retryableError &&
+      retryCount < endpoints.length - 1;
+    const properties = buildFailureTelemetry(
+      endpoint,
+      nextEndpoint,
+      error,
+      normalizedModel,
       retryCount,
-      willRetry: shouldRetry,
-      requestBody,
-      timezone,
-      model: normalizedModel,
-      dataRequest
-    });
+      timeoutMs,
+      shouldRetry
+    );
 
     if (shouldRetry) {
-      console.warn(`❌ Error en ${endpoint.url} — Reintentando en ${RETRY_DELAY}ms...`);
-      await delay(RETRY_DELAY);
-      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, dataRequest);
+      const retryDelayMs = getRetryDelayMs(error, retryCount);
+      safelyTrackEvent('AiEndpointFallbackUsed', {
+        ...properties,
+        retryDelayMs: String(retryDelayMs)
+      });
+      console.warn(
+        `❌ Error ${statusCode || error.code || 'de red'} en ` +
+        `${endpoint.region}; fallback a ${nextEndpoint?.region || 'siguiente endpoint'} ` +
+        `en ${retryDelayMs}ms`
+      );
+      await delay(retryDelayMs);
+      return callAiWithFailover(
+        requestBody,
+        timezone,
+        normalizedModel,
+        retryCount + 1,
+        _dataRequest
+      );
+    }
+
+    if (retryableError) {
+      safelyTrackEvent('AiAllEndpointsFailed', properties);
+      safelyTrackError('All AI endpoints failed', properties);
+    } else {
+      safelyTrackEvent('AiRequestRejected', properties);
+      safelyTrackError('AI request rejected without fallback', properties);
     }
     throw error;
   }
@@ -992,6 +1112,34 @@ function parseFollowUpQuestions(raw) {
  * @returns {Promise<any>} - El JSON reparado y parseado
  * @throws {Error} - Si GPT no puede reparar el JSON
  */
+function extractJsonPayload(text, jsonType = 'generic') {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+
+  const preferArray = jsonType === 'diagnosis' || jsonType === 'questions';
+  const preferObject = jsonType === 'object';
+  const candidates = preferArray
+    ? ['[', '{']
+    : preferObject
+      ? ['{', '[']
+      : ['[', '{'];
+
+  for (const openChar of candidates) {
+    const start = text.indexOf(openChar);
+    if (start === -1) {
+      continue;
+    }
+    const closeChar = openChar === '[' ? ']' : '}';
+    const end = text.lastIndexOf(closeChar);
+    if (end > start) {
+      return text.slice(start, end + 1);
+    }
+  }
+
+  return text;
+}
+
 async function repairJsonWithGPT(brokenJson, jsonType = 'generic') {
   const timezone = 'Europe/Madrid';
   
@@ -1060,22 +1208,13 @@ ${instructions}
 
 Return the fixed JSON:`;
 
-  /*const requestBody = {
-    model: "gpt-5-mini",
-    messages: [{ role: "user", content: repairPrompt }],
-    reasoning_effort: "medium"
-  };*/
-
   const requestBody = {
     messages: [{ role: "user", content: repairPrompt }],
-    temperature: 0,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
+    reasoning_effort: 'low'
   };
 
   try {
-    const response = await callAiWithFailover(requestBody, timezone, 'gpt4o', 0, null);
+    const response = await callAiWithFailover(requestBody, timezone, 'gpt54mini', 0, null);
     const choice = response?.data?.choices?.[0];
     if (!choice || !choice.message || !choice.message.content) {
       throw new Error('GPT repair returned no content');
@@ -1085,6 +1224,7 @@ Return the fixed JSON:`;
     repairedText = repairedText
       .replace(/^```json\s*|\s*```$/g, '')
       .replace(/^```\s*|\s*```$/g, '');
+    repairedText = extractJsonPayload(repairedText, jsonType);
 
     return JSON.parse(repairedText);
   } catch (gptError) {
@@ -1104,7 +1244,8 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
   let cleanResponse = jsonText.trim()
     .replace(/^```json\s*|\s*```$/g, '')
     .replace(/^```\s*|\s*```$/g, '');
-    cleanResponse = stripComments(cleanResponse);
+  cleanResponse = extractJsonPayload(cleanResponse, jsonType);
+  cleanResponse = stripComments(cleanResponse);
   // 1) Intento directo
   try {
     return JSON.parse(cleanResponse);
@@ -1198,8 +1339,11 @@ async function parseJsonWithFixes(jsonText, jsonType = 'generic') {
 }
 
 module.exports = {
+  DEFAULT_AI_MODEL,
   sanitizeAiData,
   sanitizeInput,
+  aliasRoutingModel,
+  resolveDiagnoseModel,
   getEndpointsByTimezone,
   callAiWithFailover,
   detectLanguageWithRetry,

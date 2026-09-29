@@ -3,6 +3,12 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
+const {
+  loadImageDataUrls,
+  resolveDiagnosticImages,
+  validateCaseText,
+  validateUploadReferenceFields
+} = require('./multimodalUploadService');
 
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
@@ -23,8 +29,8 @@ function validateQuestionRequest(data) {
   
     if (data.questionType === undefined) {
       errors.push({ field: 'questionType', reason: 'Field is required' });
-    } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 5) {
-      errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 5' });
+    } else if (typeof data.questionType !== 'number' || !Number.isInteger(data.questionType) || data.questionType < 0 || data.questionType > 6) {
+      errors.push({ field: 'questionType', reason: 'Must be an integer between 0 and 6' });
     }
   
     if (!data.disease) {
@@ -53,17 +59,9 @@ function validateQuestionRequest(data) {
       errors.push({ field: 'detectedLang', reason: 'Must be a valid language code (2-8 characters)' });
     }
   
-    // Validar medicalDescription si questionType es 3, 4 o 5
-    if ([3, 4, 5].includes(data.questionType)) {
-      if (!data.medicalDescription) {
-        errors.push({ field: 'medicalDescription', reason: 'Field is required for questionType 3, 4 or 5' });
-      } else if (typeof data.medicalDescription !== 'string') {
-        errors.push({ field: 'medicalDescription', reason: 'Must be a string' });
-      } else if (data.medicalDescription.length < 10) {
-        errors.push({ field: 'medicalDescription', reason: 'Must be at least 10 characters' });
-      } else if (data.medicalDescription.length > 8000) {
-        errors.push({ field: 'medicalDescription', reason: 'Must not exceed 8000 characters' });
-      }
+    // Validar medicalDescription para las preguntas adaptadas al caso
+    if ([3, 4, 5, 6].includes(data.questionType)) {
+      validateCaseText(data.medicalDescription, 'medicalDescription', data, errors);
     }
   
     // Verificar patrones sospechosos
@@ -83,7 +81,7 @@ function validateQuestionRequest(data) {
         }
       }
     }
-    if ([3, 4, 5].includes(data.questionType) && data.medicalDescription) {
+    if ([3, 4, 5, 6].includes(data.questionType) && data.medicalDescription) {
       const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
       for (const { pattern, reason } of suspiciousPatterns) {
         if (pattern.test(normalizedMedicalDescription)) {
@@ -92,6 +90,8 @@ function validateQuestionRequest(data) {
         }
       }
     }
+
+    validateUploadReferenceFields(data, errors);
   
     return errors;
   }
@@ -174,6 +174,28 @@ async function callInfoDisease(req, res) {
   
       // Sanitizar los datos
       const sanitizedData = sanitizeQuestionData(req.body);
+      try {
+        sanitizedData.imageUrls = await resolveDiagnosticImages(req.body, {
+          myuuid: sanitizedData.myuuid,
+          tenantId,
+          subscriptionId
+        });
+        delete sanitizedData.uploadId;
+      } catch (uploadError) {
+        insights.error({
+          message: uploadError.message,
+          code: uploadError.code,
+          endpoint: 'callInfoDisease',
+          tenantId,
+          subscriptionId,
+          myuuid: sanitizedData.myuuid
+        });
+        return res.status(uploadError.httpStatus || 400).send({
+          result: 'error',
+          message: 'Invalid or expired image reference',
+          code: uploadError.code
+        });
+      }
   
       const answerFormat = 'Return ONLY the HTML content without any introductory text, explanations, or markdown formatting. Use only <p>, <li>, </ul>, and <span> tags. Use <strong> for titles. Do not include any text before or after the HTML.';
   
@@ -200,13 +222,30 @@ async function callInfoDisease(req, res) {
             3. Order them from most likely/relevant to least likely/relevant.`;
           break;
         case 4:
-          prompt = `${sanitizedData.medicalDescription}. Why do you think this patient has ${sanitizedData.disease}. Indicate the common symptoms with ${sanitizedData.disease} and the ones that he/she does not have. ${answerFormat}`;
+          prompt = `Given the medical description: ${sanitizedData.medicalDescription}, explain why ${sanitizedData.disease} is a diagnostic hypothesis for this patient.
+
+            Use exactly these three unnumbered section headings:
+            - Findings supporting the hypothesis: include up to five patient findings explicitly provided that support ${sanitizedData.disease}.
+            - Key information to check: include up to five unreported findings with the greatest value for distinguishing or confirming this hypothesis.
+            - Findings that make the hypothesis less likely: include up to three explicitly provided findings that reduce its likelihood. If there are none, state: "No findings that clearly make this hypothesis less likely were provided."
+
+            Requirements:
+            - Do not treat an unmentioned finding as absent.
+            - Do not repeat findings between sections.
+            - Do not request further details about a finding that is already established unless that detail is decisive.
+            - Do not include a generic list of common symptoms.
+            - Do not add a conclusion that repeats the sections.
+            - Present this as diagnostic support, not as a confirmed diagnosis.
+            ${answerFormat}`;
           break;
         case 5:
           // Caso para pruebas genéticas - genérico
           prompt = `What genetic tests would be appropriate for ${sanitizedData.disease} given the following medical description: ${sanitizedData.medicalDescription}? ${answerFormat}`;
           
           // Continuar con el flujo normal usando callAiWithFailover
+          break;
+        case 6:
+          prompt = `Given the medical description: ${sanitizedData.medicalDescription}, compare ${sanitizedData.disease} with up to three of the most relevant alternative diagnoses. For each alternative, briefly state the most useful clinical finding or diagnostic test to distinguish it from ${sanitizedData.disease}. ${answerFormat}`;
           break;
         default:
           return res.status(400).send({ result: "error", message: "Invalid question type" });
@@ -247,20 +286,17 @@ async function callInfoDisease(req, res) {
         ],
         reasoning_effort: "low"
       };
-      if (sanitizedData.imageUrls && sanitizedData.imageUrls.length > 0) {
-        const imagePrompts = sanitizedData.imageUrls.map((image, index) => 
-          { 
-            return {
-              type: "image_url",
-              image_url: {
-                url: image.url
-              }
-            }
-          }
-        );
-
-        requestBody.messages[0].content.push(...imagePrompts);
-      }
+      const visionImages = await loadImageDataUrls(sanitizedData.imageUrls, {
+        myuuid: sanitizedData.myuuid,
+        tenantId,
+        subscriptionId
+      });
+      requestBody.messages[0].content.push(...visionImages.map((image) => ({
+        type: "image_url",
+        image_url: {
+          url: image.url
+        }
+      })));
     }
 
       aiStartTime = Date.now();

@@ -24,7 +24,7 @@ const CostTrackingSchema = new Schema({
   operation: {
     type: String,
     required: true,
-    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'emergency_questions', 'process-follow-up'],
+    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'multimodal_extract_document', 'emergency_questions', 'process-follow-up'],
     index: true
   },
 
@@ -39,7 +39,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence'],
+    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence'],
     index: true
   },
   
@@ -72,10 +72,12 @@ const CostTrackingSchema = new Schema({
         'reverse_translation', // Traducción inversa
         'reverse_diseases', // Traducción inversa de diagnósticos
         'profile_inference', // Inferencia de perfil/especialidad para feedback
+        'intent_check', // Enrutamiento unificado: diagnóstico, explicación o enriquecimiento
         'medical_question_check', // Verificación de pregunta médica
         'general_medical_response', // Verificación de escenario clínico
         'emergency_questions', // Verificación de escenario clínico
-        'document_intelligence' // Lectura/analítica de documentos (Azure Document Intelligence)
+        'document_intelligence', // Lectura/analítica de documentos (Azure Document Intelligence)
+        'image_classification' // Enrutamiento documento/imagen médica
       ]
     },
     cost: {
@@ -89,7 +91,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence']
+      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence']
     },
     duration: {
       type: Number,  // Duración en milisegundos
@@ -172,6 +174,7 @@ CostTrackingSchema.statics.createCostRecord = function(data) {
     tenantId: data.tenantId,
     subscriptionId: data.subscriptionId,
     operation: data.operation,
+    intent: data.intent,
     model: data.model,
     lang: data.lang,
     timezone: data.timezone,

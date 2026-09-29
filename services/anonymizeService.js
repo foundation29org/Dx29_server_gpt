@@ -98,14 +98,8 @@ Original text:
       throw new Error('Endpoint no configurado o inválido');
     }
 
-    // Preparar el body
-    // Para o3, el endpoint /openai/responses requiere el campo 'model' en el body
-    // Para otros modelos (chat completions), el modelo está en la URL, así que lo removemos
     const requestBodyCopy = { ...requestBody };
-    const isO3Endpoint = endpoint.url.includes('/openai/responses');
-    
-    if (!isO3Endpoint && requestBodyCopy.model) {
-      // Solo remover 'model' si NO es el endpoint de o3
+    if (requestBodyCopy.model) {
       delete requestBodyCopy.model;
     }
 

@@ -15,6 +15,7 @@ const opinionCtrl = require('../services/opinionService')
 const systemStatusCtrl = require('../services/systemStatusService')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
 const permalinkCtrl = require('../controllers/all/permalink')
+const speechTranscribeCtrl = require('../controllers/all/speechTranscribe')
 const pubsubRoutes = require('./pubsub')
 const reprocesarErrores = require('../scripts/reprocesar_errores')
 const api = express.Router()
@@ -28,6 +29,7 @@ api.get('/internal/langs/', smartLimiter, langCtrl.getLangs)
 api.post('/internal/homesupport/', smartLimiter, supportCtrl.sendMsgLogoutSupport)
 
 api.post('/diagnose', smartLimiter, helpDiagnoseCtrl.diagnose)
+api.post('/ask', smartLimiter, helpDiagnoseCtrl.ask)
 
 api.post('/disease/info', smartLimiter, callInfoDiseaseCtrl.callInfoDisease)
 
@@ -38,6 +40,7 @@ api.post('/patient/update', smartLimiter, followUpCtrl.processFollowUpAnswers)
 api.post('/medical/summarize', smartLimiter, summarizeCtrl.summarize)
 
 api.post('/medical/analyze', smartLimiter, multimodalCtrl.processMultimodalInput)
+api.delete('/medical/upload/:uploadId', smartLimiter, multimodalCtrl.deleteUpload)
 
 api.post('/internal/status/:ticketId', smartLimiter, systemStatusCtrl.getQueueStatus)
 
@@ -53,6 +56,9 @@ api.post('/internal/questionsfeedback', smartLimiter, questionsFeedbackCtrl.send
 // Rutas de Permalinks
 api.post('/internal/permalink', smartLimiter, permalinkCtrl.createPermalink)
 api.get('/internal/permalink/:id', smartLimiter, permalinkCtrl.getPermalink)
+
+// Dictado por voz: audio -> texto
+api.post('/speech/transcribe', smartLimiter, speechTranscribeCtrl.transcribe)
 
 // Rutas de Azure Web PubSub
 api.use('/pubsub', smartLimiter, pubsubRoutes)

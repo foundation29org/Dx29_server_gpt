@@ -144,7 +144,9 @@ class CostTrackingService {
       operationData: {
         diseasesList: data.diseases_list,
         detectedLanguage: data.detectedLanguage,
-        queryType: queryType
+        queryType: queryType,
+        intentAction: options.intentAction || data.intentAction,
+        intentReason: options.intentReason || data.intentReason
       }
     };
     
@@ -180,7 +182,9 @@ class CostTrackingService {
       operationData: {
         diseasesList: data.diseases_list,
         detectedLanguage: data.detectedLanguage,
-        queryType: queryType
+        queryType: queryType,
+        intentAction: options.intentAction || data.intentAction,
+        intentReason: options.intentReason || data.intentReason
       }
     };
 

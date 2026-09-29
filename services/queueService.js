@@ -27,11 +27,11 @@ const REGION_MAPPING = {
 // Configuración de tiempos de procesamiento por modelo (en segundos)
 const MODEL_PROCESSING_TIMES = {
   gpt4o: 15,    // 15 segundos 
-  o3: 60,       // 1 minuto
   gpt5nano: 25, // 25 segundos
   gpt5mini: 40, // 40 segundos
   gpt54mini: 40, // 40 segundos
   gpt5: 45, // 45 segundos
+  gpt56terra: 45
 };
 
 // Función helper para obtener el tiempo de procesamiento de un modelo
@@ -45,6 +45,24 @@ function getRegionFromTimezoneAndModel(timezone, model) {
   const availableRegions = MODEL_CAPACITY[model];
   if (!availableRegions) {
     throw new Error(`Model ${model} not supported`);
+  }
+
+  // Terra: alinear la cola con el endpoint primario configurado en aiUtils.
+  if (model === 'gpt56terra') {
+    if (tz?.includes('asia')) {
+      return 'India';
+    }
+    if (tz?.includes('europe') || tz?.includes('africa')) {
+      return 'Sweden';
+    }
+    if (
+      tz?.includes('australia') ||
+      tz?.includes('pacific') ||
+      tz?.includes('oceania')
+    ) {
+      return 'India';
+    }
+    return 'EastUS';
   }
 
   // Lógica especial para gpt5nano
@@ -70,7 +88,7 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     return 'Sweden';
   }
 
-  // Para gpt4o, o3 y gpt54mini, usar mapeo multi-región por continente
+  // Para gpt4o y gpt54mini, usar mapeo multi-región por continente
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';
     if (tz?.includes('europe')) return 'europe';
@@ -379,7 +397,10 @@ class QueueService {
           subscriptionId: data.subscriptionId,
           requestInfo: requestInfo,
           model: model,
-          iframeParams: data.iframeParams || {}
+          iframeParams: data.iframeParams || {},
+          // Solo viajan referencias (blobName, mimeType, name); el worker
+          // descarga los bytes justo antes de llamar al modelo.
+          imageUrls: data.imageUrls || []
         },
         applicationProperties: {
           requestType: 'diagnosis',

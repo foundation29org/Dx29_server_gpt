@@ -3,9 +3,32 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
+const { isValidUploadId } = require('./multimodalUploadService');
+
+// Un caso de solo imagen no tiene texto: la evidencia está en la subida, que
+// Diagnose vuelve a leer al recalcular con las respuestas.
+const NO_WRITTEN_DESCRIPTION =
+  'No written description: the case was submitted as medical images, which are not shown here. Do not repeat this note in your output.';
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
+}
+
+function validateCaseDescription(data, errors) {
+  const imageCase = isValidUploadId(data.uploadId);
+  const { description } = data;
+  if (imageCase && (description === undefined || description === null || description === '')) {
+    return;
+  }
+  if (!description) {
+    errors.push({ field: 'description', reason: 'Field is required' });
+  } else if (typeof description !== 'string') {
+    errors.push({ field: 'description', reason: 'Must be a string' });
+  } else if (!imageCase && description.length < 10) {
+    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
+  } else if (description.length > 8000) {
+    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
+  }
 }
 
 function validateFollowUpQuestionsRequest(data) {
@@ -16,15 +39,7 @@ function validateFollowUpQuestionsRequest(data) {
     return errors;
   }
 
-  if (!data.description) {
-    errors.push({ field: 'description', reason: 'Field is required' });
-  } else if (typeof data.description !== 'string') {
-    errors.push({ field: 'description', reason: 'Must be a string' });
-  } else if (data.description.length < 10) {
-    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
-  } else if (data.description.length > 8000) {
-    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
-  }
+  validateCaseDescription(data, errors);
 
   if (!data.diseases) {
     errors.push({ field: 'diseases', reason: 'Field is required' });
@@ -52,6 +67,10 @@ function validateFollowUpQuestionsRequest(data) {
     if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
       errors.push({ field: 'lang', reason: 'Must be a valid language code (2-8 characters)' });
     }
+  }
+
+  if (data.mode !== undefined && !['general', 'hypothesis'].includes(data.mode)) {
+    errors.push({ field: 'mode', reason: 'Must be either general or hypothesis' });
   }
 
   // Verificar patrones sospechosos
@@ -87,10 +106,11 @@ function validateFollowUpQuestionsRequest(data) {
 function sanitizeFollowUpQuestionsData(data) {
   return {
     ...data,
-    description: sanitizeInput(data.description),
+    description: sanitizeInput(data.description || ''),
     diseases: sanitizeInput(data.diseases),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
+    mode: data.mode || 'general',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -148,7 +168,7 @@ async function generateFollowUpQuestions(req, res) {
     }
 
     const sanitizedData = sanitizeFollowUpQuestionsData(req.body);
-    const { description, diseases, lang, timezone } = sanitizedData;
+    const { description, diseases, lang, mode, timezone } = sanitizedData;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -177,19 +197,21 @@ async function generateFollowUpQuestions(req, res) {
       const detectedHint = req.body.detectedLanguage || req.body.detectedLang;
       if (detectedHint && typeof detectedHint === 'string') {
         detectedLanguage = detectedHint.toLowerCase();
-      } else {
+      } else if (description) {
         // Detección (Azure) — contar caracteres aparte
-        detectChars += (description ? description.length : 0);
+        detectChars += description.length;
         const detStart = Date.now();
         detectedLanguage = await detectLanguageWithRetry(description, lang);
         detectDurationMs = Date.now() - detStart;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción de descripción y lista de enfermedades
-        translationChars += (description ? description.length : 0);
-        const fwdStart1 = Date.now();
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        forwardDurationMs += (Date.now() - fwdStart1);
+        if (description) {
+          translationChars += description.length;
+          const fwdStart1 = Date.now();
+          englishDescription = await translateTextWithRetry(description, detectedLanguage);
+          forwardDurationMs += (Date.now() - fwdStart1);
+        }
         if (englishDiseases) {
           translationChars += (diseases ? diseases.length : 0);
           const fwdStart2 = Date.now();
@@ -254,10 +276,32 @@ async function generateFollowUpQuestions(req, res) {
 
     // 2. Construir el prompt para generar preguntas de seguimiento
 
-    const prompt = `
+    const prompt = mode === 'hypothesis' ? `
+      You are a medical assistant helping to complete the clinical information needed to assess one selected diagnostic hypothesis.
+
+      Patient description:
+      "${englishDescription || NO_WRITTEN_DESCRIPTION}"
+
+      Selected diagnostic hypothesis:
+      ${englishDiseases}
+
+      Generate exactly 5 concise follow-up questions with the greatest value for supporting, weakening, differentiating, or confirming this hypothesis.
+
+      Requirements:
+      1. Ask only about information that is not already established in the patient description.
+      2. Prioritize discriminative clinical findings, disease-specific triggers, progression, examination findings, and high-value diagnostic or genetic test results.
+      3. Do not ask for more detail about an existing finding unless that detail materially changes the assessment.
+      4. Make each question self-contained so a short answer such as "yes", "no", "unknown", or a test result remains meaningful when stored with the question.
+      5. Ask one clinical concept per question and avoid generic demographic or administrative questions.
+      6. Do not ask for personal identifiers.
+      7. Use clear language suitable for a clinician or patient.
+
+      Format your response as a JSON array of exactly 5 strings.
+      Your response should be ONLY the JSON array, with no additional text or explanation.
+      ` : `
       You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following description of their symptoms:
   
-      "${englishDescription}"
+      "${englishDescription || NO_WRITTEN_DESCRIPTION}"
   
       The system has already suggested the following possible conditions: ${englishDiseases}.
       The patient indicated that none of these seem to match their experience.
@@ -359,6 +403,17 @@ async function generateFollowUpQuestions(req, res) {
 
       if (!Array.isArray(questions)) {
         throw new Error('Response is not an array');
+      }
+
+      if (mode === 'hypothesis') {
+        questions = questions
+          .filter(question => typeof question === 'string' && question.trim().length > 0)
+          .map(question => question.trim())
+          .slice(0, 5);
+
+        if (questions.length === 0) {
+          throw new Error('Response contains no valid hypothesis questions');
+        }
       }
     } catch (parseError) {
       console.error("Failed to parse questions:", parseError);
@@ -545,15 +600,7 @@ function validateProcessFollowUpRequest(data) {
     return errors;
   }
 
-  if (!data.description) {
-    errors.push({ field: 'description', reason: 'Field is required' });
-  } else if (typeof data.description !== 'string') {
-    errors.push({ field: 'description', reason: 'Must be a string' });
-  } else if (data.description.length < 10) {
-    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
-  } else if (data.description.length > 8000) {
-    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
-  }
+  validateCaseDescription(data, errors);
 
   if (!Array.isArray(data.answers) || data.answers.length === 0) {
     errors.push({ field: 'answers', reason: 'Must be a non-empty array' });
@@ -588,6 +635,10 @@ function validateProcessFollowUpRequest(data) {
     if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) {
       errors.push({ field: 'lang', reason: 'Must be a valid language code (2-8 characters)' });
     }
+  }
+
+  if (data.mode !== undefined && !['general', 'hypothesis'].includes(data.mode)) {
+    errors.push({ field: 'mode', reason: 'Must be either general or hypothesis' });
   }
 
   // Verificar patrones sospechosos
@@ -636,13 +687,14 @@ function validateProcessFollowUpRequest(data) {
 function sanitizeProcessFollowUpData(data) {
   return {
     ...data,
-    description: sanitizeInput(data.description),
+    description: sanitizeInput(data.description || ''),
     answers: data.answers.map(answer => ({
       question: sanitizeInput(answer.question),
       answer: sanitizeInput(answer.answer)
     })),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
+    mode: data.mode || 'general',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
   };
 }
@@ -700,7 +752,7 @@ async function processFollowUpAnswers(req, res) {
     }
 
     const sanitizedData = sanitizeProcessFollowUpData(req.body);
-    const { description, answers, lang, timezone } = sanitizedData;
+    const { description, answers, lang, mode, timezone } = sanitizedData;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -728,19 +780,21 @@ async function processFollowUpAnswers(req, res) {
       const detectedHint = req.body.detectedLanguage || req.body.detectedLang;
       if (detectedHint && typeof detectedHint === 'string') {
         detectedLanguage = detectedHint.toLowerCase();
-      } else {
+      } else if (description) {
         // Detección (Azure) — contar caracteres aparte
-        detectChars += (description ? description.length : 0);
+        detectChars += description.length;
         const detStart = Date.now();
         detectedLanguage = await detectLanguageWithRetry(description, lang);
         detectDurationMs = Date.now() - detStart;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
         // Traducción de descripción y Q/A
-        translationChars += (description ? description.length : 0);
-        const fwdStart1 = Date.now();
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        forwardDurationMs += (Date.now() - fwdStart1);
+        if (description) {
+          translationChars += description.length;
+          const fwdStart1 = Date.now();
+          englishDescription = await translateTextWithRetry(description, detectedLanguage);
+          forwardDurationMs += (Date.now() - fwdStart1);
+        }
         let qaChars = 0;
         const fwdStart2 = Date.now();
         englishAnswers = await Promise.all(
@@ -816,22 +870,33 @@ async function processFollowUpAnswers(req, res) {
       `Question: ${item.question}\nAnswer: ${item.answer}`
     ).join('\n\n');
 
+    const updateRequirements = mode === 'hypothesis' ? `
+      1. Preserve every relevant fact and the original perspective of the clinical description.
+      2. Interpret each short answer only in the context of its associated question.
+      3. Convert question-answer pairs into clear, self-contained clinical statements.
+      4. Do not infer facts that are not explicitly contained in the original description or answers.
+      5. Include known negative findings and explicitly unknown or unperformed tests when provided.
+      6. Do not include the questions themselves in the final description.
+    ` : `
+      1. Maintain all relevant information from the original description.
+      2. Seamlessly incorporate the new information from the answers.
+      3. Be well-organized and clear.
+      4. Be written in first person, as if the patient is describing their symptoms.
+      5. Not include the questions themselves, only the information.
+    `;
+
     const prompt = `
       You are a medical assistant helping to update a patient's symptom description based on their answers to follow-up questions.
       
       Original description:
-      "${englishDescription}"
+      "${englishDescription || NO_WRITTEN_DESCRIPTION}"
       
       Follow-up questions and answers:
       ${questionsAndAnswers}
       
       Please create an updated, comprehensive description that integrates the original information with the new details from the follow-up questions. The updated description should:
-      
-      1. Maintain all relevant information from the original description
-      2. Seamlessly incorporate the new information from the answers
-      3. Be well-organized and clear
-      4. Be written in first person, as if the patient is describing their symptoms
-      5. Not include the questions themselves, only the information
+
+      ${updateRequirements}
       
       Return ONLY the updated description, with no additional commentary or explanation.`;
 
@@ -1055,15 +1120,7 @@ function validateERQuestionsRequest(data) {
     return errors;
   }
 
-  if (!data.description) {
-    errors.push({ field: 'description', reason: 'Field is required' });
-  } else if (typeof data.description !== 'string') {
-    errors.push({ field: 'description', reason: 'Must be a string' });
-  } else if (data.description.length < 10) {
-    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
-  } else if (data.description.length > 8000) {
-    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
-  }
+  validateCaseDescription(data, errors);
 
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });
@@ -1116,7 +1173,7 @@ function validateERQuestionsRequest(data) {
 function sanitizeERQuestionsData(data) {
   return {
     ...data,
-    description: sanitizeInput(data.description),
+    description: sanitizeInput(data.description || ''),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
@@ -1200,17 +1257,19 @@ async function generateERQuestions(req, res) {
     let englishDescription = description;
     let detectedLanguage = lang;
     try {
-      // Detección (Azure) — contar caracteres aparte
-      detectChars += (description ? description.length : 0);
-      const detStart = Date.now();
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
-      detectDurationMs = Date.now() - detStart;
-      if (detectedLanguage && detectedLanguage !== 'en') {
-      // Traducción a inglés
-      translationChars += (description ? description.length : 0);
-      const fwdStart = Date.now();
-      englishDescription = await translateTextWithRetry(description, detectedLanguage);
-      forwardDurationMs = Date.now() - fwdStart;
+      if (description) {
+        // Detección (Azure) — contar caracteres aparte
+        detectChars += description.length;
+        const detStart = Date.now();
+        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        detectDurationMs = Date.now() - detStart;
+        if (detectedLanguage && detectedLanguage !== 'en') {
+          // Traducción a inglés
+          translationChars += description.length;
+          const fwdStart = Date.now();
+          englishDescription = await translateTextWithRetry(description, detectedLanguage);
+          forwardDurationMs = Date.now() - fwdStart;
+        }
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
@@ -1272,7 +1331,7 @@ async function generateERQuestions(req, res) {
     const prompt = `
   You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following initial description of their symptoms:
   
-  "${englishDescription}"
+  "${englishDescription || NO_WRITTEN_DESCRIPTION}"
   
   Analyze this description and generate 5-8 relevant follow-up questions to complete the patient's clinical profile.
   

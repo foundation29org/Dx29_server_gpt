@@ -3,6 +3,7 @@ const serviceEmail = require('./email');
 const insights = require('./insights');
 const Generalfeedback = require('../models/generalfeedback');
 const axios = require('axios');
+const { resolveDiagnoseModel } = require('./aiUtils');
 
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
@@ -228,6 +229,7 @@ async function sendGeneralFeedback(req, res) {
 
     // Sanitizar los datos
     const sanitizedData = sanitizeGeneralFeedbackData(req.body);
+    sanitizedData.model = resolveDiagnoseModel(sanitizedData.model);
     let isBetaPage = sanitizedData.isBetaPage || false;
     const generalfeedback = new Generalfeedback({
       myuuid: sanitizedData.myuuid,
