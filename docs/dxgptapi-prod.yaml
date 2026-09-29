@@ -1833,7 +1833,6 @@
             },
             "FollowUpQuestionsRequest": {
                 "required": [
-                    "description",
                     "diseases",
                     "myuuid",
                     "timezone"
@@ -1842,9 +1841,8 @@
                 "properties": {
                     "description": {
                         "maxLength": 8000,
-                        "minLength": 10,
                         "type": "string",
-                        "description": "Patient's medical description",
+                        "description": "Patient's medical description. May be empty or shorter than 10 characters when `uploadId` is sent (image-only case).",
                         "example": "Patient presents with persistent headache for the past 3 weeks, accompanied by sensitivity to light and occasional nausea."
                     },
                     "diseases": {
@@ -1880,6 +1878,11 @@
                         ],
                         "default": "general",
                         "description": "Question generation mode. `general` (default) differentiates against rejected diagnoses in `diseases`. `hypothesis` asks 5 questions to assess one selected diagnostic hypothesis."
+                    },
+                    "uploadId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Optional. `uploadId` returned by /medical/analyze. When present, `description` may be empty: the case was submitted as images."
                     }
                 }
             },
@@ -1923,7 +1926,6 @@
             },
             "ERQuestionsRequest": {
                 "required": [
-                    "description",
                     "myuuid",
                     "timezone"
                 ],
@@ -1931,9 +1933,8 @@
                 "properties": {
                     "description": {
                         "maxLength": 8000,
-                        "minLength": 10,
                         "type": "string",
-                        "description": "Patient's initial medical description",
+                        "description": "Patient's initial medical description. May be empty or shorter than 10 characters when `uploadId` is sent (image-only case).",
                         "example": "I've been experiencing fatigue and shortness of breath for the last two weeks, especially when climbing stairs."
                     },
                     "myuuid": {
@@ -1953,6 +1954,11 @@
                         "type": "string",
                         "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
                         "example": "America/New_York"
+                    },
+                    "uploadId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Optional. `uploadId` returned by /medical/analyze. When present, `description` may be empty: the case was submitted as images."
                     }
                 }
             },
@@ -1996,7 +2002,6 @@
             },
             "FollowUpAnswersRequest": {
                 "required": [
-                    "description",
                     "answers",
                     "myuuid",
                     "timezone"
@@ -2005,9 +2010,8 @@
                 "properties": {
                     "description": {
                         "maxLength": 8000,
-                        "minLength": 10,
                         "type": "string",
-                        "description": "Patient's initial medical description",
+                        "description": "Patient's initial medical description. May be empty or shorter than 10 characters when `uploadId` is sent (image-only case).",
                         "example": "I've been experiencing persistent headache for the past 3 weeks, accompanied by sensitivity to light."
                     },
                     "answers": {
@@ -2059,6 +2063,11 @@
                         ],
                         "default": "general",
                         "description": "Merge mode. `general` (default) writes a first-person narrative. `hypothesis` keeps short answers tied to their questions and does not infer missing facts."
+                    },
+                    "uploadId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Optional. `uploadId` returned by /medical/analyze. When present, `description` may be empty: the case was submitted as images."
                     }
                 }
             },

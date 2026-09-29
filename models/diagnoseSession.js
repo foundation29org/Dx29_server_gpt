@@ -22,9 +22,10 @@ const DiagnoseSessionSchema = new Schema({
     default: {}
   },
   question: {
+    // Vacío en los casos de solo imagen: la evidencia está en la subida.
     originalText: {
       type: String,
-      required: true
+      default: ''
     },
     detectedLanguage: {
       type: String,

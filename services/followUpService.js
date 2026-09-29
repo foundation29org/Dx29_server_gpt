@@ -1120,15 +1120,7 @@ function validateERQuestionsRequest(data) {
     return errors;
   }
 
-  if (!data.description) {
-    errors.push({ field: 'description', reason: 'Field is required' });
-  } else if (typeof data.description !== 'string') {
-    errors.push({ field: 'description', reason: 'Must be a string' });
-  } else if (data.description.length < 10) {
-    errors.push({ field: 'description', reason: 'Must be at least 10 characters' });
-  } else if (data.description.length > 8000) {
-    errors.push({ field: 'description', reason: 'Must not exceed 8000 characters' });
-  }
+  validateCaseDescription(data, errors);
 
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });
@@ -1181,7 +1173,7 @@ function validateERQuestionsRequest(data) {
 function sanitizeERQuestionsData(data) {
   return {
     ...data,
-    description: sanitizeInput(data.description),
+    description: sanitizeInput(data.description || ''),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
@@ -1265,17 +1257,19 @@ async function generateERQuestions(req, res) {
     let englishDescription = description;
     let detectedLanguage = lang;
     try {
-      // Detección (Azure) — contar caracteres aparte
-      detectChars += (description ? description.length : 0);
-      const detStart = Date.now();
-      detectedLanguage = await detectLanguageWithRetry(description, lang);
-      detectDurationMs = Date.now() - detStart;
-      if (detectedLanguage && detectedLanguage !== 'en') {
-      // Traducción a inglés
-      translationChars += (description ? description.length : 0);
-      const fwdStart = Date.now();
-      englishDescription = await translateTextWithRetry(description, detectedLanguage);
-      forwardDurationMs = Date.now() - fwdStart;
+      if (description) {
+        // Detección (Azure) — contar caracteres aparte
+        detectChars += description.length;
+        const detStart = Date.now();
+        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        detectDurationMs = Date.now() - detStart;
+        if (detectedLanguage && detectedLanguage !== 'en') {
+          // Traducción a inglés
+          translationChars += description.length;
+          const fwdStart = Date.now();
+          englishDescription = await translateTextWithRetry(description, detectedLanguage);
+          forwardDurationMs = Date.now() - fwdStart;
+        }
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
