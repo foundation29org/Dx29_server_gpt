@@ -704,7 +704,6 @@ ${medicalQuestionForModel}
             anonymizedTextHtml: ''
           },
           detectedLang: detectedLanguage,
-          model: modelType,
           queryType: queryType,
           intentAction: intentDecision.action,
           intentReason: intentDecision.reason,
@@ -1138,7 +1137,6 @@ ${medicalQuestionForModel}
             anonymizedTextHtml: ''
           },
           detectedLang: detectedLanguage,
-          model: model,
           queryType: queryType,
           intentAction: intentDecision.action,
           intentReason: intentDecision.reason,
@@ -1350,7 +1348,6 @@ ${medicalQuestionForModel}
           anonymizedTextHtml: ''
         },
         detectedLang: detectedLanguage,
-        model: model,
         queryType: queryType,
         intentAction: intentDecision.action,
         intentReason: intentDecision.reason,
@@ -1862,7 +1859,6 @@ ${medicalQuestionForModel}
         anonymizedTextHtml: anonymizedResult.htmlText
       },
       detectedLang: detectedLanguage,
-      model: model,
       queryType: queryType, // Agregar el tipo de consulta detectado
       intentAction: intentDecision.action,
       intentReason: intentDecision.reason,

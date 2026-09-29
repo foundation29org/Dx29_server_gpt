@@ -649,7 +649,6 @@ const processMultimodalInput = async (req, res) => {
                 documents: publicDocuments,
                 isImageOnly: isImageOnly,
                 summarized: summarized,
-                model: model,
                 correlationId,
                 // Con cola, el resultado no llega por PubSub: el cliente
                 // consulta el ticket, igual que en /diagnose.
