@@ -162,6 +162,36 @@ function matchesDeclaredType(file) {
   }
 }
 
+// Qué es realmente un archivo, mirando solo su cabecera. Sirve para diagnosticar un
+// rechazo "no coincide con su tipo" (p. ej. una foto renombrada a .pdf), no para validar.
+function sniffContentType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) return 'empty';
+  if (hasSignatureWithin(buffer, SIGNATURES.pdf, 1024)) return 'pdf';
+  if (startsWith(buffer, SIGNATURES.jpeg)) return 'jpeg';
+  if (startsWith(buffer, SIGNATURES.png)) return 'png';
+  if (startsWith(buffer, SIGNATURES.riff) && startsWith(buffer, SIGNATURES.webp, 8)) return 'webp';
+  if (startsWith(buffer, Buffer.from('GIF8', 'ascii'))) return 'gif';
+  if (startsWith(buffer, Buffer.from('ftyp', 'ascii'), 4)) return 'iso_media_heic_or_mp4';
+  if (startsWith(buffer, SIGNATURES.ole)) return 'ole';
+  if (hasZipSignature(buffer)) return 'zip';
+  if (buffer.indexOf(SIGNATURES.pdf) !== -1) return 'pdf_header_after_1024_bytes';
+  const head = buffer.subarray(0, 64).toString('latin1').trimStart().toLowerCase();
+  if (head.startsWith('<!doctype') || head.startsWith('<html')) return 'html';
+  return isValidText(buffer) ? 'text' : 'unknown_binary';
+}
+
+// Sin nombres de archivo (pueden llevar el nombre del paciente): solo tipo declarado,
+// tipo real, tamaño y los 8 primeros bytes.
+function describeUploadedFiles(files = {}) {
+  return getUploadedFiles(files).map((file) => ({
+    field: `${file.fieldName}[${file.index}]`,
+    declared: file.mimetype,
+    detected: sniffContentType(file.buffer),
+    bytes: file.buffer?.length ?? file.size ?? 0,
+    firstBytes: Buffer.isBuffer(file.buffer) ? file.buffer.subarray(0, 8).toString('hex') : ''
+  }));
+}
+
 function validateUploadedFiles(files = {}) {
   const uploadedFiles = getUploadedFiles(files);
   const errors = [];
@@ -302,6 +332,7 @@ module.exports = {
   SUPPORTED_IMAGE_TYPES,
   UUID_PATTERN,
   decodeText,
+  describeUploadedFiles,
   getSuccessfulSummary,
   parseIframeParams,
   validateParsedMultimodalInput,

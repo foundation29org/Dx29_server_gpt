@@ -720,6 +720,31 @@ test('rejects a file whose content does not match its declared type', async () =
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
+test('reports the real type of a file rejected for not matching its declared type, without its name', async () => {
+  const jpeg = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.from('fake-jpeg-body')]);
+  const req = createMultipartRequest(validFields, [{
+    field: 'document',
+    name: 'juan-perez.pdf',
+    type: 'application/pdf',
+    content: jpeg
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  const rejected = state.insightEvents.find((event) => event.name === 'MultimodalInputRejected');
+  const diagnostics = JSON.parse(rejected.properties.fileDiagnostics);
+  assert.deepEqual(diagnostics, [{
+    field: 'document[0]',
+    declared: 'application/pdf',
+    detected: 'jpeg',
+    bytes: jpeg.length,
+    firstBytes: 'ffd8ffe066616b65'
+  }]);
+  assert.equal(rejected.properties.fileDiagnostics.includes('juan-perez'), false);
+});
+
 test('rejects binary content disguised as a TXT document', async () => {
   const req = createMultipartRequest(validFields, [{
     field: 'document',

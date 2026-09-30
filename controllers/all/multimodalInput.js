@@ -21,7 +21,8 @@ const {
     getSuccessfulSummary,
     parseIframeParams,
     validateParsedMultimodalInput,
-    validateUploadedFiles
+    validateUploadedFiles,
+    describeUploadedFiles
 } = require('../../services/multimodalInputValidation');
 const {
     deleteUpload: deleteUploadImages,
@@ -205,7 +206,8 @@ function trackMultimodalInputRejected({
     files,
     validationFields = [],
     phase = 'validation',
-    code = ''
+    code = '',
+    fileDiagnostics = null
 }) {
     const upload = getUploadObservability(files);
     insights.trackEvent('MultimodalInputRejected', {
@@ -215,6 +217,7 @@ function trackMultimodalInputRejected({
         validationFields: JSON.stringify(validationFields),
         phase,
         code,
+        ...(fileDiagnostics ? { fileDiagnostics: JSON.stringify(fileDiagnostics) } : {}),
         ...upload.properties
     }, {
         durationMs: Date.now() - requestStartedAt,
@@ -360,7 +363,9 @@ const processMultimodalInput = async (req, res) => {
                     files: req.files,
                     validationFields: validationErrors.map(
                         (error) => error.field
-                    )
+                    ),
+                    // Tipo real de cada archivo: distingue una foto renombrada a .pdf de un PDF corrupto.
+                    fileDiagnostics: describeUploadedFiles(req.files)
                 });
                 return res.status(400).json({
                     result: 'error',
