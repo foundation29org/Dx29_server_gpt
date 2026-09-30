@@ -7,6 +7,7 @@ const axios = require('axios')
 const multer = require('multer')
 const config = require('../../config')
 const insights = require('../../services/insights')
+const { extractProviderError } = require('../../services/aiUtils')
 const CostTrackingService = require('../../services/costTrackingService')
 const { calculateTranscriptionPrice } = require('../../services/costUtils')
 
@@ -128,16 +129,23 @@ async function transcribe(req, res) {
     return res.status(200).send({ text: hasSpeech(text) ? text : '' })
   } catch (error) {
     saveTranscriptionCost({ tenantId, body: req.body, durationMs: Date.now() - startedAt, success: false, error })
-    insights.error({
-      message: 'Audio transcription failed',
-      error: error.message,
-      status: error.response?.status,
-      detail: error.response?.data?.error?.code,
-      audioBytes: file.buffer.length,
-      mimeType,
-      language,
-      tenantId: req.headers['x-tenant-id']
-    })
+    // insights.error solo promueve unos pocos campos del objeto `message`; el resto
+    // (uuid, estado, motivo del proveedor, tamaño) debe ir como `properties` o se pierde.
+    insights.error(
+      {
+        message: 'Audio transcription failed',
+        error: error.message,
+        mimeType,
+        tenantId
+      },
+      {
+        myuuid: req.body?.myuuid || 'unknown',
+        statusCode: String(error.response?.status || 'network'),
+        audioBytes: String(file.buffer.length),
+        language: language || 'none',
+        ...extractProviderError(error)
+      }
+    )
     const status = error.response?.status === 429 ? 429 : 502
     return res.status(status).send({ message: 'Could not transcribe audio' })
   }
