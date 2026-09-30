@@ -379,6 +379,17 @@ paths:
                 model:
                   type: string
                   maxLength: 200
+                fileNames:
+                  description: Uploaded file names only. String or array of strings.
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                lang:
+                  type: string
+                  minLength: 2
+                  maxLength: 8
       responses:
         "200":
           description: Feedback stored

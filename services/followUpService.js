@@ -10,6 +10,11 @@ const { isValidUploadId } = require('./multimodalUploadService');
 const NO_WRITTEN_DESCRIPTION =
   'No written description: the case was submitted as medical images, which are not shown here. Do not repeat this note in your output.';
 
+// Cada ronda de preguntas reescribe la descripción. Sin tope, unas pocas rondas
+// superan los 8000 caracteres que admiten Diagnose, follow-up y disease/info.
+const UPDATED_DESCRIPTION_LENGTH_RULE =
+  'Stay under 5000 characters: merge repeated or overlapping details into one statement instead of appending, but never drop a clinical fact.';
+
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
 }
@@ -877,12 +882,14 @@ async function processFollowUpAnswers(req, res) {
       4. Do not infer facts that are not explicitly contained in the original description or answers.
       5. Include known negative findings and explicitly unknown or unperformed tests when provided.
       6. Do not include the questions themselves in the final description.
+      7. ${UPDATED_DESCRIPTION_LENGTH_RULE}
     ` : `
       1. Maintain all relevant information from the original description.
       2. Seamlessly incorporate the new information from the answers.
       3. Be well-organized and clear.
       4. Be written in first person, as if the patient is describing their symptoms.
       5. Not include the questions themselves, only the information.
+      6. ${UPDATED_DESCRIPTION_LENGTH_RULE}
     `;
 
     const prompt = `

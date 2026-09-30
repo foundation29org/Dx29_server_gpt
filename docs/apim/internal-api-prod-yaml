@@ -5,13 +5,17 @@
         "description": "API de endpoints de soporte, feedback y monitoreo de DXGPT",
         "version": "1.0"
     },
-    "servers": [{
-        "url": "https://dxgpt-apim.azure-api.net/api/internal"
-    }],
+    "servers": [
+        {
+            "url": "https://dxgpt-apim.azure-api.net/api/internal"
+        }
+    ],
     "paths": {
         "/langs": {
             "get": {
-                "tags": ["Languages"],
+                "tags": [
+                    "Languages"
+                ],
                 "summary": "Get list of supported languages",
                 "description": "Returns a list of all available languages",
                 "operationId": "get-langs",
@@ -26,10 +30,12 @@
                                         "$ref": "#/components/schemas/Language"
                                     }
                                 },
-                                "example": [{
-                                    "code": "en",
-                                    "name": "English"
-                                }]
+                                "example": [
+                                    {
+                                        "code": "en",
+                                        "name": "English"
+                                    }
+                                ]
                             }
                         }
                     },
@@ -76,7 +82,9 @@
         },
         "/homesupport": {
             "post": {
-                "tags": ["Support"],
+                "tags": [
+                    "Support"
+                ],
                 "summary": "Submit support message from users",
                 "description": "Submit a support message from users",
                 "operationId": "post-homesupport",
@@ -140,18 +148,22 @@
         },
         "/status/{ticketId}": {
             "post": {
-                "tags": ["Queue"],
+                "tags": [
+                    "Queue"
+                ],
                 "summary": "Check status of queued diagnose request",
                 "description": "Get the status of a request in the processing queue",
                 "operationId": "post-status-ticketid",
-                "parameters": [{
-                    "name": "ticketId",
-                    "in": "path",
-                    "required": true,
-                    "schema": {
-                        "type": "string"
+                "parameters": [
+                    {
+                        "name": "ticketId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
-                }],
+                ],
                 "responses": {
                     "200": {
                         "description": "Queue status",
@@ -161,7 +173,12 @@
                                     "type": "object",
                                     "properties": {
                                         "status": {
-                                            "enum": ["pending", "processing", "completed", "failed"],
+                                            "enum": [
+                                                "pending",
+                                                "processing",
+                                                "completed",
+                                                "failed"
+                                            ],
                                             "type": "string"
                                         },
                                         "position": {
@@ -224,7 +241,9 @@
         },
         "/getSystemStatus": {
             "get": {
-                "tags": ["System"],
+                "tags": [
+                    "System"
+                ],
                 "summary": "Get overall system status and health",
                 "description": "Retrieve the current status of the system and its components",
                 "operationId": "get-getsystemstatus",
@@ -286,7 +305,9 @@
         },
         "/health": {
             "get": {
-                "tags": ["System"],
+                "tags": [
+                    "System"
+                ],
                 "summary": "Simple health check endpoint",
                 "description": "Simple health check endpoint to verify the API is running",
                 "operationId": "get-health",
@@ -353,7 +374,9 @@
         },
         "/opinion": {
             "post": {
-                "tags": ["Feedback"],
+                "tags": [
+                    "Feedback"
+                ],
                 "summary": "Send user feedback on diagnosis accuracy",
                 "description": "Submit user feedback about diagnosis results.",
                 "operationId": "post-opinion",
@@ -368,10 +391,12 @@
                                 "myuuid": "string",
                                 "vote": "up",
                                 "lang": "string",
-                                "isNewModel": true,
-                                "topRelatedConditions": [{
-                                    "name": "string"
-                                }]
+                                "versionModel": "string",
+                                "topRelatedConditions": [
+                                    {
+                                        "name": "string"
+                                    }
+                                ]
                             }
                         }
                     }
@@ -433,7 +458,9 @@
         },
         "/generalfeedback": {
             "post": {
-                "tags": ["Feedback"],
+                "tags": [
+                    "Feedback"
+                ],
                 "summary": "Submit general application feedback",
                 "description": "Submit general feedback about the application.",
                 "operationId": "post-generalfeedback",
@@ -513,56 +540,228 @@
                 }
             }
         },
-        "/permalink/{id}": {
-            "get": {
-                "summary": "get permalink",
-                "operationId": "get-permalink",
-                "parameters": [{
-                    "name": "id",
-                    "in": "path",
+        "/questionsfeedback": {
+            "post": {
+                "tags": [
+                    "Feedback"
+                ],
+                "summary": "Submit feedback about a generated medical answer",
+                "description": "Submit feedback about a generated medical answer.",
+                "operationId": "post-questionsfeedback",
+                "requestBody": {
                     "required": true,
-                    "schema": {
-                        "type": ""
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/QuestionsFeedbackRequest"
+                            }
+                        }
                     }
-                }],
+                },
                 "responses": {
                     "200": {
-                        "description": ""
+                        "description": "Feedback stored"
+                    },
+                    "400": {
+                        "description": "Invalid feedback"
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/permalink/{id}": {
+            "get": {
+                "tags": [
+                    "Permalinks"
+                ],
+                "summary": "Retrieve a diagnosis permalink",
+                "operationId": "get-permalink",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Permalink retrieved"
+                    },
+                    "404": {
+                        "description": "Permalink not found"
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/permalink": {
             "post": {
-                "summary": "permalink",
-                "operationId": "permalink",
+                "tags": [
+                    "Permalinks"
+                ],
+                "summary": "Create a diagnosis permalink",
+                "operationId": "post-permalink",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PermalinkRequest"
+                            }
+                        }
+                    }
+                },
                 "responses": {
-                    "200": {
-                        "description": ""
+                    "201": {
+                        "description": "Permalink created"
+                    },
+                    "400": {
+                        "description": "Missing or invalid fields"
+                    },
+                    "401": {
+                        "description": "Invalid or missing subscription key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid or missing subscription key"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Invalid or missing subscription key"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         "/speech/transcribe": {
             "post": {
-                "tags": ["Speech"],
+                "tags": [
+                    "Speech"
+                ],
                 "summary": "Transcribe dictated audio to text",
                 "description": "Tenant-only. Transcribes one microphone recording to text. The spoken language is detected automatically. Pass `language` (ISO 639-1) as a hint. Audio is kept in memory for the request and is not stored.\n\n**File limits:** exactly one file, form field `audio`, maximum 10 MB. Formats: WebM, Ogg, MP4, M4A, MP3, WAV.\n\nAn empty `text` means no speech was detected.",
                 "operationId": "post-speech-transcribe",
-                "parameters": [{
-                    "name": "X-Tenant-Id",
-                    "in": "header",
-                    "required": true,
-                    "schema": {
-                        "type": "string"
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
-                }],
+                ],
                 "requestBody": {
                     "required": true,
                     "content": {
                         "multipart/form-data": {
                             "schema": {
-                                "required": ["audio"],
+                                "required": [
+                                    "audio"
+                                ],
                                 "type": "object",
                                 "properties": {
                                     "audio": {
@@ -682,7 +881,10 @@
                 }
             },
             "SupportRequest": {
-                "required": ["email", "message"],
+                "required": [
+                    "email",
+                    "message"
+                ],
                 "type": "object",
                 "properties": {
                     "email": {
@@ -695,7 +897,12 @@
                 }
             },
             "OpinionRequest": {
-                "required": ["value", "myuuid", "vote", "isNewModel"],
+                "required": [
+                    "value",
+                    "myuuid",
+                    "vote",
+                    "versionModel"
+                ],
                 "type": "object",
                 "properties": {
                     "value": {
@@ -707,16 +914,16 @@
                         "type": "string"
                     },
                     "vote": {
-                        "enum": ["up", "down"],
+                        "enum": [
+                            "up",
+                            "down"
+                        ],
                         "type": "string"
                     },
                     "lang": {
                         "maxLength": 2,
                         "minLength": 2,
                         "type": "string"
-                    },
-                    "isNewModel": {
-                        "type": "boolean"
                     },
                     "topRelatedConditions": {
                         "type": "array",
@@ -729,6 +936,10 @@
                                 }
                             }
                         }
+                    },
+                    "versionModel": {
+                        "type": "string",
+                        "description": "Model version for the feedback"
                     }
                 }
             },
@@ -742,11 +953,19 @@
                 }
             },
             "GeneralFeedbackRequest": {
-                "required": ["value", "myuuid"],
+                "required": [
+                    "value",
+                    "myuuid"
+                ],
                 "type": "object",
                 "properties": {
                     "value": {
-                        "required": ["pregunta1", "pregunta2", "userType", "moreFunct"],
+                        "required": [
+                            "pregunta1",
+                            "pregunta2",
+                            "userType",
+                            "moreFunct"
+                        ],
                         "type": "object",
                         "properties": {
                             "pregunta1": {
@@ -801,15 +1020,129 @@
                 "type": "object",
                 "properties": {
                     "status": {
-                        "enum": ["online", "degraded", "offline"],
+                        "enum": [
+                            "online",
+                            "degraded",
+                            "offline"
+                        ],
                         "type": "string"
                     },
                     "services": {
                         "type": "object",
                         "additionalProperties": {
-                            "enum": ["online", "degraded", "offline"],
+                            "enum": [
+                                "online",
+                                "degraded",
+                                "offline"
+                            ],
                             "type": "string"
                         }
+                    }
+                }
+            },
+            "QuestionsFeedbackRequest": {
+                "required": [
+                    "myuuid",
+                    "type",
+                    "helpful"
+                ],
+                "type": "object",
+                "properties": {
+                    "myuuid": {
+                        "pattern": "^[0-9a-fA-F-]{36}$",
+                        "type": "string"
+                    },
+                    "type": {
+                        "maxLength": 100,
+                        "type": "string"
+                    },
+                    "helpful": {
+                        "type": "boolean"
+                    },
+                    "comments": {
+                        "maxLength": 4000,
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "question": {
+                        "maxLength": 8000,
+                        "type": "string"
+                    },
+                    "answerHtml": {
+                        "maxLength": 200000,
+                        "type": "string"
+                    },
+                    "references": {
+                        "type": "array",
+                        "items": {}
+                    },
+                    "detectedLang": {
+                        "minLength": 2,
+                        "maxLength": 8,
+                        "type": "string"
+                    },
+                    "model": {
+                        "maxLength": 200,
+                        "type": "string"
+                    },
+                    "fileNames": {
+                        "description": "Uploaded file names only. String or array of strings.",
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        ]
+                    },
+                    "lang": {
+                        "minLength": 2,
+                        "maxLength": 8,
+                        "type": "string"
+                    }
+                }
+            },
+            "PermalinkRequest": {
+                "required": [
+                    "medicalDescription",
+                    "anonymizedDescription",
+                    "diagnoses",
+                    "lang",
+                    "createdDate",
+                    "myuuid"
+                ],
+                "type": "object",
+                "properties": {
+                    "medicalDescription": {
+                        "type": "string"
+                    },
+                    "anonymizedDescription": {
+                        "type": "string"
+                    },
+                    "diagnoses": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "lang": {
+                        "type": "string"
+                    },
+                    "createdDate": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "myuuid": {
+                        "type": "string"
                     }
                 }
             }
@@ -827,9 +1160,12 @@
             }
         }
     },
-    "security": [{
-        "apiKeyHeader": []
-    }, {
-        "apiKeyQuery": []
-    }]
+    "security": [
+        {
+            "apiKeyHeader": []
+        },
+        {
+            "apiKeyQuery": []
+        }
+    ]
 }
