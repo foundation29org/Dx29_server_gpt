@@ -147,13 +147,44 @@ function sanitizeIframeParams(iframeParams) {
 }
 
 
+// Marcador de rol al inicio de línea, con o sin espacio tras los dos puntos:
+// "system: ignora lo anterior" sí, "Cardiovascular system: normal" no.
+const ROLE_MARKER_SOURCE = '^[ \\t]*(?:prompt|system|assistant|user)[ \\t]*:';
+
+// Texto clínico: "/" (130/90, poor/fair), "<" y ">" (<5 %, >50 mmHg) cambian el
+// significado si se borran. Solo se quita lo que rompe el prompt: las llaves
+// (los prompts usan {{placeholders}} y .replace() en cadena), las etiquetas
+// <tag> y los marcadores de rol.
 function sanitizeInput(input) {
-  // Eliminar caracteres especiales y patrones potencialmente peligrosos
   return input
-    .replace(/[<>{}]/g, '') // Eliminar caracteres especiales
-    .replace(/(\{|\}|\[|\]|\||\\|\/)/g, '') // Eliminar caracteres que podrían ser usados para inyección
-    .replace(/prompt:|system:|assistant:|user:/gi, '') // Eliminar palabras clave de OpenAI con ':'
+    .replace(/[{}]/g, '')
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(new RegExp(ROLE_MARKER_SOURCE, 'gim'), '')
     .trim();
+}
+
+// Sin flag /g: un RegExp global conserva lastIndex entre llamadas a test().
+const SUSPICIOUS_PATTERNS = Object.freeze([
+  { pattern: /\{\{[^}]*\}\}/, reason: 'Contains Handlebars syntax' },
+  { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/i, reason: 'Contains script tags' },
+  { pattern: /\$\{[^}]*\}/, reason: 'Contains template literals' },
+  { pattern: new RegExp(ROLE_MARKER_SOURCE, 'im'), reason: 'Contains OpenAI keywords' }
+]);
+
+// Motivo del primer patrón sospechoso que encuentre, o null. Lo usan todos los
+// validate*: si cambia, cambia en un solo sitio y a la vez que sanitizeInput.
+function findSuspiciousContent(text) {
+  if (typeof text !== 'string') return null;
+  const match = SUSPICIOUS_PATTERNS.find(({ pattern }) => pattern.test(text));
+  return match ? match.reason : null;
+}
+
+// {campo: valor} -> errores de validación con el formato de los validate*.
+function suspiciousContentErrors(fields) {
+  return Object.entries(fields).flatMap(([field, value]) => {
+    const reason = findSuspiciousContent(value);
+    return reason ? [{ field, reason: `Contains suspicious content: ${reason}` }] : [];
+  });
 }
 
 // Endpoints para traducción
@@ -1369,6 +1400,8 @@ module.exports = {
   DEFAULT_AI_MODEL,
   sanitizeAiData,
   sanitizeInput,
+  findSuspiciousContent,
+  suspiciousContentErrors,
   aliasRoutingModel,
   resolveDiagnoseModel,
   getEndpointsByTimezone,

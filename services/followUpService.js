@@ -1,4 +1,4 @@
-const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
+const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -14,6 +14,15 @@ const NO_WRITTEN_DESCRIPTION =
 // superan los 8000 caracteres que admiten Diagnose, follow-up y disease/info.
 const UPDATED_DESCRIPTION_LENGTH_RULE =
   'Stay under 5000 characters: merge repeated or overlapping details into one statement instead of appending, but never drop a clinical fact.';
+
+// El texto reescrito alimenta todos los diagnósticos posteriores: un síntoma
+// inventado aquí se arrastra y se cita como coincidencia en cada ronda.
+const INTERPRET_ANSWERS_RULE =
+  'Interpret each short answer (yes, no, unsure, skipped) only in the context of its associated question.';
+const NO_INFERENCE_RULE =
+  'Do not infer facts that are not explicitly stated in the original description or the answers. A diagnosis or condition the author mentions (for example POTS or EDS) is not evidence of the symptoms it usually causes: never add those symptoms, or values such as blood pressure, unless stated.';
+const CORRECTIONS_RULE =
+  'When an answer corrects or contradicts the description, keep only the corrected fact and remove the outdated statement.';
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -79,31 +88,7 @@ function validateFollowUpQuestionsRequest(data) {
   }
 
   // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-  ];
-
-  if (data.description) {
-    const normalizedDescription = data.description.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDescription)) {
-        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
-  if (data.diseases) {
-    const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDiseases)) {
-        errors.push({ field: 'diseases', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
+  errors.push(...suspiciousContentErrors({ description: data.description, diseases: data.diseases }));
 
   return errors;
 }
@@ -647,42 +632,13 @@ function validateProcessFollowUpRequest(data) {
   }
 
   // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-  ];
-
-  if (data.description) {
-    const normalizedDescription = data.description.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDescription)) {
-        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
+  errors.push(...suspiciousContentErrors({ description: data.description }));
   if (Array.isArray(data.answers)) {
     data.answers.forEach((answer, idx) => {
-      if (answer && typeof answer.question === 'string') {
-        const normalizedQ = answer.question.replace(/\n/g, ' ');
-        for (const { pattern, reason } of suspiciousPatterns) {
-          if (pattern.test(normalizedQ)) {
-            errors.push({ field: `answers[${idx}].question`, reason: `Contains suspicious content: ${reason}` });
-            break;
-          }
-        }
-      }
-      if (answer && typeof answer.answer === 'string') {
-        const normalizedA = answer.answer.replace(/\n/g, ' ');
-        for (const { pattern, reason } of suspiciousPatterns) {
-          if (pattern.test(normalizedA)) {
-            errors.push({ field: `answers[${idx}].answer`, reason: `Contains suspicious content: ${reason}` });
-            break;
-          }
-        }
-      }
+      errors.push(...suspiciousContentErrors({
+        [`answers[${idx}].question`]: answer?.question,
+        [`answers[${idx}].answer`]: answer?.answer
+      }));
     });
   }
 
@@ -877,19 +833,23 @@ async function processFollowUpAnswers(req, res) {
 
     const updateRequirements = mode === 'hypothesis' ? `
       1. Preserve every relevant fact and the original perspective of the clinical description.
-      2. Interpret each short answer only in the context of its associated question.
+      2. ${INTERPRET_ANSWERS_RULE}
       3. Convert question-answer pairs into clear, self-contained clinical statements.
-      4. Do not infer facts that are not explicitly contained in the original description or answers.
+      4. ${NO_INFERENCE_RULE}
       5. Include known negative findings and explicitly unknown or unperformed tests when provided.
       6. Do not include the questions themselves in the final description.
       7. ${UPDATED_DESCRIPTION_LENGTH_RULE}
+      8. ${CORRECTIONS_RULE}
     ` : `
-      1. Maintain all relevant information from the original description.
-      2. Seamlessly incorporate the new information from the answers.
-      3. Be well-organized and clear.
-      4. Be written in first person, as if the patient is describing their symptoms.
-      5. Not include the questions themselves, only the information.
-      6. ${UPDATED_DESCRIPTION_LENGTH_RULE}
+      1. Maintain all relevant information from the original description, keeping numbers, units and values exactly as written (for example blood pressure 130/90).
+      2. ${INTERPRET_ANSWERS_RULE}
+      3. Seamlessly incorporate the new information from the answers.
+      4. ${NO_INFERENCE_RULE}
+      5. Keep the perspective of the original description: first person if the author describes their own symptoms, third person if a clinician describes a patient. With no written description, use first person, as if the patient is describing their symptoms.
+      6. Be well-organized and clear.
+      7. Not include the questions themselves, only the information.
+      8. ${UPDATED_DESCRIPTION_LENGTH_RULE}
+      9. ${CORRECTIONS_RULE}
     `;
 
     const prompt = `
@@ -1148,31 +1108,7 @@ function validateERQuestionsRequest(data) {
   }
 
   // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-  ];
-
-  if (data.description) {
-    const normalizedDescription = data.description.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDescription)) {
-        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
-  if (data.diseases) {
-    const normalizedDiseases = data.diseases.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDiseases)) {
-        errors.push({ field: 'diseases', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
+  errors.push(...suspiciousContentErrors({ description: data.description, diseases: data.diseases }));
 
   return errors;
 }

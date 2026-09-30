@@ -1,4 +1,4 @@
-const { translateInvertWithRetry, sanitizeInput, callAiWithFailover, extractProviderError } = require('./aiUtils');
+const { translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -76,31 +76,10 @@ function validateQuestionRequest(data) {
     }
   
     // Verificar patrones sospechosos
-    const suspiciousPatterns = [
-      { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-      { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-      { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-      { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-    ];
-  
-    if (data.disease) {
-      const normalizedDisease = data.disease.replace(/\n/g, ' ');
-      for (const { pattern, reason } of suspiciousPatterns) {
-        if (pattern.test(normalizedDisease)) {
-          errors.push({ field: 'disease', reason: `Contains suspicious content: ${reason}` });
-          break;
-        }
-      }
-    }
-    if ([3, 4, 5, 6].includes(data.questionType) && data.medicalDescription) {
-      const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
-      for (const { pattern, reason } of suspiciousPatterns) {
-        if (pattern.test(normalizedMedicalDescription)) {
-          errors.push({ field: 'medicalDescription', reason: `Contains suspicious content: ${reason}` });
-          break;
-        }
-      }
-    }
+    errors.push(...suspiciousContentErrors({
+      disease: data.disease,
+      medicalDescription: [3, 4, 5, 6].includes(data.questionType) ? data.medicalDescription : undefined
+    }));
 
     validateUploadReferenceFields(data, errors);
   

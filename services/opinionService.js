@@ -3,6 +3,8 @@ const OpinionStats = require('../models/opinionstats');
 const serviceEmail = require('./email');
 const { resolveDiagnoseModel } = require('./aiUtils');
 
+const OPINION_VALUE_MAX_LENGTH = 10000;
+
 function getHeader(req, name) {
     return req.headers[name.toLowerCase()];
 }
@@ -19,9 +21,10 @@ function validateOpinionData(data) {
     errors.push({ field: 'value', reason: 'Field is required' });
   } else if (typeof data.value !== 'string') {
     errors.push({ field: 'value', reason: 'Must be a string' });
-  } else if (data.value.length > 10000) {
-    errors.push({ field: 'value', reason: 'Must not exceed 10000 characters' });
   }
+  // Sin límite de longitud aquí: el cliente envía texto original + traducción, que con
+  // casos de hasta 8000 caracteres supera OPINION_VALUE_MAX_LENGTH. `value` no se persiste,
+  // así que rechazar el voto por esto solo perdía la estadística. Se trunca al sanitizar.
 
   if (!data.myuuid) {
     errors.push({ field: 'myuuid', reason: 'Field is required' });
@@ -63,24 +66,9 @@ function validateOpinionData(data) {
     }
   }
 
-  // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-  ];
-
-  if (data.value) {
-    const normalizedValue = data.value.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedValue)) {
-        errors.push({ field: 'value', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
-
+  // `value` no se persiste ni llega a ningún LLM (solo se guarda la estadística del voto),
+  // así que no hay filtro de "contenido sospechoso": solo rechazaba casos clínicos legítimos
+  // que contenían, por ejemplo, "user:" o "{{ }}".
   return errors;
 }
 
@@ -92,6 +80,7 @@ function sanitizeOpinionData(data) {
         .replace(/[<>]/g, '')
         .replace(/(\{|\}|\||\\)/g, '')
         .replace(/prompt:|system:|assistant:|user:/gi, '')
+        .slice(0, OPINION_VALUE_MAX_LENGTH)
         .trim()
       : '',
     myuuid: typeof data.myuuid === 'string' ? data.myuuid.trim() : '',
@@ -112,19 +101,20 @@ function sanitizeOpinionData(data) {
 }
 
 async function opinion(req, res) {
-  try {
-    // Obtener headers
-    const subscriptionId = getHeader(req, 'x-subscription-id');
-    const tenantId = getHeader(req, 'X-Tenant-Id');
+  // Fuera del try: el catch también los necesita (antes daba ReferenceError al loguear el fallo).
+  const subscriptionId = getHeader(req, 'x-subscription-id');
+  const tenantId = getHeader(req, 'X-Tenant-Id');
+  // Nunca el body entero: lleva el caso clínico. Solo metadatos de trazabilidad.
+  const trace = { myuuid: req.body?.myuuid || 'unknown', endpoint: 'opinion' };
 
+  try {
     // Validar que al menos uno de los dos headers esté presente
     // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
     if (!tenantId && !subscriptionId) {
       insights.error({
         message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
-        headers: req.headers,
         endpoint: 'opinion'
-      });
+      }, trace);
       return res.status(400).send({
         result: "error",
         message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
@@ -135,11 +125,10 @@ async function opinion(req, res) {
     if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content",
-        request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
         subscriptionId: subscriptionId
-      });
+      }, trace);
       return res.status(400).send({
         result: "error",
         message: "Invalid request format",
@@ -173,13 +162,12 @@ async function opinion(req, res) {
   } catch (e) {
     let infoError = {
       error: e,
-      requestInfo: req.body,
       tenantId: tenantId,
       operation: 'opinion',
       subscriptionId: subscriptionId
     }
 
-    insights.error(infoError);
+    insights.error(infoError, trace);
     console.error("[ERROR] opinion responded with status: " + e)
     let lang = req.body.lang ? req.body.lang : 'en';
     serviceEmail.sendMailError(lang, req.body.value, e)

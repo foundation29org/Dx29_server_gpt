@@ -1,4 +1,4 @@
-const { translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData } = require('./aiUtils');
+const { translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData, suspiciousContentErrors } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -50,22 +50,7 @@ function validateSummarizeRequest(data) {
     }
   
     // Verificar patrones sospechosos
-    const suspiciousPatterns = [
-      { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-      { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-      { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-      { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-    ];
-  
-    if (data.description) {
-      const normalizedDescription = data.description.replace(/\n/g, ' ');
-      for (const { pattern, reason } of suspiciousPatterns) {
-        if (pattern.test(normalizedDescription)) {
-          errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
-          break;
-        }
-      }
-    }
+    errors.push(...suspiciousContentErrors({ description: data.description }));
   
     return errors;
   }

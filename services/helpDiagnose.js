@@ -18,7 +18,8 @@ const {
   translateInvertWithRetry,
   sanitizeAiData,
   parseJsonWithFixes,
-  resolveDiagnoseModel
+  resolveDiagnoseModel,
+  suspiciousContentErrors
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
@@ -2081,47 +2082,14 @@ function validateDiagnoseRequest(data) {
   validateUploadReferenceFields(data, errors);
 
   // Verificar patrones sospechosos
-  const suspiciousPatterns = [
-    { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-    { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-    { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-    { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-  ];
-
-  if (data.description) {
-    const normalizedDescription = data.description.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDescription)) {
-        errors.push({ field: 'description', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
-
-  if (data.diseases_list) {
-    const normalizedDiseasesList = data.diseases_list.replace(/\n/g, ' ');
-    for (const { pattern, reason } of suspiciousPatterns) {
-      if (pattern.test(normalizedDiseasesList)) {
-        errors.push({ field: 'diseases_list', reason: `Contains suspicious content: ${reason}` });
-        break;
-      }
-    }
-  }
-
-  // Verificar patrones sospechosos en iframeParams
-  if (data.iframeParams && typeof data.iframeParams === 'object') {
-    for (const [field, value] of Object.entries(data.iframeParams)) {
-      if (typeof value === 'string') {
-        const normalizedValue = value.replace(/\n/g, ' ');
-        for (const { pattern, reason } of suspiciousPatterns) {
-          if (pattern.test(normalizedValue)) {
-            errors.push({ field: `iframeParams.${field}`, reason: `Contains suspicious content: ${reason}` });
-            break;
-          }
-        }
-      }
-    }
-  }
+  const iframeEntries = data.iframeParams && typeof data.iframeParams === 'object'
+    ? Object.entries(data.iframeParams).map(([field, value]) => [`iframeParams.${field}`, value])
+    : [];
+  errors.push(...suspiciousContentErrors({
+    description: data.description,
+    diseases_list: data.diseases_list,
+    ...Object.fromEntries(iframeEntries)
+  }));
 
   return errors;
 }
