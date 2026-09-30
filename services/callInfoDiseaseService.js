@@ -1,4 +1,4 @@
-const { translateInvertWithRetry, sanitizeInput, callAiWithFailover } = require('./aiUtils');
+const { translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -13,6 +13,17 @@ const {
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
 const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5';
+
+// Cuerpo del email de error: NUNCA serializar el AxiosError entero (incluye api-key y las imágenes en base64).
+function buildSafeErrorEmailBody(error, myuuid) {
+  return JSON.stringify({
+    myuuid: myuuid || 'unknown',
+    name: error?.name,
+    message: error?.message,
+    status: error?.response?.status,
+    ...extractProviderError(error || {})
+  });
+}
 
 // Asegúrate de copiar la función getHeader si es necesaria
 function getHeader(req, name) {
@@ -65,31 +76,10 @@ function validateQuestionRequest(data) {
     }
   
     // Verificar patrones sospechosos
-    const suspiciousPatterns = [
-      { pattern: /\{\{[^}]*\}\}/g, reason: 'Contains Handlebars syntax' },
-      { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/gi, reason: 'Contains script tags' },
-      { pattern: /\$\{[^}]*\}/g, reason: 'Contains template literals' },
-      { pattern: /\b(prompt:|system:|assistant:|user:)\b/gi, reason: 'Contains OpenAI keywords' }
-    ];
-  
-    if (data.disease) {
-      const normalizedDisease = data.disease.replace(/\n/g, ' ');
-      for (const { pattern, reason } of suspiciousPatterns) {
-        if (pattern.test(normalizedDisease)) {
-          errors.push({ field: 'disease', reason: `Contains suspicious content: ${reason}` });
-          break;
-        }
-      }
-    }
-    if ([3, 4, 5, 6].includes(data.questionType) && data.medicalDescription) {
-      const normalizedMedicalDescription = data.medicalDescription.replace(/\n/g, ' ');
-      for (const { pattern, reason } of suspiciousPatterns) {
-        if (pattern.test(normalizedMedicalDescription)) {
-          errors.push({ field: 'medicalDescription', reason: `Contains suspicious content: ${reason}` });
-          break;
-        }
-      }
-    }
+    errors.push(...suspiciousContentErrors({
+      disease: data.disease,
+      medicalDescription: [3, 4, 5, 6].includes(data.questionType) ? data.medicalDescription : undefined
+    }));
 
     validateUploadReferenceFields(data, errors);
   
@@ -120,9 +110,8 @@ async function callInfoDisease(req, res) {
     if (!tenantId && !subscriptionId) {
         insights.error({
             message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
-            headers: req.headers,
             endpoint: 'callInfoDisease'
-        });
+        }, { myuuid: req.body?.myuuid || 'unknown' });
         return res.status(400).send({
             result: "error",
             message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
@@ -165,6 +154,19 @@ async function callInfoDisease(req, res) {
       // Validar los datos de entrada
       const validationErrors = validateQuestionRequest(req.body);
       if (validationErrors.length > 0) {
+        // Antes este 400 no dejaba rastro. Sin el body: lleva el caso clínico.
+        const description = req.body?.medicalDescription;
+        insights.error({
+          message: 'Invalid request format or content for disease info',
+          errors: validationErrors,
+          tenantId: tenantId,
+          subscriptionId: subscriptionId
+        }, {
+          myuuid: req.body?.myuuid || 'unknown',
+          endpoint: 'callInfoDisease',
+          questionType: String(req.body?.questionType),
+          descriptionLength: typeof description === 'string' ? String(description.length) : 'n/a'
+        });
         return res.status(400).send({
           result: "error",
           message: "Invalid request format",
@@ -657,7 +659,7 @@ async function callInfoDisease(req, res) {
           await serviceEmail.sendMailErrorGPTIP(
             req.body?.detectedLang || 'en',
             'API Error in callInfoDisease',
-            JSON.stringify(e),
+            buildSafeErrorEmailBody(e, req.body?.myuuid),
             tenantId,
             subscriptionId
           );
@@ -686,7 +688,7 @@ async function callInfoDisease(req, res) {
         await serviceEmail.sendMailErrorGPTIP(
           req.body?.detectedLang || 'en',
           'Error in callInfoDisease',
-          JSON.stringify(e),
+          buildSafeErrorEmailBody(e, req.body?.myuuid),
           tenantId,
           subscriptionId
         );

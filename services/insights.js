@@ -54,6 +54,16 @@ function error(message, properties = {}) {
         customProperties.errors = JSON.stringify(message.errors);
       }
     }
+
+    // `errors` solo lo pasan los rechazos de validación (400). Como excepción
+    // disparan "errors dxgpt" (exceptions/count), aunque el servicio esté bien.
+    if (typeof message === 'object' && message !== null && Array.isArray(message.errors)) {
+      trackEvent('RequestValidationRejected', {
+        message: stringException,
+        ...customProperties
+      });
+      return;
+    }
     
     const exception = new Error(stringException);
     if (stack) {

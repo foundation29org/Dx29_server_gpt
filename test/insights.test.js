@@ -80,6 +80,24 @@ test('keeps the request payload out of the exception message', () => {
   );
 });
 
+test('tracks validation rejections as an event, not an exception', () => {
+  insights.error({
+    message: 'Invalid request format or content',
+    errors: [{ field: 'description', reason: 'Must not exceed 8000 characters' }],
+    endpoint: 'diagnose',
+    request: { description: 'Do not index this value' }
+  });
+
+  assert.equal(tracked.exceptions.length, 0);
+  assert.equal(tracked.events[0].name, 'RequestValidationRejected');
+  assert.equal(tracked.events[0].properties.endpoint, 'diagnose');
+  assert.match(tracked.events[0].properties.errors, /Must not exceed 8000/);
+  assert.doesNotMatch(
+    JSON.stringify(tracked.events[0].properties),
+    /Do not index this value/
+  );
+});
+
 test('sends event dimensions as strings and metrics as measurements', () => {
   insights.trackEvent('MultimodalAnalysisCompleted', {
     correlationId: 'case-123',

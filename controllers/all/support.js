@@ -6,6 +6,7 @@
 const Support = require('../../models/support')
 const serviceEmail = require('../../services/email')
 const insights = require('../../services/insights')
+const { suspiciousContentErrors } = require('../../services/aiUtils')
 const axios = require('axios');
 const config = require('../../config')
 
@@ -40,18 +41,7 @@ function isValidSupportData(data) {
 	if (typeof data.lang !== 'string' || data.lang.length < 2 || data.lang.length > 8) return false;
   
 	// Verificar patrones sospechosos
-	const suspiciousPatterns = [
-		/\{\{[^}]*\}\}/g,  // Handlebars syntax
-		/<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Scripts
-		/\$\{[^}]*\}/g,    // Template literals
-		// Modificar la detección de palabras clave para evitar falsos positivos
-		/\b(prompt:|system:|assistant:|user:)\b/gi  // OpenAI keywords con ':'
-	];
-  
-	return !suspiciousPatterns.some(pattern => 
-	  pattern.test(data.userName) || 
-	  pattern.test(data.description)
-	);
+	return suspiciousContentErrors({ userName: data.userName, description: data.description }).length === 0;
   }
   
   function sanitizeSupportData(data) {

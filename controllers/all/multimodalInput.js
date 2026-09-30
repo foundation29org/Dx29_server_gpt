@@ -75,12 +75,36 @@ const uploadFields = upload.fields([
     { name: 'image', maxCount: MAX_IMAGE_FILES }
 ]);
 
+// Mensajes de Multer: 'aborted' (evento legacy de Node) y 'closed' (stream cerrado sin terminar).
+const CLIENT_ABORT_MESSAGES = new Set(['Request aborted', 'Request closed']);
+const CLIENT_ABORT_CODE = 'CLIENT_ABORTED';
+
+// El cliente se fue antes de terminar de subir: no es un fallo del servidor ni una
+// entrada inválida, y ya no hay a quién responder. Se mide como evento, no como excepción.
+function trackClientUploadAborted({ req, correlationId, tenantId, subscriptionId, requestStartedAt }) {
+    insights.trackEvent('MultimodalUploadAborted', {
+        correlationId,
+        tenantId: tenantId || '',
+        subscriptionId: subscriptionId || '',
+        myuuid: req.body?.myuuid || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown'
+    }, {
+        durationMs: Date.now() - requestStartedAt,
+        declaredBytes: Number(req.headers['content-length']) || 0
+    });
+}
+
 function parseMultipart(req, res) {
     return new Promise((resolve, reject) => {
         uploadFields(req, res, (error) => {
             if (error) {
                 error.phase = 'multipart';
                 error.httpStatus = 400;
+                // Multer emite este error sin código cuando el cliente cierra la conexión
+                // a mitad de la subida (pestaña cerrada, red móvil caída, usuario cancela).
+                if (CLIENT_ABORT_MESSAGES.has(error.message)) {
+                    error.code = CLIENT_ABORT_CODE;
+                }
                 reject(error);
                 return;
             }
@@ -657,6 +681,10 @@ const processMultimodalInput = async (req, res) => {
                     : {})
             });
     } catch (error) {
+        if (error.code === CLIENT_ABORT_CODE) {
+            trackClientUploadAborted({ req, correlationId, tenantId, subscriptionId, requestStartedAt });
+            return undefined;
+        }
         console.error('Error en processMultimodalInput:', {
             message: error.message,
             code: error.code,

@@ -26,6 +26,7 @@ stubModule('../services/aiUtils', {
   },
   translateInvertWithRetry: async (text) => text,
   sanitizeInput: (input) => input.trim(),
+  suspiciousContentErrors: () => [],
   callAiWithFailover: async (requestBody) => {
     state.prompts.push(requestBody.messages[0].content);
     return {

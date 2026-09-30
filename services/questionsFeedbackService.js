@@ -35,7 +35,8 @@ function validateQuestionsFeedbackData(data) {
     errors.push({ field: 'comments', reason: 'Invalid format' });
   }
 
-  if (data.email !== undefined && (typeof data.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email))) {
+  // El cliente manda email '' cuando el usuario no lo rellena: equivale a "sin email".
+  if (data.email !== undefined && data.email !== '' && (typeof data.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email))) {
     errors.push({ field: 'email', reason: 'Invalid email' });
   }
 
@@ -113,15 +114,16 @@ function sanitizeQuestionsFeedbackData(data) {
 async function sendQuestionsFeedback(req, res) {
   const subscriptionId = getHeader(req, 'x-subscription-id');
   const tenantId = getHeader(req, 'X-Tenant-Id');
+  // Nunca el body entero (lleva pregunta y respuesta clínicas) ni las cabeceras (claves).
+  const trace = { myuuid: req.body?.myuuid || 'unknown', endpoint: 'sendQuestionsFeedback' };
 
   // Validar que al menos uno de los dos headers esté presente
   // APIM convierte Ocp-Apim-Subscription-Key a x-subscription-id, tenants envían X-Tenant-Id
   if (!tenantId && !subscriptionId) {
     insights.error({
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
-      headers: req.headers,
       endpoint: 'sendQuestionsFeedback'
-    });
+    }, trace);
     return res.status(400).send({
       result: "error",
       message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
@@ -131,6 +133,13 @@ async function sendQuestionsFeedback(req, res) {
   try {
     const validationErrors = validateQuestionsFeedbackData(req.body);
     if (validationErrors.length > 0) {
+      // Antes este 400 no dejaba rastro: solo aparecía como request fallida sin motivo.
+      insights.error({
+        message: 'Invalid request format or content',
+        errors: validationErrors,
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      }, trace);
       return res.status(400).send({
         result: 'error',
         message: 'Invalid request format',
@@ -162,12 +171,11 @@ async function sendQuestionsFeedback(req, res) {
   } catch (e) {
     let infoError = {
       error: e,
-      requestInfo: req.body,
       tenantId: tenantId,
       operation: 'sendQuestionsFeedback',
       subscriptionId: subscriptionId
     };
-    insights.error(infoError);
+    insights.error(infoError, trace);
     return res.status(500).send('error');
   }
 }
