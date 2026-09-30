@@ -179,8 +179,8 @@ The cost tracking system allows calculating and storing the cost of AI operation
   diagnóstico y clasificación segura de imágenes
 - `gpt54mini` (`gpt-5.4-mini`) - Tareas auxiliares como intención,
   anonimización, resumen e información de enfermedades
-- `gpt5` (`gpt-5`) - Modelo multimodal anterior, conservado para rutas
-  internas compatibles
+- `gpt5` (`gpt-5`) - Retirado: se resuelve a `gpt56terra`, igual que `o3`.
+  Solo se conserva en los modelos de costes para leer registros históricos
 - `gpt5mini` (`gpt-5-mini`) - Modelo rápido y económico
 - `gpt5nano` (`gpt-5-nano`) - Detección y traducción ligeras
 - `gpt4o` - Ruta heredada de GPT-4 Omni
