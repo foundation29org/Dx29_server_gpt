@@ -28,6 +28,17 @@ function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
 }
 
+// Trazabilidad de un 400 por validación: quién (myuuid) y cuánto midió la descripción,
+// sin volcar el body (lleva el caso clínico).
+function validationRejectionProperties(req, endpoint) {
+  const description = req.body?.description;
+  return {
+    myuuid: req.body?.myuuid || 'unknown',
+    endpoint,
+    descriptionLength: typeof description === 'string' ? String(description.length) : 'n/a'
+  };
+}
+
 function validateCaseDescription(data, errors) {
   const imageCase = isValidUploadId(data.uploadId);
   const { description } = data;
@@ -145,11 +156,10 @@ async function generateFollowUpQuestions(req, res) {
     if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for follow-up questions",
-        request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
         subscriptionId: subscriptionId
-      });
+      }, validationRejectionProperties(req, 'generateFollowUpQuestions'));
       return res.status(400).send({
         result: "error",
         message: "Invalid request format",
@@ -700,11 +710,10 @@ async function processFollowUpAnswers(req, res) {
     if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for processing follow-up answers",
-        request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
         subscriptionId: subscriptionId
-      });
+      }, validationRejectionProperties(req, 'processFollowUpAnswers'));
       return res.status(400).send({
         result: "error",
         message: "Invalid request format",
@@ -1162,11 +1171,10 @@ async function generateERQuestions(req, res) {
     if (validationErrors.length > 0) {
       insights.error({
         message: "Invalid request format or content for ER questions",
-        request: req.body,
         errors: validationErrors,
         tenantId: tenantId,
         subscriptionId: subscriptionId
-      });
+      }, validationRejectionProperties(req, 'generateERQuestions'));
       return res.status(400).send({
         result: "error",
         message: "Invalid request format",

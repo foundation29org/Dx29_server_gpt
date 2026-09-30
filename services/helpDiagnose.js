@@ -2189,6 +2189,12 @@ async function handleDiagnoseOrAsk(req, res, flow) {
         productName.toLowerCase().includes('swa')
       );
       
+      // Quién (myuuid) y cuánto medía la descripción, sin volcar el body (lleva el caso clínico).
+      const validationTrace = {
+        myuuid: req.body?.myuuid || 'unknown',
+        descriptionLength: typeof req.body?.description === 'string' ? String(req.body.description.length) : 'n/a'
+      };
+
       const securityInfo = {
         hasAuthToken: !!authToken,
         authTokenLength: authToken ? authToken.length : 0,
@@ -2218,10 +2224,11 @@ async function handleDiagnoseOrAsk(req, res, flow) {
         origin: req.get('origin'),
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
         security: securityInfo
-      });
+      }, validationTrace);
       
       // También registrar como evento para facilitar búsquedas en Application Insights
       insights.trackEvent('DiagnoseValidationError', {
+        ...validationTrace,
         subscriptionId: subscriptionId,
         subscriptionName: apimSubscriptionName,
         tenantId: tenantId,

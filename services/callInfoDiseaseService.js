@@ -110,9 +110,8 @@ async function callInfoDisease(req, res) {
     if (!tenantId && !subscriptionId) {
         insights.error({
             message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required",
-            headers: req.headers,
             endpoint: 'callInfoDisease'
-        });
+        }, { myuuid: req.body?.myuuid || 'unknown' });
         return res.status(400).send({
             result: "error",
             message: "Missing required headers: at least one of X-Tenant-Id or Ocp-Apim-Subscription-Key is required"
@@ -155,6 +154,19 @@ async function callInfoDisease(req, res) {
       // Validar los datos de entrada
       const validationErrors = validateQuestionRequest(req.body);
       if (validationErrors.length > 0) {
+        // Antes este 400 no dejaba rastro. Sin el body: lleva el caso clínico.
+        const description = req.body?.medicalDescription;
+        insights.error({
+          message: 'Invalid request format or content for disease info',
+          errors: validationErrors,
+          tenantId: tenantId,
+          subscriptionId: subscriptionId
+        }, {
+          myuuid: req.body?.myuuid || 'unknown',
+          endpoint: 'callInfoDisease',
+          questionType: String(req.body?.questionType),
+          descriptionLength: typeof description === 'string' ? String(description.length) : 'n/a'
+        });
         return res.status(400).send({
           result: "error",
           message: "Invalid request format",

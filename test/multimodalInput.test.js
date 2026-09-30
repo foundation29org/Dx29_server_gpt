@@ -619,6 +619,46 @@ test('returns one 400 response for a Multer file validation error', async () => 
   ), false);
 });
 
+test('tracks a client that closes the connection mid-upload as an abort, not a rejection', async () => {
+  const complete = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'photo.png',
+    type: 'image/png',
+    content: PNG
+  }]);
+  const req = new Readable({ read() {} });
+  Object.assign(req, {
+    method: complete.method,
+    url: complete.url,
+    headers: complete.headers,
+    connection: complete.connection,
+    params: {},
+    query: {},
+    ip: complete.ip,
+    get: complete.get
+  });
+  // Solo llega el comienzo del cuerpo; el resto nunca se recibe.
+  req.push(Buffer.from('------dxgpt-test-boundary\r\nContent-Disposition: form-data; name="myuuid"\r\n'));
+  const res = createResponse();
+
+  const processing = processMultimodalInput(req, res);
+  // Un socket cerrado por el cliente emite 'aborted' y destruye el stream.
+  setImmediate(() => {
+    req.emit('aborted');
+    req.destroy();
+  });
+  await processing;
+
+  assert.equal(res.responseCount, 0);
+  assert.equal(state.diagnoseCalls.length, 0);
+  const aborted = state.insightEvents.find((event) => event.name === 'MultimodalUploadAborted');
+  assert.ok(aborted);
+  assert.equal(aborted.measurements.declaredBytes, Number(complete.headers['content-length']));
+  for (const other of ['MultimodalInputRejected', 'MultimodalAnalysisFailed']) {
+    assert.equal(state.insightEvents.some((event) => event.name === other), false);
+  }
+});
+
 test('validates required multipart fields after Multer parses them', async () => {
   const req = createMultipartRequest({
     myuuid: 'not-a-uuid',
