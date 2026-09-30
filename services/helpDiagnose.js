@@ -86,13 +86,10 @@ function buildVisionDiagnoseRequest(deploymentModel, prompt, imageUrls) {
   };
 }
 
-const VISION_DEPLOYMENT_NAMES = {
-  gpt5: 'gpt-5',
-  gpt56terra: 'gpt-5.6-terra'
-};
-
+// Solo el modelo por defecto (Terra) diagnostica con imágenes. En local se puede pedir
+// nano, mini o gpt4o, y esos siguen yendo solo con el texto.
 function isVisionDiagnoseModel(model) {
-  return Object.prototype.hasOwnProperty.call(VISION_DEPLOYMENT_NAMES, model);
+  return model === defaultModel;
 }
 
 function isLongDiagnoseModel(model) {
@@ -100,7 +97,6 @@ function isLongDiagnoseModel(model) {
     model === 'gpt5nano' ||
     model === 'gpt5mini' ||
     model === 'gpt54mini' ||
-    model === 'gpt5' ||
     model === 'gpt56terra'
   );
 }
@@ -1184,7 +1180,7 @@ ${medicalQuestionForModel}
       // Los bytes se leen aquí, no antes: data.imageUrls viaja por cola,
       // tracking y logs y solo debe llevar referencias.
       requestBody = buildVisionDiagnoseRequest(
-        VISION_DEPLOYMENT_NAMES[model],
+        'gpt-5.6-terra',
         helpDiagnosePrompt,
         await loadImageDataUrls(data.imageUrls, {
           myuuid: data.myuuid,
@@ -1609,8 +1605,6 @@ ${medicalQuestionForModel}
       } else {
         if (model == 'gpt4o') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-        } else if (model == 'gpt5') {
-          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5');
         } else if (model == 'gpt56terra') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt56terra');
         } else if (model == 'gpt5mini') {

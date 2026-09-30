@@ -19,8 +19,10 @@ const ROUTING_MODEL_ALIASES = {
   'gpt-5-mini': 'gpt5mini',
   gpt54mini: 'gpt54mini',
   'gpt-5.4-mini': 'gpt54mini',
-  gpt5: 'gpt5',
-  'gpt-5': 'gpt5',
+  // gpt-5 se retiró (su deployment aún tenía filtros de contenido): como "o3", cualquier
+  // cliente que lo pida recibe Terra.
+  gpt5: DEFAULT_AI_MODEL,
+  'gpt-5': DEFAULT_AI_MODEL,
   gpt56terra: 'gpt56terra',
   'gpt-5.6-terra': 'gpt56terra'
 };
@@ -29,7 +31,6 @@ const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt5nano: 'gpt-5-nano',
   gpt5mini: 'gpt-5-mini',
   gpt54mini: 'gpt-5.4-mini',
-  gpt5: 'gpt-5',
   gpt56terra: 'gpt-5.6-terra'
 };
 
@@ -54,10 +55,6 @@ const modelConfig = {
     apiVersion: '2024-02-15-preview',
     path: '/openai/deployments/normalcalls/chat/completions'
   },
-  'gpt-5': {
-    apiVersion: '2025-01-01-preview',
-    path: '/openai/deployments/gpt-5/chat/completions'
-  },
   'gpt-5-mini': {
     apiVersion: '2025-01-01-preview',
     path: '/openai/deployments/gpt-5-mini/chat/completions'
@@ -79,7 +76,7 @@ const modelConfig = {
 /**
  * Construye la URL completa de Azure OpenAI para un endpoint específico
  * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
- * @param {string} model - Modelo (gpt4o, gpt-5, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, gpt-5.6-terra)
+ * @param {string} model - Modelo (gpt4o, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, gpt-5.6-terra)
  * @returns {Object} - { url, apiKey, region, deployment } o null
  */
 function buildAzureOpenAIEndpoint(region, model) {
@@ -350,36 +347,6 @@ const endpointsMap = {
     other: [
       buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini'),
       buildAzureOpenAIEndpoint('as2', 'gpt-5.4-mini')
-    ]
-  },
-  gpt5: {
-    asia: [
-      buildAzureOpenAIEndpoint('as1', 'gpt-5'),
-      buildAzureOpenAIEndpoint('as2', 'gpt-5')
-    ],
-    europe: [
-      buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
-      buildAzureOpenAIEndpoint('us2', 'gpt-5')
-    ],
-    northamerica: [
-      buildAzureOpenAIEndpoint('us2', 'gpt-5'),
-      buildAzureOpenAIEndpoint('eu1', 'gpt-5')
-    ],
-    southamerica: [
-      buildAzureOpenAIEndpoint('us2', 'gpt-5'),
-      buildAzureOpenAIEndpoint('eu1', 'gpt-5')
-    ],
-    africa: [
-      buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
-      buildAzureOpenAIEndpoint('as2', 'gpt-5')
-    ],
-    oceania: [
-      buildAzureOpenAIEndpoint('as2', 'gpt-5'),
-      buildAzureOpenAIEndpoint('eu1', 'gpt-5')
-    ],
-    other: [
-      buildAzureOpenAIEndpoint('eu1', 'gpt-5'),
-      buildAzureOpenAIEndpoint('as2', 'gpt-5')
     ]
   },
   gpt56terra: {

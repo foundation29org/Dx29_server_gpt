@@ -30,7 +30,6 @@ const MODEL_PROCESSING_TIMES = {
   gpt5nano: 25, // 25 segundos
   gpt5mini: 40, // 40 segundos
   gpt54mini: 40, // 40 segundos
-  gpt5: 45, // 45 segundos
   gpt56terra: 45
 };
 
@@ -75,7 +74,7 @@ function getRegionFromTimezoneAndModel(timezone, model) {
     }
     return 'Sweden'; // Europa, África, Oceanía, etc.
   }
-  if (model === 'gpt5mini' || model === 'gpt5') {
+  if (model === 'gpt5mini') {
     if (tz?.includes('asia')) {
       return 'India';
     }

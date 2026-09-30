@@ -1,4 +1,4 @@
-const { translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError } = require('./aiUtils');
+const { translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError, DEFAULT_AI_MODEL } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -11,8 +11,10 @@ const {
 } = require('./multimodalUploadService');
 
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
-const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
-const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5';
+// Con imágenes se usa el mismo modelo que el resto del flujo multimodal (clasificador y
+// diagnóstico). Se quedó en gpt-5 desde abril, cuando el resto aún no había migrado.
+const CALL_INFO_DISEASE_IMAGE_MODEL = DEFAULT_AI_MODEL;
+const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5.6-terra';
 
 // Cuerpo del email de error: NUNCA serializar el AxiosError entero (incluye api-key y las imágenes en base64).
 function buildSafeErrorEmailBody(error, myuuid) {
