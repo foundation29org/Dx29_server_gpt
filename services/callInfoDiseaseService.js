@@ -1,4 +1,4 @@
-const { translateInvertWithRetry, sanitizeInput, callAiWithFailover } = require('./aiUtils');
+const { translateInvertWithRetry, sanitizeInput, callAiWithFailover, extractProviderError } = require('./aiUtils');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -13,6 +13,17 @@ const {
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt5';
 const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5';
+
+// Cuerpo del email de error: NUNCA serializar el AxiosError entero (incluye api-key y las imágenes en base64).
+function buildSafeErrorEmailBody(error, myuuid) {
+  return JSON.stringify({
+    myuuid: myuuid || 'unknown',
+    name: error?.name,
+    message: error?.message,
+    status: error?.response?.status,
+    ...extractProviderError(error || {})
+  });
+}
 
 // Asegúrate de copiar la función getHeader si es necesaria
 function getHeader(req, name) {
@@ -657,7 +668,7 @@ async function callInfoDisease(req, res) {
           await serviceEmail.sendMailErrorGPTIP(
             req.body?.detectedLang || 'en',
             'API Error in callInfoDisease',
-            JSON.stringify(e),
+            buildSafeErrorEmailBody(e, req.body?.myuuid),
             tenantId,
             subscriptionId
           );
@@ -686,7 +697,7 @@ async function callInfoDisease(req, res) {
         await serviceEmail.sendMailErrorGPTIP(
           req.body?.detectedLang || 'en',
           'Error in callInfoDisease',
-          JSON.stringify(e),
+          buildSafeErrorEmailBody(e, req.body?.myuuid),
           tenantId,
           subscriptionId
         );

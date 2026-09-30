@@ -467,6 +467,28 @@ function getEndpointHost(endpoint) {
   }
 }
 
+const PROVIDER_ERROR_MESSAGE_MAX_LENGTH = 300;
+
+// Extrae el motivo real del 4xx/5xx del proveedor (p.ej. content_filter).
+// AxiosError.toJSON() NO serializa `response`, por eso antes se perdía.
+function extractProviderError(error) {
+  const providerError = error.response?.data?.error;
+  if (!providerError) return {};
+  const filterResults = providerError.innererror?.content_filter_result;
+  const triggeredFilters = filterResults
+    ? Object.entries(filterResults)
+        .filter(([, result]) => result?.filtered)
+        .map(([category]) => category)
+        .join(',')
+    : '';
+  return {
+    providerErrorCode: String(providerError.code || 'unknown'),
+    providerInnerCode: String(providerError.innererror?.code || 'none'),
+    providerErrorMessage: String(providerError.message || '').slice(0, PROVIDER_ERROR_MESSAGE_MAX_LENGTH),
+    providerFilteredCategories: triggeredFilters || 'none'
+  };
+}
+
 function buildFailureTelemetry(
   endpoint,
   nextEndpoint,
@@ -474,9 +496,13 @@ function buildFailureTelemetry(
   normalizedModel,
   retryCount,
   timeoutMs,
-  willRetry
+  willRetry,
+  dataRequest = null
 ) {
   return {
+    myuuid: String(dataRequest?.myuuid || 'unknown'),
+    tenantId: String(dataRequest?.tenantId || 'unknown'),
+    ...extractProviderError(error),
     model: String(normalizedModel),
     endpointRegion: String(endpoint?.region || 'unknown'),
     endpointHost: getEndpointHost(endpoint),
@@ -560,7 +586,8 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
       normalizedModel,
       retryCount,
       timeoutMs,
-      shouldRetry
+      shouldRetry,
+      _dataRequest
     );
 
     if (shouldRetry) {
@@ -1346,6 +1373,7 @@ module.exports = {
   resolveDiagnoseModel,
   getEndpointsByTimezone,
   callAiWithFailover,
+  extractProviderError,
   detectLanguageWithRetry,
   translateTextWithRetry,
   translateInvertWithRetry,
