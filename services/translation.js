@@ -6,6 +6,11 @@ const axios = require('axios');
 const SUPPORTED = require('./translatorSupported.json');
 const NORMALIZE = require('./langNormalize.json');
 
+// Azure Translator responde en menos de un segundo. Sin tope, una conexión
+// parada bloquea la petición hasta el timeout del sistema (decenas de
+// segundos) y los reintentos de aiUtils nunca llegan a actuar.
+const TRANSLATOR_TIMEOUT_MS = 10000;
+
 function normalizeSourceLang(lang) {
   if (!lang) return null;
 
@@ -64,7 +69,7 @@ async function detectLanguage(text, lang, endpoint) {
     const response = await axios.post(
       'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0',
       jsonText,
-      { headers }
+      { headers, timeout: TRANSLATOR_TIMEOUT_MS }
     );
 
     if (!response.data || !response.data[0]) {
@@ -153,7 +158,7 @@ async function translateText(text, targetLang, endpoint) {
     const response = await axios.post(
       url,
       jsonText,
-      { headers }
+      { headers, timeout: TRANSLATOR_TIMEOUT_MS }
     );
 
     if (!response.data || 
@@ -227,7 +232,7 @@ async function translateInvert(text, targetLang, endpoint) {
     const response = await axios.post(
       url,
       jsonText,
-      { headers }
+      { headers, timeout: TRANSLATOR_TIMEOUT_MS }
     );
 
     if (!response.data || 
