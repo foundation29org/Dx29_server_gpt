@@ -54,15 +54,20 @@ stubModule('@azure-rest/ai-document-intelligence', {
     })
   }),
   getLongRunningPoller: () => ({
-    pollUntilDone: async () => ({
-      body: {
-        status: 'succeeded',
-        analyzeResult: {
-          content: state.documentContent,
-          pages: [{}]
+    pollUntilDone: async () => {
+      const pages = state.documentPageCounts.length > 0
+        ? state.documentPageCounts.shift()
+        : state.documentPages;
+      return {
+        body: {
+          status: 'succeeded',
+          analyzeResult: {
+            content: state.documentContent,
+            pages: Array.from({ length: pages }, () => ({}))
+          }
         }
-      }
-    })
+      };
+    }
   }),
   isUnexpected: () => false
 });
@@ -291,6 +296,8 @@ test.beforeEach(() => {
   };
   state.imageClassificationError = null;
   state.documentContent = 'Extracted document content';
+  state.documentPages = 1;
+  state.documentPageCounts = [];
   state.documentPostCalls = 0;
   state.diagnose = async (req, res) => res.status(200).send({ result: 'success' });
   state.summarize = async (req, res) => res.status(200).send({
@@ -829,6 +836,61 @@ test('sends one socket error when every document fails and there is nothing else
   assert.equal(state.pubsubErrors[0].code, 'NO_DOCUMENT');
   assert.equal(state.pubsubErrors[0].message, 'No document could be processed');
   assert.equal(state.diagnoseCalls.length, 0);
+});
+
+test('rejects documents above 100 total pages before diagnosis', async () => {
+  let queryParameters;
+  state.documentPages = 101;
+  state.documentPost = async (payload) => {
+    queryParameters = payload.queryParameters;
+    return { status: '202', body: {} };
+  };
+  const req = createMultipartRequest(validFields, [{
+    field: 'document',
+    name: 'large-report.pdf',
+    type: 'application/pdf',
+    content: '%PDF-1.7\nfake-pdf'
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'DOCUMENT_PAGE_LIMIT_EXCEEDED');
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.equal(state.teamEmails.length, 0);
+  assert.equal(queryParameters.pages, '1-101');
+});
+
+test('applies the 100-page limit across all uploaded documents', async () => {
+  const requestedRanges = [];
+  state.documentPageCounts = [60, 41];
+  state.documentPost = async (payload) => {
+    requestedRanges.push(payload.queryParameters.pages);
+    return { status: '202', body: {} };
+  };
+  const req = createMultipartRequest(validFields, [
+    {
+      field: 'document',
+      name: 'part-1.pdf',
+      type: 'application/pdf',
+      content: '%PDF-1.7\npart-1'
+    },
+    {
+      field: 'document',
+      name: 'part-2.pdf',
+      type: 'application/pdf',
+      content: '%PDF-1.7\npart-2'
+    }
+  ]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'DOCUMENT_PAGE_LIMIT_EXCEEDED');
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.deepEqual(requestedRanges, ['1-101', '1-41']);
 });
 
 test('tracks every legacy .doc so its usage can be measured', async () => {

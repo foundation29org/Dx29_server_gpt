@@ -35,6 +35,7 @@ stubModule('@azure-rest/ai-document-intelligence', {
       post: async (request) => {
         state.posts += 1;
         state.lastBody = request?.body;
+        state.lastQuery = request?.queryParameters;
         if (typeof state.post === 'function') {
           return state.post();
         }
@@ -65,6 +66,7 @@ const {
 test.beforeEach(() => {
   state.posts = 0;
   state.lastBody = null;
+  state.lastQuery = null;
   state.isUnexpected = false;
   state.post = null;
   state.poll = null;
@@ -128,6 +130,19 @@ test('does not retry corrupt or invalid document content', async () => {
     }, { sleep: async () => undefined }),
     (error) => error.code === 'InvalidContent' && state.posts === 1
   );
+});
+
+test('limits Document Intelligence to the requested page range', async () => {
+  await extractDocument({
+    fileBuffer: Buffer.from('%PDF-1.7'),
+    originalName: 'report.pdf',
+    mimeType: 'application/pdf'
+  }, { maxPages: 101 });
+
+  assert.deepEqual(state.lastQuery, {
+    outputContentFormat: 'markdown',
+    pages: '1-101'
+  });
 });
 
 test('retries 429 responses while submitting and honors Retry-After', async () => {

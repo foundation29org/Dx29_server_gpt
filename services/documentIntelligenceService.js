@@ -6,6 +6,7 @@ const { decodeText } = require('./multimodalInputValidation');
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_CONCURRENCY = 2;
+const MAX_DOCUMENT_PAGES = 100;
 const MAX_RETRY_DELAY_MS = 8000;
 const LEGACY_WORD_MIME_TYPE = 'application/msword';
 const GOTENBERG_TIMEOUT_MS = 45000;
@@ -195,9 +196,13 @@ async function submitDocumentAnalysis(client, source, options = {}) {
   const {
     sleep = delay,
     random = Math.random,
-    maxAttempts = DEFAULT_MAX_ATTEMPTS
+    maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    maxPages
   } = options;
   const body = buildAnalyzeSource(source);
+  const requestedPages = Number.isInteger(maxPages) && maxPages > 0
+    ? (maxPages === 1 ? '1' : `1-${maxPages}`)
+    : undefined;
   let lastError;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -207,7 +212,10 @@ async function submitDocumentAnalysis(client, source, options = {}) {
         .post({
           contentType: 'application/json',
           body,
-          queryParameters: { outputContentFormat: 'markdown' }
+          queryParameters: {
+            outputContentFormat: 'markdown',
+            ...(requestedPages ? { pages: requestedPages } : {})
+          }
         });
 
       if (isUnexpected(initialResponse)) {
@@ -362,5 +370,6 @@ module.exports = {
   getRetryDelayMs,
   LEGACY_WORD_MIME_TYPE,
   DEFAULT_CONCURRENCY,
-  DEFAULT_MAX_ATTEMPTS
+  DEFAULT_MAX_ATTEMPTS,
+  MAX_DOCUMENT_PAGES
 };

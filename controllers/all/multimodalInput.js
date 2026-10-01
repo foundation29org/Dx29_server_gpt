@@ -33,10 +33,9 @@ const {
     extractDocument,
     failedDocumentResult,
     toPublicDocumentResult,
-    mapWithConcurrency,
     isRetryableDocumentError,
     LEGACY_WORD_MIME_TYPE,
-    DEFAULT_CONCURRENCY
+    MAX_DOCUMENT_PAGES
 } = require('../../services/documentIntelligenceService');
 const {
     processUploadedImages,
@@ -245,7 +244,7 @@ function trackLegacyWordDocument(file, context, startedAt, error) {
 
 // Los documentos se procesan solo en memoria: nada los vuelve a leer después
 // de extraer su texto, así que no se guardan en blob.
-async function extractUploadedDocument(file, context) {
+async function extractUploadedDocument(file, context, options = {}) {
     const startedAt = Date.now();
     try {
         const result = await extractDocument({
@@ -253,7 +252,7 @@ async function extractUploadedDocument(file, context) {
             originalName: file.originalname,
             mimeType: file.mimetype,
             size: file.size
-        });
+        }, options);
         trackLegacyWordDocument(file, context, startedAt);
         return result;
     } catch (error) {
@@ -411,11 +410,30 @@ const processMultimodalInput = async (req, res) => {
                     subscriptionId,
                     correlationId
                 };
-                results.documents = await mapWithConcurrency(
-                    req.files.document,
-                    DEFAULT_CONCURRENCY,
-                    (file) => extractUploadedDocument(file, documentContext)
-                );
+                let extractedPages = 0;
+                let pageLimitExceeded = false;
+                for (const file of req.files.document) {
+                    const isPlainText = file.mimetype === 'text/plain';
+                    const remainingPages = MAX_DOCUMENT_PAGES - extractedPages;
+
+                    // Pedimos una página más que el presupuesto disponible para
+                    // detectar el exceso sin extraer el documento completo.
+                    const document = await extractUploadedDocument(
+                        file,
+                        documentContext,
+                        isPlainText
+                            ? {}
+                            : { maxPages: Math.max(1, remainingPages + 1) }
+                    );
+                    results.documents.push(document);
+                    if (document.status === 'succeeded') {
+                        extractedPages += document.pages || 0;
+                    }
+                    if (extractedPages > MAX_DOCUMENT_PAGES) {
+                        pageLimitExceeded = true;
+                        break;
+                    }
+                }
 
                 results.documentAnalysis = results.documents
                     .map((document, index) => (
@@ -443,6 +461,17 @@ const processMultimodalInput = async (req, res) => {
                         correlationId
                     });
                 });
+
+                if (pageLimitExceeded) {
+                    const tooManyPages = new Error(
+                        `The documents exceed the ${MAX_DOCUMENT_PAGES}-page limit`
+                    );
+                    tooManyPages.phase = 'document_page_limit';
+                    tooManyPages.httpStatus = 400;
+                    tooManyPages.code = 'DOCUMENT_PAGE_LIMIT_EXCEEDED';
+                    tooManyPages.documentPages = extractedPages;
+                    throw tooManyPages;
+                }
             }
 
             // Documento puro -> OCR sin imagen. Imagen mixta -> OCR + imagen.
