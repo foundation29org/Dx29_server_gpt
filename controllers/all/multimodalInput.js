@@ -581,6 +581,15 @@ const processMultimodalInput = async (req, res) => {
                     tooLarge.code = 'INPUT_TOO_LARGE';
                     tooLarge.notifyTeam = true;
                     tooLarge.inputChars = combinedInput.length;
+                    // Cuánto trabajo de extracción se hizo antes de rechazarlo.
+                    tooLarge.documentPages = results.documents.reduce(
+                        (total, document) => total + (document.pages || 0),
+                        0
+                    );
+                    tooLarge.extractionMs = results.documents.reduce(
+                        (total, document) => total + (document.durationMs || 0),
+                        0
+                    );
                     throw tooLarge;
                 }
 
@@ -736,12 +745,16 @@ const processMultimodalInput = async (req, res) => {
             });
         }
 
+        const failedUpload = getUploadObservability(req.files);
         let infoError = {
             error: error.message,
             code: error.code,
             phase: error.phase,
             inputChars: error.inputChars,
-            files: Array.isArray(req.files) ? req.files.length : 0,
+            documentPages: error.documentPages,
+            extractionMs: error.extractionMs,
+            ...failedUpload.properties,
+            ...failedUpload.measurements,
             myuuid: req.body?.myuuid,
             correlationId
         };
