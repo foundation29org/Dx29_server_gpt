@@ -145,6 +145,76 @@ test('limits Document Intelligence to the requested page range', async () => {
   });
 });
 
+test('does not send a page range for DOCX: Layout rejects it', async () => {
+  await extractDocument({
+    fileBuffer: Buffer.from([0x50, 0x4B, 0x03, 0x04]),
+    originalName: 'informe.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  }, { maxPages: 101 });
+
+  assert.deepEqual(state.lastQuery, { outputContentFormat: 'markdown' });
+});
+
+test('sends the page range for XLSX: Layout accepts it as sheets', async () => {
+  await extractDocument({
+    fileBuffer: Buffer.from([0x50, 0x4B, 0x03, 0x04]),
+    originalName: 'datos.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  }, { maxPages: 101 });
+
+  assert.deepEqual(state.lastQuery, {
+    outputContentFormat: 'markdown',
+    pages: '1-101'
+  });
+});
+
+test('still sends the page range for a legacy .doc converted to PDF', async () => {
+  await extractDocument({
+    fileBuffer: Buffer.from([0xD0, 0xCF, 0x11, 0xE0]),
+    originalName: 'informe.doc',
+    mimeType: 'application/msword'
+  }, {
+    maxPages: 101,
+    gotenbergUrl: 'http://gotenberg.test/',
+    fetchImpl: async () => new Response(Buffer.from('%PDF-1.7 converted'), { status: 200 })
+  });
+
+  assert.deepEqual(state.lastQuery, {
+    outputContentFormat: 'markdown',
+    pages: '1-101'
+  });
+});
+
+test('keeps the Document Intelligence inner error in the failure message', async () => {
+  state.isUnexpected = true;
+  state.post = async () => ({
+    status: '400',
+    body: {
+      error: {
+        code: 'InvalidArgument',
+        message: 'Invalid argument.',
+        innererror: {
+          code: 'InvalidParameter',
+          message: 'The parameter pages is invalid'
+        }
+      }
+    },
+    headers: {}
+  });
+
+  await assert.rejects(
+    extractDocument({
+      fileBuffer: Buffer.from('%PDF-1.7'),
+      originalName: 'report.pdf',
+      mimeType: 'application/pdf'
+    }, { sleep: async () => undefined }),
+    (error) =>
+      error.code === 'InvalidArgument' &&
+      error.message === 'Invalid argument. | The parameter pages is invalid' &&
+      state.posts === 1
+  );
+});
+
 test('retries 429 responses while submitting and honors Retry-After', async () => {
   const delays = [];
   state.post = async () => {
