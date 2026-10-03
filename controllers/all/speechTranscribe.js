@@ -38,6 +38,18 @@ const languageHint = (value) => (/^[a-z]{2}$/.test(value || '') ? value : null)
 // Respuestas sin letras ni números (".", "…") son silencio, no dictado.
 const hasSpeech = (text) => /[\p{L}\p{N}]/u.test(text)
 
+// Azure contesta 400 invalid_value ("Audio file might be corrupted or unsupported") cuando no
+// puede decodificar el audio, p. ej. un WebM de unos segundos mal cerrado. Es un fallo del
+// archivo, no del servicio: reenviarlo no lo arregla.
+const isUnreadableAudio = (error) =>
+  error.response?.status === 400 && error.response?.data?.error?.code === 'invalid_value'
+
+// 400 para que el cliente no reintente (solo reintenta 429, 5xx y fallos de red).
+function failureStatus(error) {
+  if (isUnreadableAudio(error)) return 400
+  return error.response?.status === 429 ? 429 : 502
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_AUDIO_BYTES, files: 1, fields: 3 },
@@ -131,6 +143,19 @@ async function transcribe(req, res) {
     saveTranscriptionCost({ tenantId, body: req.body, durationMs: Date.now() - startedAt, success: false, error })
     // insights.error solo promueve unos pocos campos del objeto `message`; el resto
     // (uuid, estado, motivo del proveedor, tamaño) debe ir como `properties` o se pierde.
+    const telemetry = {
+      myuuid: req.body?.myuuid || 'unknown',
+      statusCode: String(error.response?.status || 'network'),
+      audioBytes: String(file.buffer.length),
+      language: language || 'none',
+      ...extractProviderError(error)
+    }
+    const status = failureStatus(error)
+    if (status === 400) {
+      // Un archivo que Azure no abre no es una caída del servicio: evento, no excepción.
+      insights.trackEvent('AudioTranscriptionRejected', { mimeType, tenantId, ...telemetry })
+      return res.status(400).send({ message: 'Could not read the audio' })
+    }
     insights.error(
       {
         message: 'Audio transcription failed',
@@ -138,19 +163,13 @@ async function transcribe(req, res) {
         mimeType,
         tenantId
       },
-      {
-        myuuid: req.body?.myuuid || 'unknown',
-        statusCode: String(error.response?.status || 'network'),
-        audioBytes: String(file.buffer.length),
-        language: language || 'none',
-        ...extractProviderError(error)
-      }
+      telemetry
     )
-    const status = error.response?.status === 429 ? 429 : 502
     return res.status(status).send({ message: 'Could not transcribe audio' })
   }
 }
 
 module.exports = {
-  transcribe
+  transcribe,
+  failureStatus
 }
