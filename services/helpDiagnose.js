@@ -1616,6 +1616,17 @@ ${medicalQuestionForModel}
           myuuid: data.myuuid,
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId
+        }, {
+          // Solo forma, nunca contenido: sirve para saber por qué el modelo
+          // devuelve una lista vacía tras decidir diagnosticar.
+          intentAction: String(intentDecision?.action ?? ''),
+          finishReason: String(aiResponse.data?.choices?.[0]?.finish_reason ?? ''),
+          completionTokens: String(usage?.completion_tokens ?? ''),
+          reasoningTokens: String(usage?.completion_tokens_details?.reasoning_tokens ?? ''),
+          responseChars: String(aiResponseText.length),
+          descriptionChars: String((englishDescription || '').length),
+          imageCount: String(Array.isArray(data.imageUrls) ? data.imageUrls.length : 0),
+          flow: String(flow ?? '')
         });
       } else {
         if (model == 'gpt4o') {
