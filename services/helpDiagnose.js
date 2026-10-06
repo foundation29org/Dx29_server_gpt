@@ -1468,23 +1468,38 @@ ${medicalQuestionForModel}
             for (const s of diagnosis.symptoms_not_in_common) reverseInChars += (s ? s.length : 0);
           }
         }
-        // Traducir por campos con Azure
+        // Esta fase puede durar varios segundos y antes seguía mostrando
+        // "Anonymizing" desde el 80 %. Se avisa del último tramo.
+        if (userId) {
+          await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 88);
+        }
+        // Traducir por campos con Azure. Todos los campos a la vez: antes
+        // diagnosis y description iban en serie, y cada serie sumaba su espera.
         const revDisStart = Date.now();
         parsedResponse = await Promise.all(
-          parsedResponse.map(async diagnosis => ({
-            diagnosis: await translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-            description: await translateInvertWithRetry(diagnosis.description, detectedLanguage),
-            symptoms_in_common: await Promise.all(
-              diagnosis.symptoms_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
-              )
-            ),
-            symptoms_not_in_common: await Promise.all(
-              diagnosis.symptoms_not_in_common.map(symptom =>
-                translateInvertWithRetry(symptom, detectedLanguage)
-              )
-            )
-          }))
+          parsedResponse.map(async diagnosis => {
+            const [translatedDiagnosis, translatedDescription, symptomsInCommon, symptomsNotInCommon] =
+              await Promise.all([
+                translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
+                translateInvertWithRetry(diagnosis.description, detectedLanguage),
+                Promise.all(
+                  diagnosis.symptoms_in_common.map(symptom =>
+                    translateInvertWithRetry(symptom, detectedLanguage)
+                  )
+                ),
+                Promise.all(
+                  diagnosis.symptoms_not_in_common.map(symptom =>
+                    translateInvertWithRetry(symptom, detectedLanguage)
+                  )
+                )
+              ]);
+            return {
+              diagnosis: translatedDiagnosis,
+              description: translatedDescription,
+              symptoms_in_common: symptomsInCommon,
+              symptoms_not_in_common: symptomsNotInCommon
+            };
+          })
         );
         const revDisElapsed = Date.now() - revDisStart;
         // Registrar coste Azure específico de diagnósticos
@@ -1601,6 +1616,17 @@ ${medicalQuestionForModel}
           myuuid: data.myuuid,
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId
+        }, {
+          // Solo forma, nunca contenido: sirve para saber por qué el modelo
+          // devuelve una lista vacía tras decidir diagnosticar.
+          intentAction: String(intentDecision?.action ?? ''),
+          finishReason: String(aiResponse.data?.choices?.[0]?.finish_reason ?? ''),
+          completionTokens: String(usage?.completion_tokens ?? ''),
+          reasoningTokens: String(usage?.completion_tokens_details?.reasoning_tokens ?? ''),
+          responseChars: String(aiResponseText.length),
+          descriptionChars: String((englishDescription || '').length),
+          imageCount: String(Array.isArray(data.imageUrls) ? data.imageUrls.length : 0),
+          flow: String(flow ?? '')
         });
       } else {
         if (model == 'gpt4o') {

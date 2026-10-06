@@ -6,8 +6,18 @@ const { decodeText } = require('./multimodalInputValidation');
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_CONCURRENCY = 2;
+const MAX_DOCUMENT_PAGES = 100;
 const MAX_RETRY_DELAY_MS = 8000;
 const LEGACY_WORD_MIME_TYPE = 'application/msword';
+const XLSX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+// Verificado contra Layout real (2024-11-30): `pages` da 202 en PDF y XLSX
+// (una página = una hoja) y 400 "The page range is unsupported" en DOCX.
+const PAGE_RANGE_MIME_TYPES = new Set([
+  'application/pdf',
+  LEGACY_WORD_MIME_TYPE,
+  XLSX_MIME_TYPE
+]);
 const GOTENBERG_TIMEOUT_MS = 45000;
 const NON_RETRYABLE_CODES = new Set([
   'LEGACY_DOC_CONVERSION_UNAVAILABLE',
@@ -170,7 +180,11 @@ function normalizeDocumentError(error, fallbackMessage) {
   if (error instanceof Error) {
     return error;
   }
-  const normalized = new Error(error?.message || fallbackMessage);
+  const detail = error?.innererror?.message;
+  const message = [error?.message || fallbackMessage, detail]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(' | ');
+  const normalized = new Error(message);
   if (error && typeof error === 'object') {
     normalized.code = error.code;
     normalized.statusCode = error.statusCode;
@@ -195,9 +209,13 @@ async function submitDocumentAnalysis(client, source, options = {}) {
   const {
     sleep = delay,
     random = Math.random,
-    maxAttempts = DEFAULT_MAX_ATTEMPTS
+    maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    maxPages
   } = options;
   const body = buildAnalyzeSource(source);
+  const requestedPages = Number.isInteger(maxPages) && maxPages > 0
+    ? (maxPages === 1 ? '1' : `1-${maxPages}`)
+    : undefined;
   let lastError;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -207,7 +225,10 @@ async function submitDocumentAnalysis(client, source, options = {}) {
         .post({
           contentType: 'application/json',
           body,
-          queryParameters: { outputContentFormat: 'markdown' }
+          queryParameters: {
+            outputContentFormat: 'markdown',
+            ...(requestedPages ? { pages: requestedPages } : {})
+          }
         });
 
       if (isUnexpected(initialResponse)) {
@@ -338,7 +359,12 @@ async function extractDocument({
   const analyzeSource = mimeType === LEGACY_WORD_MIME_TYPE
     ? { fileBuffer: await convertLegacyWordToPdf(fileBuffer, options) }
     : { fileBuffer, blobUrl };
-  const analyzed = await analyzeWithDocumentIntelligence(analyzeSource, options);
+  // En DOCX, Layout rechaza `pages` (InvalidArgument). Ahí el tope se
+  // comprueba después, con las páginas que devuelva el análisis.
+  const analyzeOptions = PAGE_RANGE_MIME_TYPES.has(mimeType)
+    ? options
+    : { ...options, maxPages: undefined };
+  const analyzed = await analyzeWithDocumentIntelligence(analyzeSource, analyzeOptions);
   return {
     name: originalName,
     ...(Number.isFinite(size) ? { size } : {}),
@@ -362,5 +388,6 @@ module.exports = {
   getRetryDelayMs,
   LEGACY_WORD_MIME_TYPE,
   DEFAULT_CONCURRENCY,
-  DEFAULT_MAX_ATTEMPTS
+  DEFAULT_MAX_ATTEMPTS,
+  MAX_DOCUMENT_PAGES
 };
