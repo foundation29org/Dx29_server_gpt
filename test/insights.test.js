@@ -59,6 +59,26 @@ test('promotes safe correlation metadata without copying clinical fields', () =>
   );
 });
 
+test('promotes the visitor IP and the session id, and nothing clinical', () => {
+  insights.error({
+    message: 'Too many requests',
+    ip: '203.0.113.10',
+    myuuid: '0dbbcea8-de00-4e1f-b4c6-a3348c08332f',
+    description: 'Do not index this value'
+  });
+
+  assert.equal(tracked.exceptions[0].exception.message, 'Too many requests');
+  assert.equal(tracked.exceptions[0].properties.ip, '203.0.113.10');
+  assert.equal(
+    tracked.exceptions[0].properties.myuuid,
+    '0dbbcea8-de00-4e1f-b4c6-a3348c08332f'
+  );
+  assert.equal(
+    Object.hasOwn(tracked.exceptions[0].properties, 'description'),
+    false
+  );
+});
+
 test('keeps the request payload out of the exception message', () => {
   insights.error({
     message: 'Unknown error in processMultimodalInput',
