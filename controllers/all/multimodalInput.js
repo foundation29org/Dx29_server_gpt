@@ -658,6 +658,8 @@ const processMultimodalInput = async (req, res) => {
                 myuuid: req.body.myuuid || 'default-uuid',
                 lang: req.body.lang || 'en',
                 timezone: req.body.timezone || 'UTC',
+                // Validado y convertido en frase por /diagnose (locationContext).
+                countryCode: req.body.countryCode,
                 model: model,
                 iframeParams: req.body.iframeParams || {},
                 // Solo si queda alguna imagen para visión; /diagnose vuelve a
@@ -839,6 +841,7 @@ async function callDiagnoses(data, requestInfo) {
             myuuid: data.myuuid,
             lang: data.lang,
             timezone: data.timezone || 'UTC',
+            ...(data.countryCode ? { countryCode: data.countryCode } : {}),
             model: data.model || DEFAULT_AI_MODEL,
             iframeParams: data.iframeParams || {},
             ...(data.uploadId ? { uploadId: data.uploadId } : {}),

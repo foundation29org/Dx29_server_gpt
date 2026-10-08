@@ -4,6 +4,7 @@ const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
 const { isValidUploadId } = require('./multimodalUploadService');
+const { locationContextText, resolveCountryCode } = require('./locationContext');
 
 // Un caso de solo imagen no tiene texto: la evidencia está en la subida, que
 // Diagnose vuelve a leer al recalcular con las respuestas.
@@ -26,6 +27,13 @@ const CORRECTIONS_RULE =
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
+}
+
+// Only for generating questions (so they can target local exposures). Never for the
+// rewrite of the description in processFollowUpAnswers: that text is stored and shown
+// to the user, and would end up carrying the sentence.
+function locationNoteFor(body, englishDescription) {
+  return englishDescription ? locationContextText(resolveCountryCode(body?.countryCode)) : '';
 }
 
 // Trazabilidad de un 400 por validación: quién (myuuid) y cuánto midió la descripción,
@@ -276,11 +284,13 @@ async function generateFollowUpQuestions(req, res) {
 
     // 2. Construir el prompt para generar preguntas de seguimiento
 
+    const locationNote = locationNoteFor(req.body, englishDescription);
     const prompt = mode === 'hypothesis' ? `
       You are a medical assistant helping to complete the clinical information needed to assess one selected diagnostic hypothesis.
 
       Patient description:
       "${englishDescription || NO_WRITTEN_DESCRIPTION}"
+      ${locationNote}
 
       Selected diagnostic hypothesis:
       ${englishDiseases}
@@ -302,6 +312,7 @@ async function generateFollowUpQuestions(req, res) {
       You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following description of their symptoms:
   
       "${englishDescription || NO_WRITTEN_DESCRIPTION}"
+      ${locationNote}
   
       The system has already suggested the following possible conditions: ${englishDiseases}.
       The patient indicated that none of these seem to match their experience.
@@ -1279,10 +1290,12 @@ async function generateERQuestions(req, res) {
 
     // 2. Construir el prompt para generar preguntas iniciales
 
+    const locationNote = locationNoteFor(req.body, englishDescription);
     const prompt = `
   You are a medical assistant helping to gather more information from a patient before making a diagnosis. The patient has provided the following initial description of their symptoms:
   
   "${englishDescription || NO_WRITTEN_DESCRIPTION}"
+  ${locationNote}
   
   Analyze this description and generate 5-8 relevant follow-up questions to complete the patient's clinical profile.
   

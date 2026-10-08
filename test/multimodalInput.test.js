@@ -1024,6 +1024,24 @@ test('passes valid parsed text to Diagnose and returns processing once', async (
   assert.equal(state.diagnoseCalls[0].model, 'gpt56terra');
 });
 
+test('passes the country code to Diagnose, which turns it into the location sentence', async () => {
+  const withCountry = createMultipartRequest({
+    ...validFields,
+    countryCode: 'IN',
+    text: 'Patient with fever and a persistent cough'
+  });
+  await processMultimodalInput(withCountry, createResponse());
+  assert.equal(state.diagnoseCalls[0].countryCode, 'IN');
+
+  state.diagnoseCalls = [];
+  const withoutCountry = createMultipartRequest({
+    ...validFields,
+    text: 'Patient with fever and a persistent cough'
+  });
+  await processMultimodalInput(withoutCountry, createResponse());
+  assert.equal('countryCode' in state.diagnoseCalls[0], false);
+});
+
 test('passes iframeParams sent as a multipart JSON string to Diagnose as an object', async () => {
   const req = createMultipartRequest({
     ...validFields,

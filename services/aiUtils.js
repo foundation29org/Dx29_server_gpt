@@ -2,6 +2,7 @@ const config = require('../config');
 const axios = require('axios');
 const translationCtrl = require('./translation');
 const insights = require('./insights');
+const { normalizeCountryCode } = require('./locationContext');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const { jsonrepair } = require('jsonrepair');
 
@@ -106,12 +107,8 @@ function buildAzureOpenAIEndpoint(region, model) {
 
 function sanitizeAiData(data) {
   const rawCountryName = typeof data.countryName === 'string' ? data.countryName : '';
-  const rawCountryCode = typeof data.countryCode === 'string' ? data.countryCode : '';
   const sanitizedCountryName = typeof rawCountryName === 'string' ? sanitizeInput(rawCountryName).trim() : '';
-  const normalizedCountryCode = typeof rawCountryCode === 'string'
-    ? rawCountryCode.trim().toUpperCase().replace(/[^A-Z]/g, '')
-    : '';
-  const sanitizedCountryCode = /^[A-Z]{2}$/.test(normalizedCountryCode) ? normalizedCountryCode : '';
+  const sanitizedCountryCode = normalizeCountryCode(data.countryCode);
 
   return {
     ...data,
