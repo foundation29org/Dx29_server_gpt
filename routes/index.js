@@ -21,47 +21,50 @@ const reprocesarErrores = require('../scripts/reprocesar_errores')
 const api = express.Router()
 const { smartLimiter, healthLimiter } = require('../services/rateLimiter')
 
-// Aplicar rate limiting inteligente globalmente
+// Rate limiting de todo lo que cuelga de /api, incluidas rutas desconocidas.
+// Va UNA sola vez: poner smartLimiter también en cada ruta cuenta cada
+// petición dos veces y deja el tope en la mitad (50 en vez de 100 / 15 min).
+// Solo healthLimiter se añade por ruta: tiene su propio contador.
 api.use(smartLimiter);
 
-api.get('/internal/langs/', smartLimiter, langCtrl.getLangs)
+api.get('/internal/langs/', langCtrl.getLangs)
 
-api.post('/internal/homesupport/', smartLimiter, supportCtrl.sendMsgLogoutSupport)
+api.post('/internal/homesupport/', supportCtrl.sendMsgLogoutSupport)
 
-api.post('/diagnose', smartLimiter, helpDiagnoseCtrl.diagnose)
-api.post('/ask', smartLimiter, helpDiagnoseCtrl.ask)
+api.post('/diagnose', helpDiagnoseCtrl.diagnose)
+api.post('/ask', helpDiagnoseCtrl.ask)
 
-api.post('/disease/info', smartLimiter, callInfoDiseaseCtrl.callInfoDisease)
+api.post('/disease/info', callInfoDiseaseCtrl.callInfoDisease)
 
-api.post('/questions/followup', smartLimiter, followUpCtrl.generateFollowUpQuestions)
-api.post('/questions/emergency', smartLimiter, followUpCtrl.generateERQuestions)
-api.post('/patient/update', smartLimiter, followUpCtrl.processFollowUpAnswers)
+api.post('/questions/followup', followUpCtrl.generateFollowUpQuestions)
+api.post('/questions/emergency', followUpCtrl.generateERQuestions)
+api.post('/patient/update', followUpCtrl.processFollowUpAnswers)
 
-api.post('/medical/summarize', smartLimiter, summarizeCtrl.summarize)
+api.post('/medical/summarize', summarizeCtrl.summarize)
 
-api.post('/medical/analyze', smartLimiter, multimodalCtrl.processMultimodalInput)
-api.delete('/medical/upload/:uploadId', smartLimiter, multimodalCtrl.deleteUpload)
+api.post('/medical/analyze', multimodalCtrl.processMultimodalInput)
+api.delete('/medical/upload/:uploadId', multimodalCtrl.deleteUpload)
 
-api.post('/internal/status/:ticketId', smartLimiter, systemStatusCtrl.getQueueStatus)
+api.post('/internal/status/:ticketId', systemStatusCtrl.getQueueStatus)
 
 api.get('/internal/getSystemStatus', healthLimiter, systemStatusCtrl.getSystemStatus)
 api.get('/internal/health', healthLimiter, systemStatusCtrl.checkHealth)
 
-api.post('/internal/opinion', smartLimiter, opinionCtrl.opinion)
+api.post('/internal/opinion', opinionCtrl.opinion)
 
-api.post('/internal/generalfeedback', smartLimiter, generalFeedbackCtrl.sendGeneralFeedback)
+api.post('/internal/generalfeedback', generalFeedbackCtrl.sendGeneralFeedback)
 
-api.post('/internal/questionsfeedback', smartLimiter, questionsFeedbackCtrl.sendQuestionsFeedback)
+api.post('/internal/questionsfeedback', questionsFeedbackCtrl.sendQuestionsFeedback)
 
 // Rutas de Permalinks
-api.post('/internal/permalink', smartLimiter, permalinkCtrl.createPermalink)
-api.get('/internal/permalink/:id', smartLimiter, permalinkCtrl.getPermalink)
+api.post('/internal/permalink', permalinkCtrl.createPermalink)
+api.get('/internal/permalink/:id', permalinkCtrl.getPermalink)
 
 // Dictado por voz: audio -> texto. Solo tenants, no forma parte de la API pública.
-api.post('/internal/speech/transcribe', smartLimiter, speechTranscribeCtrl.transcribe)
+api.post('/internal/speech/transcribe', speechTranscribeCtrl.transcribe)
 
 // Rutas de Azure Web PubSub
-api.use('/pubsub', smartLimiter, pubsubRoutes)
+api.use('/pubsub', pubsubRoutes)
 
 api.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
