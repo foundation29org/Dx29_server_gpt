@@ -43,7 +43,9 @@ function error(message, properties = {}) {
         'retryable',
         'operation',
         'model',
-        'type'
+        'type',
+        'ip',
+        'myuuid'
       ];
       safeFields.forEach((field) => {
         if (message[field] !== undefined && message[field] !== null) {

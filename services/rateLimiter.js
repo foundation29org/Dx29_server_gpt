@@ -55,6 +55,11 @@ function clientIp(req) {
         'unknown';
 }
 
+// Id de sesión del navegador (localStorage), no una cuenta de usuario.
+function sessionId(req) {
+    return req.body?.myuuid || req.query?.myuuid;
+}
+
 // Rate limiter para DxGPT interno (mantiene configuración actual)
 const needsLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
@@ -71,11 +76,13 @@ const needsLimiter = rateLimit({
             ip: clientIp(req),
             timestamp: new Date()
         });
-        let infoError = {
+        // El mensaje tiene que ser texto: si se pasa el objeto de la respuesta,
+        // la excepción queda como "Unhandled error" y no se puede filtrar.
+        insights.error({
+            message: 'Too many requests',
             ip: clientIp(req),
-            message: options.message
-        }
-        insights.error(infoError);
+            myuuid: sessionId(req)
+        });
         res.status(429).json(options.message);
     }
 });
@@ -90,7 +97,7 @@ const externalLimiter = rateLimit({
     },
     keyGenerator: function (req) {
         const tenantId = getHeader(req, 'x-tenant-id');
-        const myuuid = req.body?.myuuid || req.query?.myuuid;
+        const myuuid = sessionId(req);
         const ip = clientIp(req);
         
         if (myuuid) {
@@ -111,17 +118,16 @@ const externalLimiter = rateLimit({
     handler: (req, res, next, options) => {
         console.warn('External rate limit exceeded:', {
             tenantId: getHeader(req, 'x-tenant-id'),
-            myuuid: req.body?.myuuid || req.query?.myuuid,
+            myuuid: sessionId(req),
             ip: clientIp(req),
             timestamp: new Date()
         });
-        let infoError = {
+        insights.error({
+            message: 'Too many requests',
             tenantId: getHeader(req, 'x-tenant-id'),
-            myuuid: req.body?.myuuid || req.query?.myuuid,
-            ip: clientIp(req),
-            message: options.message
-        }
-        insights.error(infoError);
+            myuuid: sessionId(req),
+            ip: clientIp(req)
+        });
         res.status(429).json(options.message);
     }
 });
@@ -168,11 +174,10 @@ const healthLimiter = rateLimit({
             ip: clientIp(req),
             timestamp: new Date()
         });
-        let infoError = {
-            ip: clientIp(req),
-            message: options.message
-        }
-        insights.error(infoError);
+        insights.error({
+            message: 'Too many requests to /health',
+            ip: clientIp(req)
+        });
         res.status(429).json(options.message);
     }
 });
