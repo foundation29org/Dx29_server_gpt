@@ -30,7 +30,7 @@ const {
   validateUploadReferenceFields,
   withImageContext
 } = require('./multimodalUploadService');
-
+const { locationContextText, resolveCountryCode, withLocationContext } = require('./locationContext');
 const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
@@ -647,6 +647,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
       console.log('General medical question detected for special tenant, generating educational response');
 
+      // Con país conocido, la respuesta puede depender de él (prevalencia local,
+      // calendario vacunal, servicios sanitarios). Va fuera de <medical_question>:
+      // no es texto del usuario.
+      const questionLocation = locationContextText(resolveCountryCode(data.countryCode), 'user');
+      const questionLocationRule = questionLocation
+        ? `\n- ${questionLocation} Use this only when the answer depends on the country (for example local disease prevalence, vaccination schedules or health services); otherwise ignore it.`
+        : '';
+
       // Llamar al modelo para contestar la pregunta médica general
       const generalMedicalPrompt = `You are a medical educator. Answer the medical question below with accurate, evidence-based, educational information.
 
@@ -657,7 +665,7 @@ Content requirements:
 - If the question describes symptoms, clearly identify relevant urgent warning signs.
 - Do not diagnose the user or add a generic disclaimer; the interface already displays one.
 - Do not repeat names, direct identifiers, redaction markers, or anonymization placeholders from the question.
-- Cite sources inline when available, but do not add a separate references or sources section.
+- Cite sources inline when available, but do not add a separate references or sources section.${questionLocationRule}
 
 Markdown format contract:
 - Use short paragraphs and, when useful, simple non-nested bullet lists.
@@ -1149,13 +1157,24 @@ ${medicalQuestionForModel}
 
     // 2. FASE ÚNICA: Obtener diagnósticos completos en una sola llamada
 
-    const promptDescription = withImageContext(englishDescription, data.imageUrls);
+    // Frase de imágenes: solo con un texto que sea ya un caso (con solo imágenes
+    // baja el R@1, MedReaMM n=100). Frase de ubicación: también cuando no hay texto,
+    // porque la misma imagen significa cosas distintas según el lugar (sin diferencia
+    // significativa en MedReaMM solo imágenes n=250). Orden: descripción, imágenes, ubicación.
+    const hasImages = Array.isArray(data.imageUrls) && data.imageUrls.length > 0;
+    const promptDescription = withLocationContext(
+      withImageContext(englishDescription, data.imageUrls),
+      resolveCountryCode(data.countryCode),
+      { allowEmpty: hasImages }
+    );
+    // Reemplazo con función: con un string, `$&` o `$$` del texto del paciente
+    // se interpretarían como patrones de String.replace.
     let helpDiagnosePrompt = englishDiseasesList ?
       PROMPTS.diagnosis.withDiseases
-        .replace("{{description}}", promptDescription)
-        .replace("{{previous_diagnoses}}", englishDiseasesList) :
+        .replace("{{description}}", () => promptDescription)
+        .replace("{{previous_diagnoses}}", () => englishDiseasesList) :
       PROMPTS.diagnosis.withoutDiseases
-        .replace("{{description}}", promptDescription);
+        .replace("{{description}}", () => promptDescription);
     console.log('Calling IA for full diagnoses');
     let requestBody;
     if (model === 'gpt5nano') {
