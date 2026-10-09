@@ -64,6 +64,7 @@
                                 "myuuid": "550e8400-e29b-41d4-a716-446655440000",
                                 "lang": "en",
                                 "timezone": "America/New_York",
+                                "countryCode": "ES",
                                 "diseases_list": "Migraine, Tension headache, Cluster headache",
                                 "response_mode": "direct"
                             }
@@ -368,7 +369,8 @@
                                 "diseases": "Migraine, Tension headache, Cluster headache",
                                 "myuuid": "550e8400-e29b-41d4-a716-446655440000",
                                 "lang": "en",
-                                "timezone": "America/New_York"
+                                "timezone": "America/New_York",
+                                "countryCode": "ES"
                             }
                         }
                     }
@@ -464,7 +466,8 @@
                                 "description": "I've been experiencing fatigue and shortness of breath for the last two weeks, especially when climbing stairs.",
                                 "myuuid": "550e8400-e29b-41d4-a716-446655440000",
                                 "lang": "en",
-                                "timezone": "America/New_York"
+                                "timezone": "America/New_York",
+                                "countryCode": "ES"
                             }
                         }
                     }
@@ -1098,7 +1101,8 @@
                                 "description": "What are the common side effects of metformin?",
                                 "myuuid": "550e8400-e29b-41d4-a716-446655440000",
                                 "lang": "en",
-                                "timezone": "Europe/Madrid"
+                                "timezone": "Europe/Madrid",
+                                "countryCode": "ES"
                             }
                         }
                     }
@@ -1179,6 +1183,11 @@
                         "type": "string",
                         "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
                         "example": "America/New_York"
+                    },
+                    "countryCode": {
+                        "type": "string",
+                        "description": "Optional ISO 3166-1 alpha-2 country code of the patient (for example ES or IN). When valid, the differential takes the patient's country into account. If omitted or invalid, it is ignored. Timezone does not set the country; it only selects the Azure region.",
+                        "example": "ES"
                     },
                     "diseases_list": {
                         "maxLength": 1000,
@@ -1374,6 +1383,11 @@
                         "type": "string",
                         "description": "User timezone used for regional routing.",
                         "example": "Europe/Madrid"
+                    },
+                    "countryCode": {
+                        "type": "string",
+                        "description": "Optional ISO 3166-1 alpha-2 country code (for example ES or IN). Used only when the answer depends on the country, for example local disease prevalence, vaccination schedules or health services. If omitted or invalid, it is ignored. Timezone does not set the country; it only selects the Azure region.",
+                        "example": "ES"
                     },
                     "model": {
                         "type": "string",
@@ -1729,6 +1743,11 @@
                         "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
                         "example": "America/New_York"
                     },
+                    "countryCode": {
+                        "type": "string",
+                        "description": "Optional ISO 3166-1 alpha-2 country code of the patient (for example ES or IN). When valid, the questions take the patient's country into account. If omitted or invalid, it is ignored. Timezone does not set the country; it only selects the Azure region.",
+                        "example": "ES"
+                    },
                     "mode": {
                         "type": "string",
                         "enum": [
@@ -1813,6 +1832,11 @@
                         "type": "string",
                         "description": "User's timezone (optional). Used to determine which regional endpoint will process the request.\n- If timezone contains \"america\" → North America region\n- If timezone contains \"europe\" → Europe region\n- If timezone contains \"asia\" → Asia region\n- If timezone contains \"africa\" → Africa region\n- If timezone contains \"australia\" or \"pacific\" → Oceania region\n- Otherwise → Default region\n",
                         "example": "America/New_York"
+                    },
+                    "countryCode": {
+                        "type": "string",
+                        "description": "Optional ISO 3166-1 alpha-2 country code of the patient (for example ES or IN). When valid, the questions take the patient's country into account. If omitted or invalid, it is ignored. Timezone does not set the country; it only selects the Azure region.",
+                        "example": "ES"
                     },
                     "uploadId": {
                         "type": "string",
@@ -2063,6 +2087,11 @@
                         "type": "string",
                         "description": "User's timezone. Used to determine which regional endpoint will process the request. - If timezone contains \"america\" → North America region - If timezone contains \"europe\" → Europe region - If timezone contains \"asia\" → Asia region - If timezone contains \"africa\" → Africa region - If timezone contains \"australia\" or \"pacific\" → Oceania region - Otherwise → Default region\n",
                         "example": "America/New_York"
+                    },
+                    "countryCode": {
+                        "type": "string",
+                        "description": "Optional ISO 3166-1 alpha-2 country code of the patient (for example ES or IN). When valid, the diagnosis started by this request takes the patient's country into account. If omitted or invalid, it is ignored. Timezone does not set the country; it only selects the Azure region.",
+                        "example": "ES"
                     },
                     "document": {
                         "type": "array",
