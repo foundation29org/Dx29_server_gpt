@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Contrato público de desarrollo exportado desde API Management (JSON).
-const openApiPath = path.join(__dirname, '../docs/dxgptapi-dev-yaml');
+const openApiPath = path.join(__dirname, '../docs/apim/dxgptapi-dev-yaml');
 const fileContents = fs.readFileSync(openApiPath, 'utf8');
 const swaggerSpec = JSON.parse(fileContents);
 
