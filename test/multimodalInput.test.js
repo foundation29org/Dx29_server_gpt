@@ -167,6 +167,7 @@ const {
   MAX_FIELD_SIZE_BYTES,
   MAX_MULTIPART_PARTS,
   MAX_NON_FILE_FIELDS,
+  reconcileDeclaredTypes,
   validateUploadedFiles
 } = require('../services/multimodalInputValidation');
 
@@ -722,7 +723,27 @@ test('rejects a file whose content does not match its declared type', async () =
   assert.deepEqual(res.body.details, [{
     field: 'image[0]',
     filename: 'scan.png',
+    code: 'FILE_CONTENT_MISMATCH',
     reason: 'File content does not match its declared type'
+  }]);
+  assert.equal(state.diagnoseCalls.length, 0);
+});
+
+test('tells an empty file apart from a mismatched one so the client can name it', async () => {
+  const req = createMultipartRequest(validFields, [
+    { field: 'document', name: 'ok.pdf', type: 'application/pdf', content: '%PDF-1.7\nbody' },
+    { field: 'document', name: 'vacio.pdf', type: 'application/pdf', content: '' }
+  ]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body.details, [{
+    field: 'document[1]',
+    filename: 'vacio.pdf',
+    code: 'FILE_EMPTY',
+    reason: 'File is empty'
   }]);
   assert.equal(state.diagnoseCalls.length, 0);
 });
@@ -767,6 +788,133 @@ test('rejects binary content disguised as a TXT document', async () => {
   assert.equal(res.responseCount, 1);
   assert.equal(res.body.details[0].field, 'document[0]');
   assert.equal(state.diagnoseCalls.length, 0);
+});
+
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const ZIP_HEADER = Buffer.from([0x50, 0x4B, 0x03, 0x04]);
+const DOCX_BYTES = Buffer.concat([ZIP_HEADER, Buffer.from('word/document.xml')]);
+const XLSX_BYTES = Buffer.concat([ZIP_HEADER, Buffer.from('xl/workbook.xml')]);
+
+test('processes a DOCX saved as .doc as a DOCX, without the legacy conversion', async () => {
+  const previousUrl = process.env.GOTENBERG_URL;
+  delete process.env.GOTENBERG_URL;
+  try {
+    const req = createMultipartRequest(validFields, [{
+      field: 'document',
+      name: 'informe.doc',
+      type: 'application/msword',
+      content: DOCX_BYTES
+    }]);
+    const res = createResponse();
+
+    await processMultimodalInput(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.result, 'processing');
+    assert.equal(state.documentPostCalls, 1);
+    assert.equal(state.diagnoseCalls.length, 1);
+    assert.equal(
+      state.insightEvents.some((event) => event.name === 'LegacyWordDocumentProcessed'),
+      false
+    );
+    const corrected = state.insightEvents.find(
+      (event) => event.name === 'MultimodalUploadTypeCorrected'
+    );
+    assert.deepEqual(JSON.parse(corrected.properties.corrections), [{
+      field: 'document[0]',
+      declared: 'application/msword',
+      detected: DOCX_TYPE
+    }]);
+    assert.equal(corrected.measurements.correctedFiles, 1);
+    assert.equal(JSON.stringify(corrected).includes('informe'), false);
+  } finally {
+    if (previousUrl !== undefined) {
+      process.env.GOTENBERG_URL = previousUrl;
+    }
+  }
+});
+
+test('processes a PNG sent as image/jpeg as a PNG', async () => {
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'foto.jpg',
+    type: 'image/jpeg',
+    content: PNG
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.result, 'processing');
+  const corrected = state.insightEvents.find(
+    (event) => event.name === 'MultimodalUploadTypeCorrected'
+  );
+  assert.deepEqual(JSON.parse(corrected.properties.corrections), [{
+    field: 'image[0]',
+    declared: 'image/jpeg',
+    detected: 'image/png'
+  }]);
+});
+
+test('does not announce a correction when every file matches its declared type', async () => {
+  const req = createMultipartRequest(validFields, [{
+    field: 'document',
+    name: 'report.pdf',
+    type: 'application/pdf',
+    content: '%PDF-1.7\nbody'
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    state.insightEvents.some((event) => event.name === 'MultimodalUploadTypeCorrected'),
+    false
+  );
+});
+
+test('reconciles a mismatched type only to another type allowed in the same field', () => {
+  const jpeg = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]);
+  const ole = Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+  const both = Buffer.concat([DOCX_BYTES, Buffer.from('xl/workbook.xml')]);
+  const cases = [
+    // [field, declared, content, expected type after reconciling]
+    ['document', 'application/msword', DOCX_BYTES, DOCX_TYPE],
+    ['document', DOCX_TYPE, XLSX_BYTES, XLSX_TYPE],
+    ['document', 'text/plain', Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2D, 0x00, 0x01]), 'application/pdf'],
+    ['image', 'image/png', jpeg, 'image/jpeg'],
+    // Sin cambios: una foto en el campo de documentos, OLE (no distingue .doc de
+    // .xls), un zip ambiguo, basura y un tipo que ya cuadra.
+    ['document', 'application/pdf', jpeg, 'application/pdf'],
+    ['document', 'application/pdf', ole, 'application/pdf'],
+    ['document', 'application/msword', both, 'application/msword'],
+    ['image', 'image/png', Buffer.from('not-an-image'), 'image/png'],
+    ['image', 'image/png', Buffer.from('%PDF-1.7'), 'image/png'],
+    ['document', 'application/pdf', Buffer.from('%PDF-1.7'), 'application/pdf']
+  ];
+
+  for (const [field, mimetype, buffer, expected] of cases) {
+    const files = { [field]: [{ mimetype, buffer, size: buffer.length }] };
+    reconcileDeclaredTypes(files);
+    assert.equal(files[field][0].mimetype, expected, `${field} ${mimetype}`);
+  }
+});
+
+test('keeps rejecting what is not a supported type once reconciled', () => {
+  const heic = Buffer.concat([Buffer.alloc(4), Buffer.from('ftypheic')]);
+  const files = {
+    document: [{ originalname: 'vacio.pdf', mimetype: 'application/pdf', buffer: Buffer.alloc(0), size: 0 }],
+    image: [{ originalname: 'foto.jpeg', mimetype: 'image/jpeg', buffer: heic, size: heic.length }]
+  };
+
+  assert.deepEqual(reconcileDeclaredTypes(files), []);
+  assert.deepEqual(validateUploadedFiles(files).map((error) => error.field), [
+    'document[0]',
+    'image[0]'
+  ]);
 });
 
 test('accepts TXT in ANSI and UTF-16 but not binary without NUL bytes', () => {

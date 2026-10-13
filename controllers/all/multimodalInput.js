@@ -20,6 +20,7 @@ const {
     UUID_PATTERN,
     getSuccessfulSummary,
     parseIframeParams,
+    reconcileDeclaredTypes,
     validateParsedMultimodalInput,
     validateUploadedFiles,
     describeUploadedFiles
@@ -156,7 +157,9 @@ function startSlowAnalysisWatch(context) {
 }
 
 const REJECTION_FIELD_BY_CODE = Object.freeze({
-    INVALID_UPLOAD_OWNER: 'myuuid'
+    INVALID_UPLOAD_OWNER: 'myuuid',
+    // Texto + documentos juntos superan lo que admite el resumen: no es un archivo concreto.
+    INPUT_TOO_LARGE: 'input'
 });
 
 // Cada análisis es un caso nuevo y crea su propio uploadId; las referencias
@@ -347,6 +350,20 @@ const processMultimodalInput = async (req, res) => {
                 filesKeys: req.files ? Object.keys(req.files) : [],
                 contentType: req.headers['content-type']
             });
+
+            // Un DOCX guardado como ".doc" o una foto con otra extensión se procesan
+            // como lo que son en lugar de rechazar al usuario por un nombre.
+            const typeCorrections = reconcileDeclaredTypes(req.files);
+            if (typeCorrections.length > 0) {
+                insights.trackEvent('MultimodalUploadTypeCorrected', {
+                    correlationId,
+                    tenantId: tenantId || '',
+                    subscriptionId: subscriptionId || '',
+                    corrections: JSON.stringify(typeCorrections)
+                }, {
+                    correctedFiles: typeCorrections.length
+                });
+            }
 
             const validationErrors = [
                 ...validateParsedMultimodalInput(req.body, req.files),
