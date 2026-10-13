@@ -19,11 +19,17 @@ const MAX_NON_FILE_FIELDS = 12;
 // por encima del máximo válido: campos + documentos + imágenes.
 const MAX_MULTIPART_PARTS =
   MAX_NON_FILE_FIELDS + MAX_DOCUMENT_FILES + MAX_IMAGE_FILES + 1;
+const FILE_EMPTY_CODE = 'FILE_EMPTY';
+const FILE_CONTENT_MISMATCH_CODE = 'FILE_CONTENT_MISMATCH';
+const DOCX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const SUPPORTED_DOCUMENT_TYPES = Object.freeze([
   'application/pdf',
   'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  DOCX_MIME_TYPE,
+  XLSX_MIME_TYPE,
   'text/plain'
 ]);
 // TIFF y BMP no entran: los modelos de visión solo leen JPEG, PNG y WEBP.
@@ -144,9 +150,9 @@ function matchesDeclaredType(file) {
       return hasSignatureWithin(buffer, SIGNATURES.pdf, 1024);
     case 'application/msword':
       return startsWith(buffer, SIGNATURES.ole);
-    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    case DOCX_MIME_TYPE:
       return hasZipSignature(buffer) && containsAscii(buffer, 'word/');
-    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+    case XLSX_MIME_TYPE:
       return hasZipSignature(buffer) && containsAscii(buffer, 'xl/');
     case 'text/plain':
       return isValidText(buffer);
@@ -160,6 +166,63 @@ function matchesDeclaredType(file) {
     default:
       return false;
   }
+}
+
+function isAllowedInField(fieldName, mimetype) {
+  return fieldName === 'image'
+    ? SUPPORTED_IMAGE_TYPES.includes(mimetype)
+    : SUPPORTED_DOCUMENT_TYPES.includes(mimetype);
+}
+
+// Qué tipo soportado demuestra ser el contenido. El navegador declara el tipo por
+// la extensión, así que un DOCX guardado como ".doc" llega como msword. Solo cuentan
+// firmas inequívocas: OLE (.doc/.xls/.ppt) y el texto plano quedan fuera porque su
+// cabecera no dice de qué formato son. Un zip que parece Word y Excel a la vez
+// tampoco se adivina. Se buscan las partes principales (nombres que el zip guarda
+// sin comprimir): "xl/" o "word/" sueltos podrían salir por azar en un archivo grande.
+function detectSupportedMimeType(buffer) {
+  if (hasSignatureWithin(buffer, SIGNATURES.pdf, 1024)) return 'application/pdf';
+  if (startsWith(buffer, SIGNATURES.jpeg)) return 'image/jpeg';
+  if (startsWith(buffer, SIGNATURES.png)) return 'image/png';
+  if (startsWith(buffer, SIGNATURES.riff) && startsWith(buffer, SIGNATURES.webp, 8)) {
+    return 'image/webp';
+  }
+  if (hasZipSignature(buffer)) {
+    const isWord = containsAscii(buffer, 'word/document.xml');
+    const isExcel = containsAscii(buffer, 'xl/workbook.xml');
+    if (isWord && !isExcel) return DOCX_MIME_TYPE;
+    if (isExcel && !isWord) return XLSX_MIME_TYPE;
+  }
+  return null;
+}
+
+// Cuando el contenido contradice el tipo declarado pero es otro tipo que ya
+// aceptamos en ese mismo campo, manda el contenido: el archivo se procesa como lo
+// que es. Una foto en el campo de documentos o un archivo que no es nada soportado
+// siguen rechazándose en validateUploadedFiles. Muta los archivos de Multer y
+// devuelve las correcciones (sin nombres de archivo) para medirlas.
+function reconcileDeclaredTypes(files = {}) {
+  const corrections = [];
+  for (const fieldName of ['document', 'image']) {
+    const uploaded = Array.isArray(files[fieldName]) ? files[fieldName] : [];
+    uploaded.forEach((file, index) => {
+      if (!isAllowedInField(fieldName, file.mimetype) || matchesDeclaredType(file)) {
+        return;
+      }
+      const detected = detectSupportedMimeType(file.buffer);
+      if (!detected || !isAllowedInField(fieldName, detected)) {
+        return;
+      }
+      corrections.push({
+        field: `${fieldName}[${index}]`,
+        declared: file.mimetype,
+        detected
+      });
+      file.declaredMimetype = file.mimetype;
+      file.mimetype = detected;
+    });
+  }
+  return corrections;
 }
 
 // Qué es realmente un archivo, mirando solo su cabecera. Sirve para diagnosticar un
@@ -208,10 +271,7 @@ function validateUploadedFiles(files = {}) {
   }
 
   for (const file of uploadedFiles) {
-    const allowedInField = file.fieldName === 'image'
-      ? SUPPORTED_IMAGE_TYPES.includes(file.mimetype)
-      : SUPPORTED_DOCUMENT_TYPES.includes(file.mimetype);
-    if (!allowedInField) {
+    if (!isAllowedInField(file.fieldName, file.mimetype)) {
       errors.push({
         field: `${file.fieldName}[${file.index}]`,
         filename: file.originalname,
@@ -221,10 +281,16 @@ function validateUploadedFiles(files = {}) {
     }
 
     if (!matchesDeclaredType(file)) {
+      // `code` es el contrato con el cliente, que lo traduce a un mensaje por
+      // idioma. `reason` es solo para quien lea la respuesta o los logs.
+      const isEmpty = (file.buffer?.length ?? file.size ?? 0) === 0;
       errors.push({
         field: `${file.fieldName}[${file.index}]`,
         filename: file.originalname,
-        reason: 'File content does not match its declared type'
+        code: isEmpty ? FILE_EMPTY_CODE : FILE_CONTENT_MISMATCH_CODE,
+        reason: isEmpty
+          ? 'File is empty'
+          : 'File content does not match its declared type'
       });
     }
   }
@@ -335,6 +401,7 @@ module.exports = {
   describeUploadedFiles,
   getSuccessfulSummary,
   parseIframeParams,
+  reconcileDeclaredTypes,
   validateParsedMultimodalInput,
   validateUploadedFiles
 };
