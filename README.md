@@ -30,6 +30,12 @@ npm run validate-openapi
 npm run swagger-ui
 ```
 
+#### 4. Security audit skill
+
+`.github/skills/security-audit` vendors Cloudflare's [security-audit skill](https://github.com/cloudflare/security-audit-skill) (MIT, commit `c1c8a8c`) for coding agents such as GitHub Copilot CLI. Ask the agent to `security audit this codebase` for a full audit, or ask a focused security question for guidance mode. Full-audit artifacts go to `~/security-audit-skill/<repo-name>/run-<N>` by default, outside this repository.
+
+The bundled validators (`validate-findings.cjs`, `validate-coverage-ledger.cjs`) need Node.js and refuse to read input on Windows, where `O_NOFOLLOW` is unavailable; run audits from Linux, macOS, or WSL.
+
 <p>&nbsp;</p>
 
 
