@@ -7,8 +7,9 @@ class PermalinkController {
     try {
       const { medicalDescription, anonymizedDescription, diagnoses, lang, createdDate, myuuid } = req.body;
 
-      // Validar datos requeridos
-      if (!medicalDescription || !anonymizedDescription || !diagnoses || !lang || !createdDate) {
+      // En análisis solo con imagen no hay texto del paciente: medicalDescription
+      // y anonymizedDescription llegan como string vacío (""), lo cual es válido.
+      if (typeof medicalDescription !== 'string' || typeof anonymizedDescription !== 'string' || !diagnoses || !lang || !createdDate) {
         return res.status(400).json({
           success: false,
           message: 'Faltan datos requeridos: medicalDescription, anonymizedDescription, diagnoses, lang, createdDate'
