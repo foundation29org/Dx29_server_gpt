@@ -118,7 +118,7 @@ async function detectLanguage(text, lang, endpoint) {
       text: text,
       lang: lang,
       error: error.message,
-      endpoint: endpoint
+      endpoint: endpoint?.name || endpoint?.region || 'unknown'
     };
     insights.error(infoError);
     throw error;
@@ -175,7 +175,7 @@ async function translateText(text, targetLang, endpoint) {
       text,
       fromLang: targetLang,
       normalizedFrom: sourceLang,
-      endpoint,
+      endpoint: endpoint?.name || endpoint?.region || 'unknown',
       error: error.message,
       translatorError: error.response?.data,
     };
@@ -258,7 +258,7 @@ async function translateInvert(text, targetLang, endpoint) {
       text,
       originalTargetLang: targetLang,
       normalizedTargetLang: normalizedTarget,
-      endpoint,
+      endpoint: endpoint?.name || endpoint?.region || 'unknown',
       error: error.message,
       translatorError: error.response?.data,
     };

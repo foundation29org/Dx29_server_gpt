@@ -754,18 +754,6 @@ const processMultimodalInput = async (req, res) => {
             correlationId
         });
         
-        insights.error({
-            message: error.message || 'Unknown error in processMultimodalInput',
-            stack: error.stack,
-            code: error.code,
-            timestamp: new Date().toISOString(),
-            endpoint: 'processMultimodalInput',
-            phase: error.phase || 'unknown',
-            requestInfo: safeRequestInfo,
-            correlationId,
-            tenantId: tenantId,
-            subscriptionId: subscriptionId
-        });
         const statusCode = error.httpStatus === 400 ? 400 : 500;
         if (statusCode === 400) {
             trackMultimodalInputRejected({
@@ -781,6 +769,18 @@ const processMultimodalInput = async (req, res) => {
                 code: error.code || ''
             });
         } else {
+            insights.error({
+                message: error.message || 'Unknown error in processMultimodalInput',
+                stack: error.stack,
+                code: error.code,
+                timestamp: new Date().toISOString(),
+                endpoint: 'processMultimodalInput',
+                phase: error.phase || 'unknown',
+                requestInfo: safeRequestInfo,
+                correlationId,
+                tenantId: tenantId,
+                subscriptionId: subscriptionId
+            });
             insights.trackEvent('MultimodalAnalysisFailed', {
                 correlationId,
                 tenantId: tenantId || '',
