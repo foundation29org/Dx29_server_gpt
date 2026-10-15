@@ -10,11 +10,11 @@ const PermalinkSchema = new Schema({
   },
   medicalDescription: {
     type: String,
-    required: true
+    default: ''
   },
   anonymizedDescription: {
     type: String,
-    required: true
+    default: ''
   },
   diagnoses: {
     type: [Schema.Types.Mixed],
