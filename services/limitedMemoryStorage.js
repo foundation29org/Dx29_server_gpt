@@ -20,6 +20,12 @@ class LimitedMemoryStorage {
     if (!Number.isFinite(req.multimodalUploadBytes)) {
       req.multimodalUploadBytes = 0;
     }
+    if (!req.multimodalUploadMimeTypes) {
+      req.multimodalUploadMimeTypes = {};
+    }
+    const mimeType = file.mimetype || 'unknown';
+    req.multimodalUploadMimeTypes[mimeType] =
+      (req.multimodalUploadMimeTypes[mimeType] || 0) + 1;
 
     file.stream.on('data', (chunk) => {
       req.multimodalUploadBytes += chunk.length;

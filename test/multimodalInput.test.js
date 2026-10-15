@@ -665,6 +665,10 @@ test('tracks a client that closes the connection mid-upload as an abort, not a r
   const aborted = state.insightEvents.find((event) => event.name === 'MultimodalUploadAborted');
   assert.ok(aborted);
   assert.equal(aborted.measurements.declaredBytes, Number(complete.headers['content-length']));
+  assert.equal(aborted.measurements.receivedBytes, 0);
+  assert.equal(aborted.properties.ip, '127.0.0.1');
+  assert.equal(aborted.properties.abortMessage, 'Request aborted');
+  assert.equal(aborted.properties.uploadedMimeTypes, '{}');
   for (const other of ['MultimodalInputRejected', 'MultimodalAnalysisFailed']) {
     assert.equal(state.insightEvents.some((event) => event.name === other), false);
   }
