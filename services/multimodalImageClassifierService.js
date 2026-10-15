@@ -131,7 +131,8 @@ function fallbackClassification(error) {
     hasDocumentText: false,
     hasMedicalVisual: false,
     evidence: [],
-    error: error?.message || 'Image classification failed'
+    error: error?.message || 'Image classification failed',
+    unparseableImage: error?.response?.data?.error?.code === 'image_parse_error'
   };
 }
 

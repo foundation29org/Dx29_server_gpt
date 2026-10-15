@@ -116,6 +116,17 @@ async function classifyAndRouteImages(files, context) {
         });
       }
 
+      if (classification.unparseableImage) {
+        return {
+          file,
+          classification,
+          route: 'not_medical',
+          useExtractedText: false,
+          fallbackReason: 'image_parse_error',
+          extraction: null
+        };
+      }
+
       if (isNotMedicalImage(classification)) {
         return {
           file,

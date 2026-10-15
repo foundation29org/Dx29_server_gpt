@@ -16,6 +16,7 @@ function stubModule(modulePath, exports) {
 
 const state = {
   diagnoseCalls: [],
+  insightErrors: [],
   insightEvents: [],
   diagnose: async (req, res) => res.status(200).send({ result: 'success' }),
   imageUploads: [],
@@ -96,7 +97,7 @@ stubModule('../services/blobFiles', {
   }
 });
 stubModule('../services/insights', {
-  error: () => undefined,
+  error: (info) => state.insightErrors.push(info),
   trackEvent: (name, properties, measurements) =>
     state.insightEvents.push({ name, properties, measurements })
 });
@@ -134,7 +135,8 @@ stubModule('../services/multimodalImageClassifierService', {
     confidence: 0,
     hasDocumentText: false,
     hasMedicalVisual: false,
-    error: error.message
+    error: error.message,
+    unparseableImage: error?.response?.data?.error?.code === 'image_parse_error'
   }),
   isNotMedicalImage: (classification) =>
     classification.classification === 'not_medical' &&
@@ -282,6 +284,7 @@ const validFields = {
 
 test.beforeEach(() => {
   state.diagnoseCalls = [];
+  state.insightErrors = [];
   state.insightEvents = [];
   state.imageUploads = [];
   state.imageUploadError = null;
@@ -1427,6 +1430,34 @@ test('falls back to direct vision when image classification fails', async () => 
   assert.match(state.diagnoseCalls[0].uploadId, UPLOAD_ID_PATTERN);
 });
 
+test('discards an unparseable image (image_parse_error) instead of forwarding it to vision', async () => {
+  const err = new Error('Request failed with status code 400');
+  err.response = {
+    status: 400,
+    data: {
+      error: {
+        code: 'image_parse_error',
+        message: 'You uploaded an unsupported image. Please make sure your image is valid.'
+      }
+    }
+  };
+  state.imageClassificationError = err;
+  const req = createMultipartRequest(validFields, [{
+    field: 'image',
+    name: 'corrupt.jpg',
+    type: 'image/jpeg',
+    content: Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assertFailedOverSocket(res);
+  assert.equal(state.pubsubErrors[0].code, 'NO_MEDICAL_IMAGE');
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.equal(state.imageUploads.length, 0);
+});
+
 test('falls back to direct vision when OCR of a document image fails', async () => {
   state.imageClassification = {
     classification: 'document_only',
@@ -1690,6 +1721,7 @@ test('reports summarize validation errors without emailing the team', async () =
   assert.equal(state.diagnoseCalls.length, 0);
   assert.equal(state.pubsubErrors[0].code, 'SUMMARY_INPUT_REJECTED');
   assert.equal(state.teamEmails.length, 0);
+  assert.equal(state.insightErrors.length, 0);
 });
 
 const DELETE_UPLOAD_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
