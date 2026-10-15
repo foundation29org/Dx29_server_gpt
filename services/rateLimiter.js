@@ -185,6 +185,7 @@ const healthLimiter = rateLimit({
 
 
 module.exports = {
+    clientIp,
     needsLimiter,
     healthLimiter,
     smartLimiter,

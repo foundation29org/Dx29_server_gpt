@@ -46,6 +46,7 @@ const {
     CORRELATION_HEADER,
     ensureCorrelationId
 } = require('../../services/requestCorrelation');
+const { clientIp } = require('../../services/rateLimiter');
 
 // Configuración de multer para manejar archivos en memoria
 const upload = multer({
@@ -82,16 +83,20 @@ const CLIENT_ABORT_CODE = 'CLIENT_ABORTED';
 
 // El cliente se fue antes de terminar de subir: no es un fallo del servidor ni una
 // entrada inválida, y ya no hay a quién responder. Se mide como evento, no como excepción.
-function trackClientUploadAborted({ req, correlationId, tenantId, subscriptionId, requestStartedAt }) {
+function trackClientUploadAborted({ req, error, correlationId, tenantId, subscriptionId, requestStartedAt }) {
     insights.trackEvent('MultimodalUploadAborted', {
         correlationId,
         tenantId: tenantId || '',
         subscriptionId: subscriptionId || '',
+        ip: clientIp(req),
         myuuid: req.body?.myuuid || 'unknown',
+        abortMessage: error?.message || 'unknown',
+        uploadedMimeTypes: JSON.stringify(req.multimodalUploadMimeTypes || {}),
         userAgent: req.headers['user-agent'] || 'unknown'
     }, {
         durationMs: Date.now() - requestStartedAt,
-        declaredBytes: Number(req.headers['content-length']) || 0
+        declaredBytes: Number(req.headers['content-length']) || 0,
+        receivedBytes: Number(req.multimodalUploadBytes) || 0
     });
 }
 
@@ -744,7 +749,7 @@ const processMultimodalInput = async (req, res) => {
             });
     } catch (error) {
         if (error.code === CLIENT_ABORT_CODE) {
-            trackClientUploadAborted({ req, correlationId, tenantId, subscriptionId, requestStartedAt });
+            trackClientUploadAborted({ req, error, correlationId, tenantId, subscriptionId, requestStartedAt });
             return undefined;
         }
         console.error('Error en processMultimodalInput:', {
