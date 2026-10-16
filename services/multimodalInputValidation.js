@@ -328,13 +328,10 @@ function validateParsedMultimodalInput(body = {}, files = {}) {
     });
   }
 
-  if (
-    body.timezone !== undefined &&
-    (typeof body.timezone !== 'string' || body.timezone.trim().length === 0)
-  ) {
+  if (body.timezone !== undefined && typeof body.timezone !== 'string') {
     errors.push({
       field: 'timezone',
-      reason: 'Must be a non-empty string when provided'
+      reason: 'Must be a string'
     });
   }
 

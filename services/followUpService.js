@@ -90,9 +90,7 @@ function validateFollowUpQuestionsRequest(data) {
     errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
 
-  if (!data.timezone) {
-    errors.push({ field: 'timezone', reason: 'Field is required' });
-  } else if (typeof data.timezone !== 'string') {
+  if (data.timezone !== undefined && data.timezone !== '' && typeof data.timezone !== 'string') {
     errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
 
@@ -120,7 +118,7 @@ function sanitizeFollowUpQuestionsData(data) {
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     mode: data.mode || 'general',
-    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+    timezone: data.timezone?.trim() || 'UTC'
   };
 }
 
@@ -177,6 +175,7 @@ async function generateFollowUpQuestions(req, res) {
 
     const sanitizedData = sanitizeFollowUpQuestionsData(req.body);
     const { description, diseases, lang, mode, timezone } = sanitizedData;
+    requestInfo.timezone = timezone;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -636,9 +635,7 @@ function validateProcessFollowUpRequest(data) {
     errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
 
-  if (!data.timezone) {
-    errors.push({ field: 'timezone', reason: 'Field is required' });
-  } else if (typeof data.timezone !== 'string') {
+  if (data.timezone !== undefined && data.timezone !== '' && typeof data.timezone !== 'string') {
     errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
 
@@ -677,7 +674,7 @@ function sanitizeProcessFollowUpData(data) {
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
     mode: data.mode || 'general',
-    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+    timezone: data.timezone?.trim() || 'UTC'
   };
 }
 
@@ -734,6 +731,7 @@ async function processFollowUpAnswers(req, res) {
 
     const sanitizedData = sanitizeProcessFollowUpData(req.body);
     const { description, answers, lang, mode, timezone } = sanitizedData;
+    requestInfo.timezone = timezone;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -1115,9 +1113,7 @@ function validateERQuestionsRequest(data) {
     errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
 
-  if (!data.timezone) {
-    errors.push({ field: 'timezone', reason: 'Field is required' });
-  } else if (typeof data.timezone !== 'string') {
+  if (data.timezone !== undefined && data.timezone !== '' && typeof data.timezone !== 'string') {
     errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
 
@@ -1139,7 +1135,7 @@ function sanitizeERQuestionsData(data) {
     description: sanitizeInput(data.description || ''),
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en',
-    timezone: data.timezone?.trim() || '' // Manejar caso donde timezone es undefined
+    timezone: data.timezone?.trim() || 'UTC'
   };
 }
 async function generateERQuestions(req, res) {
@@ -1195,6 +1191,7 @@ async function generateERQuestions(req, res) {
 
     const sanitizedData = sanitizeERQuestionsData(req.body);
     const { description, lang, timezone } = sanitizedData;
+    requestInfo.timezone = timezone;
 
     // Variables para cost tracking
     const costTrackingData = {

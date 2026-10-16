@@ -116,7 +116,7 @@ function sanitizeAiData(data) {
     diseases_list: data.diseases_list ? sanitizeInput(data.diseases_list) : '',
     myuuid: data.myuuid.trim(),
     lang: data.lang ? data.lang.trim().toLowerCase() : 'en', // Usar 'en' como predeterminado
-    timezone: data.timezone?.trim() || '', // Manejar caso donde timezone es undefined
+    timezone: data.timezone?.trim() || 'UTC',
     countryName: sanitizedCountryName,
     countryCode: sanitizedCountryCode,
     iframeParams: sanitizeIframeParams(data.iframeParams) // Sanitizar iframeParams

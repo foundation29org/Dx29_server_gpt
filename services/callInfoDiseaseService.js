@@ -62,9 +62,7 @@ function validateQuestionRequest(data) {
       errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
     }
   
-    if (!data.timezone) {
-      errors.push({ field: 'timezone', reason: 'Field is required' });
-    } else if (typeof data.timezone !== 'string') {
+    if (data.timezone !== undefined && data.timezone !== '' && typeof data.timezone !== 'string') {
       errors.push({ field: 'timezone', reason: 'Must be a string' });
     }
   
@@ -94,7 +92,7 @@ function validateQuestionRequest(data) {
       disease: sanitizeInput(data.disease),
       medicalDescription: data.medicalDescription ? sanitizeInput(data.medicalDescription) : '',
       myuuid: data.myuuid.trim(),
-      timezone: data.timezone?.trim() || '',
+      timezone: data.timezone?.trim() || 'UTC',
       questionType: Number(data.questionType),
       detectedLang: data.detectedLang ? data.detectedLang.trim().toLowerCase() : 'en'
     };
@@ -178,6 +176,8 @@ async function callInfoDisease(req, res) {
   
       // Sanitizar los datos
       const sanitizedData = sanitizeQuestionData(req.body);
+      requestInfo.timezone = sanitizedData.timezone;
+      costTrackingData.timezone = sanitizedData.timezone;
       try {
         sanitizedData.imageUrls = await resolveDiagnosticImages(req.body, {
           myuuid: sanitizedData.myuuid,

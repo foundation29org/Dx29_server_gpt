@@ -37,9 +37,7 @@ function validateSummarizeRequest(data) {
       errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
     }
   
-    if (!data.timezone) {
-      errors.push({ field: 'timezone', reason: 'Field is required' });
-    } else if (typeof data.timezone !== 'string') {
+    if (data.timezone !== undefined && data.timezone !== '' && typeof data.timezone !== 'string') {
       errors.push({ field: 'timezone', reason: 'Must be a string' });
     }
   
@@ -108,7 +106,8 @@ async function summarize(req, res) {
     }
 
     const sanitizedData = sanitizeAiData(req.body);
-    const { description, lang } = sanitizedData;
+    const { description, lang, timezone } = sanitizedData;
+    requestInfo.timezone = timezone;
 
     // Variables para cost tracking
     const costTrackingData = {
@@ -116,7 +115,7 @@ async function summarize(req, res) {
       tenantId: tenantId,
       subscriptionId: subscriptionId,
       lang: lang,
-      timezone: req.body.timezone,
+      timezone: timezone,
       description: `${description.substring(0, 100)}... - Summarize`,
       iframeParams: req.body.iframeParams || {}
     };

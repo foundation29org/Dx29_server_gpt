@@ -181,3 +181,18 @@ test('image-only answers are processed without a description', async () => {
   assert.equal(state.detectCalls, 0);
   assert.match(state.prompts[0], /submitted as medical images/);
 });
+
+test('missing or empty timezone falls back to UTC instead of rejecting', async () => {
+  state.aiContent = '["¿Desde cuándo?"]';
+  const res = await call(generateFollowUpQuestions, {
+    myuuid: baseBody.myuuid,
+    lang: 'es',
+    timezone: '',
+    description: 'Cefalea pulsátil desde hace tres semanas.',
+    diseases: 'Migraña',
+    mode: 'general'
+  });
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal(res.body.result, 'success');
+});

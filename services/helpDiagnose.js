@@ -2063,9 +2063,7 @@ function validateDiagnoseRequest(data) {
     errors.push({ field: 'myuuid', reason: 'Must be a valid UUID v4' });
   }
 
-  if (!data.timezone) {
-    errors.push({ field: 'timezone', reason: 'Field is required' });
-  } else if (typeof data.timezone !== 'string') {
+  if (data.timezone !== undefined && data.timezone !== '' && typeof data.timezone !== 'string') {
     errors.push({ field: 'timezone', reason: 'Must be a string' });
   }
 
@@ -2309,6 +2307,7 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     }
 
     const sanitizedData = sanitizeAiData(req.body);
+    requestInfo.timezone = sanitizedData.timezone;
     sanitizedData.model = model;
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;
