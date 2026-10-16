@@ -344,7 +344,9 @@ const processMultimodalInput = async (req, res) => {
             const userId = req.body.myuuid;
 
             // Actualizar requestInfo con el body parseado y timezone correcto
-            safeRequestInfo.timezone = req.body.timezone;
+            const resolvedTimezone = req.body.timezone?.trim() || 'UTC';
+            req.body.timezone = resolvedTimezone;
+            safeRequestInfo.timezone = resolvedTimezone;
 
             // Log para debug - ver qué está llegando
             console.log('Body recibido:', {
