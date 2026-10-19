@@ -90,17 +90,9 @@ async function detectLanguage(text, lang, endpoint) {
         return normalized;
       }
 
-      const error = new Error(
-        `Detected language '${detectionResult.language}' is not supported for translation (confidence: ${detectionResult.score})`
+      console.warn(
+        `Detected language '${detectionResult.language}' is not supported for translation (confidence: ${detectionResult.score}); falling back to 'en'`
       );
-      error.code = 'UNSUPPORTED_LANGUAGE';
-      insights.error?.({
-        type: 'UNSUPPORTED_LANGUAGE',
-        raw,
-        normalized,
-        score: detectionResult.score,
-        message: error.message,
-      });
       
       return 'en';
     }
@@ -185,8 +177,10 @@ async function translateText(text, targetLang, endpoint) {
     if (error.response?.status === 401) {
       throw new Error('Authentication failed with translation service');
     }
-    
-    throw new Error('Failed to translate text');
+
+    const wrappedError = new Error('Failed to translate text');
+    wrappedError.status = error.response?.status;
+    throw wrappedError;
   }
 }
 
@@ -268,8 +262,10 @@ async function translateInvert(text, targetLang, endpoint) {
     if (error.response?.status === 401) {
       throw new Error('Authentication failed with translation service');
     }
-    
-    throw new Error('Failed to translate text from English');
+
+    const wrappedError = new Error('Failed to translate text from English');
+    wrappedError.status = error.response?.status;
+    throw wrappedError;
   }
 }
 

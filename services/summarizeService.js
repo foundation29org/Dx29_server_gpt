@@ -7,6 +7,7 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const modelTranslation = 'gpt54mini';
 const modelSummarize = 'gpt54mini';
 const MAX_SUMMARY_INPUT_CHARS = 400000;
+const AZURE_TRANSLATOR_MAX_CHARS = 50000;
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -184,11 +185,15 @@ async function summarize(req, res) {
           englishDescription = await translateTextWithRetry(description, detectedLanguage);
           forwardAzureDuration = Date.now() - fwdAzStart;
         }*/
-        // Usar Azure Translator directamente para reducir latencia y coste
-        translationChars += (description ? description.length : 0);
-        const fwdAzStart = Date.now();
-        englishDescription = await translateTextWithRetry(description, detectedLanguage);
-        forwardAzureDuration = Date.now() - fwdAzStart;
+        // Usar Azure Translator directamente para reducir latencia y coste.
+        // Azure Translator rechaza textos de más de 50 000 caracteres con 400;
+        // por encima de ese tamaño gpt54mini resume directamente el texto original en inglés.
+        if (description && description.length <= AZURE_TRANSLATOR_MAX_CHARS) {
+          translationChars += description.length;
+          const fwdAzStart = Date.now();
+          englishDescription = await translateTextWithRetry(description, detectedLanguage);
+          forwardAzureDuration = Date.now() - fwdAzStart;
+        }
       }
     } catch (translationError) {
       // Manejo en caso de fallo de detección/traducción de ida: continuar sin traducir
