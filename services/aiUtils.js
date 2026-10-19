@@ -617,6 +617,11 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
   }
 }
 
+  function isNonRetryableTranslatorError(error) {
+    const status = error?.status || error?.response?.status;
+    return status === 400;
+  }
+
   async function detectLanguageWithRetry(text, lang, retries = 3, delay = 1000) {
     for (let i = 0; i < translatorEndpoints.length; i++) {
       const endpoint = translatorEndpoints[i];
@@ -626,7 +631,7 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
           return await translationCtrl.detectLanguage(text, lang, endpoint);
         } catch (error) {
           const isLastTry = attempt === retries - 1 && i === translatorEndpoints.length - 1;
-          if (isLastTry) throw error;
+          if (isLastTry || isNonRetryableTranslatorError(error)) throw error;
   
           console.warn(`Error in ${endpoint.region}, retrying... (${attempt + 1}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
@@ -644,7 +649,7 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
           return await translationCtrl.translateText(text, fromLang, endpoint);
         } catch (error) {
           const isLastTry = attempt === retries - 1 && i === translatorEndpoints.length - 1;
-          if (isLastTry) throw error;
+          if (isLastTry || isNonRetryableTranslatorError(error)) throw error;
   
           console.warn(`Error in ${endpoint.name}, retrying... (${attempt + 1}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
@@ -663,7 +668,7 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
           return await translationCtrl.translateInvert(text, toLang, endpoint);
         } catch (error) {
           const isLastTry = attempt === retries - 1 && i === translatorEndpoints.length - 1;
-          if (isLastTry) throw error;
+          if (isLastTry || isNonRetryableTranslatorError(error)) throw error;
   
           console.warn(`Error in ${endpoint.name} (invert), retrying... (${attempt + 1}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));

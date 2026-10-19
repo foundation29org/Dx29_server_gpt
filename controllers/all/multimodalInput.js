@@ -209,6 +209,7 @@ function trackMultimodalInputRejected({
     correlationId,
     tenantId,
     subscriptionId,
+    myuuid,
     requestStartedAt,
     files,
     validationFields = [],
@@ -221,6 +222,7 @@ function trackMultimodalInputRejected({
         correlationId,
         tenantId: tenantId || '',
         subscriptionId: subscriptionId || '',
+        myuuid: myuuid || 'unknown',
         validationFields: JSON.stringify(validationFields),
         phase,
         code,
@@ -382,6 +384,7 @@ const processMultimodalInput = async (req, res) => {
                     correlationId,
                     tenantId,
                     subscriptionId,
+                    myuuid: req.body?.myuuid,
                     requestStartedAt,
                     files: req.files,
                     validationFields: validationErrors.map(
@@ -555,6 +558,7 @@ const processMultimodalInput = async (req, res) => {
                     correlationId,
                     tenantId: tenantId || '',
                     subscriptionId: subscriptionId || '',
+                    myuuid: req.body?.myuuid || 'unknown',
                     phase: 'extract_documents',
                     statusCode: 400,
                     ...failedUpload.properties
@@ -588,6 +592,7 @@ const processMultimodalInput = async (req, res) => {
                     correlationId,
                     tenantId: tenantId || '',
                     subscriptionId: subscriptionId || '',
+                    myuuid: req.body?.myuuid || 'unknown',
                     phase: 'classify_images',
                     statusCode: 400,
                     ...failedUpload.properties
@@ -699,6 +704,7 @@ const processMultimodalInput = async (req, res) => {
                 correlationId,
                 tenantId: tenantId || '',
                 subscriptionId: subscriptionId || '',
+                myuuid: req.body?.myuuid || 'unknown',
                 summarized,
                 model,
                 ...completedUpload.properties
@@ -767,6 +773,7 @@ const processMultimodalInput = async (req, res) => {
                 correlationId,
                 tenantId,
                 subscriptionId,
+                myuuid: req.body?.myuuid,
                 requestStartedAt,
                 files: req.files,
                 validationFields: error.validationFields?.length
@@ -792,6 +799,7 @@ const processMultimodalInput = async (req, res) => {
                 correlationId,
                 tenantId: tenantId || '',
                 subscriptionId: subscriptionId || '',
+                myuuid: req.body?.myuuid || 'unknown',
                 phase: error.phase || 'unknown',
                 code: error.code || '',
                 statusCode
