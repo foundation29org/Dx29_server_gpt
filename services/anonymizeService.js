@@ -15,32 +15,24 @@ async function anonymizeText(text, timezone, tenantId, subscriptionId, myuuid, m
   const RETRY_DELAY = 1000;
   const endpoints = getEndpointsByTimezone(timezone, model);
   const devInstruction = `
-You are a medical text anonymizer.
+You are a medical text anonymizer. Remove ONLY direct identifiers of a specific person or healthcare facility.
 
-Your ONLY job is to remove direct identifiers of a person.
+ANONYMIZE:
+- Personal names of a specific patient, relative, or clinician when context indicates a person (e.g. "John Smith", "Dr. Neha Verma", "Varón de 55 años (José)"), even if lowercase.
+- Street addresses, postal/ZIP codes, phone numbers, emails, and clinic websites.
+- Government IDs (DNI/NIE/SSN), medical record/request numbers (MRN/NHC), and clinician license numbers (e.g. "Lic. 48291", "Col. 12345").
+- Specific hospital or clinic names in patient reports or prescriptions.
 
-DIRECT IDENTIFIERS (anonymize):
-- Full personal names (e.g. "John Smith", "María García").
-- Full postal addresses.
-- Phone numbers.
-- Email addresses.
-- Government IDs (DNI/NIE/passport/SSN, etc.).
-- Medical record numbers (MRN/NHC, etc.).
+DO NOT ANONYMIZE (preserve all clinical content):
+- Ages, dates of birth, and clinical/test/vaccination dates or years.
+- Diagnoses, symptoms, lab/imaging results, vital signs, gene symbols/variants, vaccine lot numbers, and device names.
+- Medications (generic, brand, or suffixed brands like "-AH", "-XR", "-OD", "-Max").
+- Medical eponyms: scores/indices/scales (e.g. Walter, Glasgow, Barthel), textbooks/authors/theories (e.g. Miller's, Morgan & Mikhail, Orem), diseases/signs, medical typos, or food/diet terms.
+- General city/region names or hospital acronyms in protocol/vaccination queries (e.g. "HULP", "Huesca").
+- Never anonymize a standalone word in a short query without personal/demographic/clinical-role context. When in doubt, DO NOT anonymize.
 
-DO NOT anonymize:
-- Ages (e.g. "14-year-old").
-- Clinical event dates (e.g. seizure dates, admission dates, test dates), or years.
-- Diagnoses, symptoms, lab results, imaging findings, vital signs.
-- Gene symbols/variants (e.g. SCN1A, c.4126T>C, p.Cys1376Arg).
-- Medication names (generic or brand: valproate, Diacomit, Depakine, etc.).
-- Device/orthosis/product names (e.g. FODA).
-
-If the text contains NO direct identifiers according to this list, return it IDENTICAL.
-
-When you anonymize a span, replace ONLY that span with [ANON-N],
-where N is the exact count of replaced characters in that span.
-
-Never use asterisks (*). Never add explanations or extra text.
+If no direct identifiers exist, return the text IDENTICAL.
+Replace ONLY each identifier span with [ANON-N] (N = exact character count replaced). Leave existing *** or [ANON-N] unchanged. Never use asterisks (*) or add explanations.
 `;
 
   const anonymizationPrompt = `
@@ -51,7 +43,7 @@ Original text:
 `;
 
   const messages = [
-    //{ role: "developer", content: devInstruction },
+    { role: "developer", content: devInstruction },
     { role: "user", content: anonymizationPrompt.replace("{{text}}", text) }
   ];
   let requestBody = {

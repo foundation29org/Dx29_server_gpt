@@ -46,6 +46,15 @@ const PRICING = {
     input: 0.002,     // $2.00 per 1M tokens
     output: 0.012     // $12.00 per 1M tokens
   },
+  gpt61sol: {
+    input: 0.002,     // $2.00 per 1M tokens
+    output: 0.010     // $10.00 per 1M tokens
+  },
+  perplexity_search: {
+    input: 0,
+    output: 0,
+    request: 0.005    // $5.00 per 1K requests ($0.005 per search call)
+  },
   'gemini-3-pro-preview': {
     input: 0.002,      // Temporal: ajustar cuando se confirme tarifa final
     output: 0.008      // Temporal: ajustar cuando se confirme tarifa final
@@ -66,7 +75,11 @@ const PRICING_ALIASES = {
   'gpt-5-nano': 'gpt5nano',
   'gpt-5': 'gpt5',
   gpt56terra: 'gpt56terra',
-  'gpt-5.6-terra': 'gpt56terra'
+  'gpt-5.6-terra': 'gpt56terra',
+  gpt61sol: 'gpt61sol',
+  'gpt-6.1-sol': 'gpt61sol',
+  'perplexity-search': 'perplexity_search',
+  perplexity_search: 'perplexity_search'
 };
 
 function calculatePrice(usage, model = 'gpt54mini') {
@@ -80,8 +93,8 @@ function calculatePrice(usage, model = 'gpt54mini') {
   const inputCost = (promptTokens / 1000) * pricing.input;
   const outputCost = (completionTokens / 1000) * pricing.output;
   
-  // Agregar request fee para Sonar
-  const requestFee = pricing.request || 0;
+  // Agregar request fee para Sonar, Perplexity Search o web_search tool calls
+  const requestFee = usage.request_fee ?? usage.requestFee ?? pricing.request ?? 0;
   const totalCost = inputCost + outputCost + requestFee;
 
   return {

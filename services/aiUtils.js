@@ -25,14 +25,17 @@ const ROUTING_MODEL_ALIASES = {
   gpt5: DEFAULT_AI_MODEL,
   'gpt-5': DEFAULT_AI_MODEL,
   gpt56terra: 'gpt56terra',
-  'gpt-5.6-terra': 'gpt56terra'
+  'gpt-5.6-terra': 'gpt56terra',
+  gpt61sol: 'gpt61sol',
+  'gpt-6.1-sol': 'gpt61sol'
 };
 const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt4o: 'gpt4o',
   gpt5nano: 'gpt-5-nano',
   gpt5mini: 'gpt-5-mini',
   gpt54mini: 'gpt-5.4-mini',
-  gpt56terra: 'gpt-5.6-terra'
+  gpt56terra: 'gpt-5.6-terra',
+  gpt61sol: 'gpt-6.1-sol'
 };
 
 // Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
@@ -71,6 +74,10 @@ const modelConfig = {
   'gpt-5.6-terra': {
     apiVersion: '2025-04-01-preview',
     path: '/openai/deployments/gpt-5.6-terra/chat/completions'
+  },
+  'gpt-6.1-sol': {
+    apiVersion: '2025-04-01-preview',
+    path: '/openai/deployments/gpt-6.1-sol/chat/completions'
   }
 };
 
@@ -374,6 +381,41 @@ const endpointsMap = {
     other: [
       buildAzureOpenAIEndpoint('us2', 'gpt-5.6-terra'),
       buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-terra')
+    ]
+  },
+  // gpt-6.1-sol: enrutamiento multi-región igual que Terra (as1, eu1, us1, us2) con failover entre regiones
+  gpt61sol: {
+    asia: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol')
+    ],
+    europe: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-6.1-sol')
+    ],
+    northamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol')
+    ],
+    southamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol')
+    ],
+    africa: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-6.1-sol')
+    ],
+    oceania: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol')
+    ],
+    other: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-6.1-sol'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol')
     ]
   }
 };

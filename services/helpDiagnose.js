@@ -10,7 +10,6 @@ const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
 const { inferProfileAndSpecialty, getDefaultInferredProfile } = require('./profileInferenceService');
 const { classifyIntent, shouldSuggestDiagnosisPage } = require('./intentClassifier');
-const PerplexityApiKey = config.PERPLEXITY_API_KEY;
 const {
   DEFAULT_AI_MODEL,
   callAiWithFailover,
@@ -31,9 +30,10 @@ const {
   withImageContext
 } = require('./multimodalUploadService');
 const { locationContextText, resolveCountryCode, withLocationContext } = require('./locationContext');
+const { answerMedicalQuestion } = require('./medicalQuestionService');
 const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
-const modelQuestions = 'sonar-pro'; // Cambiar: 'sonar', 'gpt4o', 'gpt5nano', 'gpt5mini', 'sonar-reasoning-pro, 'sonar-pro'
+const modelQuestions = 'gpt61sol';
 const modelAnonymization = 'gpt54mini';//'gpt5mini'; //'gpt5nano';
 const profileInferenceEnabled = config.PROFILE_INFERENCE_ENABLED;
 const profileInferenceConfidenceThreshold = Number.isFinite(config.PROFILE_INFERENCE_CONFIDENCE_THRESHOLD)
@@ -110,190 +110,6 @@ const toAnonymizedHtml = (txt) => {
    .replace(/\n/g, '<br>');
 };
 
-// Función para llamar a Sonar (Perplexity API)
-async function callSonarAPI(prompt, timezone, modelType) {
-  const axios = require('axios');
-
-  const perplexityPrompt = `${prompt}
-
-  IMPORTANT: Use your web search capabilities to find current, accurate medical information.
-
-  Prioritize current clinical guidelines, systematic reviews, and official medical sources.
-
-  Cite supported claims inline using the citation markers associated with the search results.
-  Do not include a separate references, sources, or bibliography section, and do not list raw URLs.
-  The application renders the verified references separately from the API citation metadata.`;
-
-  let reasoning_effort = "low";
-  if (modelType === 'sonar-reasoning-pro' || modelType === 'sonar-pro') {
-    reasoning_effort = "medium";
-  }
-
-  const perplexityResponse = await axios.post('https://api.perplexity.ai/chat/completions', {
-    model: modelType,
-    messages: [{ role: "user", content: perplexityPrompt }],
-    search_mode: "academic",
-    web_search_options: { search_context_size: reasoning_effort }
-  }, {
-    headers: {
-      'Authorization': `Bearer ${PerplexityApiKey}`,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  return perplexityResponse;
-}
-
-// Función para llamar a modelos GPT
-async function callGPTAPI(prompt, timezone, dataRequest, model = defaultModel) {
-
-  let requestBody = {
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
-  };
-
-  if (model === 'gpt5nano') {
-
-    requestBody = {
-      model: "gpt-5-nano",
-      messages: [{ role: "user", content: prompt }],
-      reasoning_effort: "low" //minimal, low, medium, high
-    };
-  } else if (model === 'gpt5mini') {
-
-    requestBody = {
-      model: "gpt-5-mini",
-      messages: [{ role: "user", content: prompt }],
-      reasoning_effort: "low" //minimal, low, medium, high
-    };
-  } else if (model === 'gpt54mini') {
-
-    requestBody = {
-      model: "gpt-5.4-mini",
-      messages: [{ role: "user", content: prompt }],
-      reasoning_effort: "low" //minimal, low, medium, high
-    };
-  }
-
-  return await callAiWithFailover(requestBody, timezone, model, 0, dataRequest);
-}
-
-// Función para procesar respuesta de Sonar
-function processSonarResponse(perplexityResponse) {
-  // Simular la estructura de respuesta de OpenAI para compatibilidad
-  const generalMedicalResponse = {
-    data: {
-      choices: [{
-        message: {
-          content: perplexityResponse.data.choices[0].message.content
-        }
-      }],
-      usage: perplexityResponse.data.usage
-    }
-  };
-
-  let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
-
-  // Eliminar secciones de razonamiento redactado si están presentes
-  // Esto maneja <think>...</think> que puede aparecer en modelos reasoning
-  // Formato según Perplexity: <think>...</think>
-  medicalAnswer = medicalAnswer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  medicalAnswer = medicalAnswer.replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '').trim();
-
-  // Limpiar marcadores de código markdown si están presentes
-  if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
-    medicalAnswer = medicalAnswer.slice(7, -3).trim();
-  } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
-    medicalAnswer = medicalAnswer.slice(3, -3).trim();
-  }
-
-  return {
-    medicalAnswer,
-    sonarData: perplexityResponse.data.citations && perplexityResponse.data.citations.length > 0 ? {
-      citations: perplexityResponse.data.citations,
-      searchResults: perplexityResponse.data.search_results,
-      hasCitations: true
-    } : null
-  };
-}
-
-// Función para procesar respuesta de GPT-4o
-function processGPTResponse(generalMedicalResponse) {
-  let medicalAnswer = generalMedicalResponse.data.choices[0].message.content.trim();
-
-  // Limpiar marcadores de código markdown si están presentes
-  if (medicalAnswer.startsWith('```html') && medicalAnswer.endsWith('```')) {
-    medicalAnswer = medicalAnswer.slice(7, -3).trim();
-  } else if (medicalAnswer.startsWith('```') && medicalAnswer.endsWith('```')) {
-    medicalAnswer = medicalAnswer.slice(3, -3).trim();
-  }
-
-  return {
-    medicalAnswer,
-    sonarData: null // GPT-4o no tiene citas web
-  };
-}
-
-// Función unificada para manejar todos los modelos
-async function getMedicalResponse(prompt, timezone, dataRequest, modelType = defaultModel) {
-  let response, model;
-
-  switch (modelType) {
-    case 'sonar':
-      response = await callSonarAPI(prompt, timezone, modelType);
-      model = 'sonar';
-      break;
-    case 'sonar-reasoning-pro':
-      response = await callSonarAPI(prompt, timezone, modelType);
-      model = 'sonar-reasoning-pro';
-      break;
-    case 'sonar-pro':
-      response = await callSonarAPI(prompt, timezone, modelType);
-      model = 'sonar-pro';
-      break;
-    case 'gpt5nano':
-      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt5nano');
-      model = 'gpt5nano';
-      break;
-    case 'gpt5mini':
-      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt5mini');
-      model = 'gpt5mini';
-      break;
-    case 'gpt54mini':
-      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt54mini');
-      model = 'gpt54mini';
-      break;
-    case 'gpt4o':
-    default:
-      response = await callGPTAPI(prompt, timezone, dataRequest, 'gpt4o');
-      model = 'gpt4o';
-      break;
-  }
-
-  return { response, model };
-}
-
-// Función unificada para procesar cualquier respuesta
-function processMedicalResponse(response, model) {
-  let medicalAnswer, sonarData;
-
-  if (model === 'sonar' || model === 'sonar-reasoning-pro' || model === 'sonar-pro') {
-    const processedResponse = processSonarResponse(response);
-    medicalAnswer = processedResponse.medicalAnswer;
-    sonarData = processedResponse.sonarData;
-  } else {
-    // Para GPT-4o, gpt-5-nano y otros modelos GPT
-    const processedResponse = processGPTResponse(response);
-    medicalAnswer = processedResponse.medicalAnswer;
-    sonarData = processedResponse.sonarData;
-  }
-
-  return { medicalAnswer, sonarData };
-}
-
 // Función para sanitizar parámetros del iframe que pueden incluir información adicional
 // para tenants específicos como centro médico, ámbito, especialidad, etc.
 
@@ -364,8 +180,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let forwardTranslationDurationMs = 0; // duración traducción a inglés (Azure)
   let reverseTranslationDurationMs = 0; // duración traducción inversa genérica (Azure)
   let reverseTranslationChars = 0; // traducción inversa al idioma original
-  // Hoist queryType to function scope so it's available in error paths
+  // Hoist queryType and shouldAnswerMedical to function scope so they're available in error paths
   let queryType = 'unknown';
+  let shouldAnswerMedical = false;
   let intentDecision = {
     action: 'go',
     reason: 'patient_case_ready',
@@ -579,7 +396,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       costTracking.total.tokens.total += intentCost.totalTokens;
     }
 
-    const shouldAnswerMedical = flow === 'ask' && intentDecision.action === 'explain';
+    shouldAnswerMedical = flow === 'ask' && intentDecision.action === 'explain';
     const shouldRunDiagnosis = flow === 'diagnose' && intentDecision.action === 'go';
     let suggestedPage = null;
     if (flow === 'ask' && shouldSuggestDiagnosisPage(intentDecision)) {
@@ -659,12 +476,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       const generalMedicalPrompt = `You are a medical educator. Answer the medical question below with accurate, evidence-based, educational information.
 
 Content requirements:
-- Answer in the same language as the question, using plain language.
+- Answer in the same language and the same writing script/alphabet as the question (for example, if the question is written in Roman/Latin script such as Hinglish or Roman Urdu, reply in Roman/Latin script rather than Devanagari or Arabic script), using plain language.
 - Start with a direct answer in one to three sentences.
 - Include only context that helps the user understand or act on the answer.
+- When relevant to the question, state concrete clinical facts from the evidence (such as active ingredients, specific excipients, standard dosages or durations, diagnostic thresholds, cohort/trial numbers, and whether evidence is direct or class-level).
 - If the question describes symptoms, clearly identify relevant urgent warning signs.
 - Do not diagnose the user or add a generic disclaimer; the interface already displays one.
-- Do not repeat names, direct identifiers, redaction markers, or anonymization placeholders from the question.
+- Do not end with questions to the user: each question is answered in a single turn without follow-up.
+- Do not repeat personal names of people, direct patient identifiers, redaction markers, or anonymization placeholders from the question.
 - Cite sources inline when available, but do not add a separate references or sources section.${questionLocationRule}
 
 Markdown format contract:
@@ -682,27 +501,28 @@ ${medicalQuestionForModel}
 
       const modelType = modelQuestions;
       try {
-        // Obtener respuesta del modelo seleccionado
+        // Obtener respuesta educativa verificada con fuentes médicas (Perplexity Search API + Azure gpt-6.1-sol,
+        // con fallback automático a Azure OpenAI Responses web_search)
         const generalStartMs = Date.now();
-        const { response: generalMedicalResponse, model: selectedModel } = await getMedicalResponse(
-          generalMedicalPrompt,
-          data.timezone,
-          dataRequest,
-          modelType
-        );
+        const {
+          medicalAnswer,
+          sonarData,
+          model: selectedModel,
+          usage: medicalQuestionUsage
+        } = await answerMedicalQuestion({
+          questionText: medicalQuestionForModel,
+          basePrompt: generalMedicalPrompt,
+          detectedLanguage,
+          timezone: data.timezone,
+          dataRequest
+        });
         const generalElapsedMs = Date.now() - generalStartMs;
-        data.model = selectedModel;
-
-        // Procesar respuesta
-        const { medicalAnswer, sonarData } = processMedicalResponse(
-          generalMedicalResponse,
-          selectedModel
-        );
+        data.model = selectedModel || modelType;
         const result = {
           result: 'success',
           data: [], // Sin diagnósticos para consultas generales
           medicalAnswer: medicalAnswer, // Respuesta educativa generada
-          sonarData: sonarData, // Información de citas (solo disponible con Sonar)
+          sonarData: sonarData, // Información de citas verificadas
           anonymization: {
             hasPersonalInfo: hasPersonalInfo,
             anonymizedText: data.description,
@@ -741,9 +561,8 @@ ${medicalQuestionForModel}
         }
         let etapa1Cost = null;
         // Agregar costos de la respuesta médica general
-        if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
-          const usage = generalMedicalResponse.data.usage;
-          etapa1Cost = calculatePrice(usage, selectedModel);
+        if (medicalQuestionUsage) {
+          etapa1Cost = calculatePrice(medicalQuestionUsage, selectedModel);
           costTracking.etapa1_medical_response = {
             cost: etapa1Cost.totalCost,
             tokens: { input: etapa1Cost.inputTokens, output: etapa1Cost.outputTokens, total: etapa1Cost.totalTokens },
@@ -877,7 +696,7 @@ ${medicalQuestionForModel}
           console.log(`   Etapa 1 - Reverse Translation: ${formatCost(costTracking.reverse_translation.cost)}`);
         }
 
-        if (generalMedicalResponse && generalMedicalResponse.data && generalMedicalResponse.data.usage) {
+        if (etapa1Cost) {
           console.log(`   Etapa 1 - General Medical Response: ${formatCost(etapa1Cost.totalCost)}`);
         }
         console.log(`   ──────────────────────────`);
@@ -910,7 +729,7 @@ ${medicalQuestionForModel}
               queryType: queryType,
               intentAction: intentDecision.action,
               intentReason: intentDecision.reason,
-              model: modelType
+              model: selectedModel || modelType
             },
             timezone: data.timezone,
             lang: data.lang || 'en',
@@ -945,10 +764,17 @@ ${medicalQuestionForModel}
 
         return result;
       } catch (generalMedicalError) {
+        data.model = data.model || modelType;
+        generalMedicalError.phase = generalMedicalError.phase || 'general_medical_response';
         console.error('Error generating general medical response:', generalMedicalError);
         insights.error({
           message: 'Error generating general medical response',
           error: generalMedicalError.message,
+          operation: 'general-medical-question',
+          phase: generalMedicalError.phase,
+          code: generalMedicalError.code,
+          statusCode: generalMedicalError.statusCode || generalMedicalError.response?.status,
+          model: data.model,
           myuuid: data.myuuid,
           tenantId: data.tenantId,
           subscriptionId: data.subscriptionId
@@ -1934,17 +1760,6 @@ ${medicalQuestionForModel}
             success: false
           });
         }
-        //etapa0__medical_check
-        if (costTracking.etapa0__medical_check && costTracking.etapa0__medical_check.cost > 0) {
-          stages.push({
-            name: 'medical_question_check',
-            cost: costTracking.etapa0__medical_check.cost,
-            tokens: costTracking.etapa0__medical_check.tokens,
-            model: modelIntencion,
-            duration: costTracking.etapa0__medical_check.duration || 0,
-            success: false
-          });
-        }
 
         // Etapa 1: Diagnósticos
         if (costTracking.etapa1_diagnosticos && costTracking.etapa1_diagnosticos.cost > 0) {
@@ -1963,7 +1778,7 @@ ${medicalQuestionForModel}
             name: 'anonymization',
             cost: costTracking.etapa2_anonimizacion.cost,
             tokens: costTracking.etapa2_anonimizacion.tokens,
-            model: model,
+            model: costTracking.etapa2_anonimizacion.model || modelAnonymization,
             duration: costTracking.etapa2_anonimizacion.duration || 0,
             success: false
           });
@@ -2025,7 +1840,7 @@ ${medicalQuestionForModel}
           phase: error.phase || 'unknown',
           queryType: queryType
         }, {
-          intent: queryType || 'unknown',
+          intent: shouldAnswerMedical ? 'medical_question' : (queryType || 'unknown'),
           queryType: queryType
         });
         console.log('✅ Costos de operación fallida guardados en la base de datos');
