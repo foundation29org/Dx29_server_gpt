@@ -188,8 +188,9 @@ test('mergeAndPrioritizeSearchResults interleaves round-robin across query bucke
   );
 });
 
-test('sanitizeSourceText removes replacement characters from source snippets and titles', () => {
+test('sanitizeSourceText removes replacement characters and private-use glyphs from source snippets and titles', () => {
   assert.equal(sanitizeSourceText('If eGFR is \uFFFD45 mg/dL, \uFFFD\uFFFDEvery 2 weeks'), 'If eGFR is 45 mg/dL, Every 2 weeks');
+  assert.equal(sanitizeSourceText('\uF0B7 Sinusitis bacteriana aguda \uE001'), '• Sinusitis bacteriana aguda');
   assert.equal(sanitizeSourceText(null), '');
 
   const { sonarData } = buildSequentialSonarData('Dosis baja. [1]', [
