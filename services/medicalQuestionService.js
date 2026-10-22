@@ -250,6 +250,9 @@ function expandCitationGroups(text, maxIndex = 0) {
 function sanitizeSourceText(text) {
   return String(text || '')
     .replace(/\uFFFD+/g, '')
+    .replace(/\u00AD/g, '')
+    .replace(/[\uF0A7\uF0B7\uF0D8\uF0FC]/g, '•')
+    .replace(/[\uE000-\uF8FF]/g, '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
