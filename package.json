@@ -7,7 +7,7 @@
     "start": "node index.js",
     "serve": "nodemon index.js",
     "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
-    "test": "node --test test/intentClassifier.test.js test/multimodalInput.test.js test/multimodalUploadService.test.js test/multimodalImageClassifierService.test.js test/multimodalImageRoutingConfig.test.js test/blobFiles.test.js test/documentIntelligenceService.test.js test/requestCorrelation.test.js test/insights.test.js test/rateLimiter.test.js test/routesLimiter.test.js test/languageDetect.test.js test/followUpService.test.js test/sanitizeInput.test.js test/locationContext.test.js test/speechTranscribe.test.js test/permalink.test.js test/medicalQuestionService.test.js",
+    "test": "node --test test/intentClassifier.test.js test/multimodalInput.test.js test/multimodalUploadService.test.js test/multimodalImageClassifierService.test.js test/multimodalImageRoutingConfig.test.js test/blobFiles.test.js test/documentIntelligenceService.test.js test/requestCorrelation.test.js test/insights.test.js test/rateLimiter.test.js test/routesLimiter.test.js test/languageDetect.test.js test/localLanguageDetect.test.js test/followUpService.test.js test/sanitizeInput.test.js test/locationContext.test.js test/speechTranscribe.test.js test/permalink.test.js test/medicalQuestionService.test.js",
     "validate-openapi": "swagger-cli validate docs/apim/dxgptapi-dev-yaml && swagger-cli validate docs/apim/dxgptapi-prod.yaml && swagger-cli validate docs/apim/internal-api.yaml",
     "swagger-ui": "node scripts/serve-swagger-ui.js",
     "cost:daily-durations": "node scripts/daily-operation-durations.js"
@@ -25,6 +25,7 @@
     "body-parser": "^1.20.6",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
+    "eld": "^2.1.0",
     "express": "^4.22.2",
     "express-handlebars": "^7.1.3",
     "express-rate-limit": "^7.5.0",
@@ -35,7 +36,8 @@
     "nodemailer": "^9.0.5",
     "nodemailer-express-handlebars": "^6.1.2",
     "openai": "^4.104.0",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "tinyld": "^1.3.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",

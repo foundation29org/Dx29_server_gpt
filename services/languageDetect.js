@@ -2,12 +2,13 @@
 
 const { callAiWithFailover, detectLanguageWithRetry } = require('./aiUtils');
 const { MIN_TEXT_CHARS_WITHOUT_IMAGES: MIN_DETECTABLE_CHARS } = require('./multimodalInputValidation');
+const { detectLanguageLocal } = require('./localLanguageDetect');
+const insights = require('./insights');
 
 /**
  * Smart language detection with tiered strategy:
- * - <30 chars: Azure detect (cheap and fast)
- * - 30–200 chars: gpt-5-mini (LLM)
- * - >200 chars: gpt-5-nano (LLM)
+ * - Local detectors (tinyld + eld) when both agree and the language is supported (free, ~1 ms)
+ * - Otherwise <1000 chars: Azure detect; >=1000 chars: gpt-5-nano on the first 1000 chars
  * Fallbacks: On LLM error → Azure detect; On Azure error → return langHint || 'en'
  *
  * @param {string} text
@@ -19,6 +20,24 @@ const { MIN_TEXT_CHARS_WITHOUT_IMAGES: MIN_DETECTABLE_CHARS } = require('./multi
  * @returns {Promise<{ lang: string, modelUsed: string, usage?: any, durationMs?: number, azureCharsBilled: number }>}
  */
 async function detectLanguageSmart(text, langHint, timezone, tenantId, subscriptionId, myuuid) {
+  const result = await detectLanguageSmartUntracked(text, langHint, timezone, tenantId, subscriptionId, myuuid);
+  trackDetectionMethod(result.modelUsed, text);
+  return result;
+}
+
+// Permite ver en Insights qué parte de las detecciones se resuelve en local
+// (LanguageDetectionMethod por method y lengthBucket). Nunca debe romper la petición.
+function trackDetectionMethod(method, text) {
+  try {
+    const length = typeof text === 'string' ? text.length : 0;
+    const lengthBucket = length < 100 ? '<100' : length < 1000 ? '100-999' : '1000+';
+    insights.trackEvent('LanguageDetectionMethod', { method: String(method || 'unknown'), lengthBucket });
+  } catch (_) {
+    // La telemetría es opcional
+  }
+}
+
+async function detectLanguageSmartUntracked(text, langHint, timezone, tenantId, subscriptionId, myuuid) {
   const content = typeof text === 'string' ? text : '';
   const length = content.length;
   const dataRequest = { tenantId, subscriptionId, myuuid };
@@ -28,6 +47,13 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   if (content.trim().length < MIN_DETECTABLE_CHARS) {
     return { lang: langHint || 'en', modelUsed: 'fallback_hint', usage: null, durationMs: 0, azureCharsBilled: 0 };
   }
+  // Primero el detector local gratuito; si no hay acuerdo claro, sigue la ruta de siempre.
+  const localStart = Date.now();
+  const localLang = await detectLanguageLocal(content);
+  if (localLang) {
+    return { lang: localLang, modelUsed: 'local_detect', usage: null, durationMs: Date.now() - localStart, azureCharsBilled: 0 };
+  }
+
   // Short: Azure detect
   if (length < 1000) {
     try {
@@ -75,6 +101,23 @@ async function detectLanguageSmart(text, langHint, timezone, tenantId, subscript
   }
 }
 
-module.exports = { detectLanguageSmart };
+/**
+ * Detección para los flujos que solo usan Azure (follow-up): local primero y
+ * Azure si no hay acuerdo. Devuelve también los caracteres facturados por Azure.
+ * @returns {Promise<{ lang: string, azureCharsBilled: number }>}
+ */
+async function detectLanguageLocalOrAzure(text, langHint) {
+  const content = typeof text === 'string' ? text : '';
+  const localLang = await detectLanguageLocal(content);
+  if (localLang) {
+    trackDetectionMethod('local_detect', content);
+    return { lang: localLang, azureCharsBilled: 0 };
+  }
+  const lang = await detectLanguageWithRetry(content, langHint);
+  trackDetectionMethod('azure_detect', content);
+  return { lang, azureCharsBilled: content.length };
+}
+
+module.exports = { detectLanguageSmart, detectLanguageLocalOrAzure };
 
 
