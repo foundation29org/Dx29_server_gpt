@@ -1,4 +1,5 @@
-const { detectLanguageWithRetry, translateTextWithRetry, translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
+const { translateTextWithRetry, translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
+const { detectLanguageLocalOrAzure } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -206,9 +207,11 @@ async function generateFollowUpQuestions(req, res) {
         detectedLanguage = detectedHint.toLowerCase();
       } else if (description) {
         // Detección (Azure) — contar caracteres aparte
-        detectChars += description.length;
         const detStart = Date.now();
-        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        const detection = await detectLanguageLocalOrAzure(description, lang);
+        detectedLanguage = detection.lang;
+        // Solo se imputan los caracteres que Azure factura (el detector local es gratis)
+        detectChars += detection.azureCharsBilled;
         detectDurationMs = Date.now() - detStart;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
@@ -761,9 +764,11 @@ async function processFollowUpAnswers(req, res) {
         detectedLanguage = detectedHint.toLowerCase();
       } else if (description) {
         // Detección (Azure) — contar caracteres aparte
-        detectChars += description.length;
         const detStart = Date.now();
-        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        const detection = await detectLanguageLocalOrAzure(description, lang);
+        detectedLanguage = detection.lang;
+        // Solo se imputan los caracteres que Azure factura (el detector local es gratis)
+        detectChars += detection.azureCharsBilled;
         detectDurationMs = Date.now() - detStart;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
@@ -1218,9 +1223,11 @@ async function generateERQuestions(req, res) {
     try {
       if (description) {
         // Detección (Azure) — contar caracteres aparte
-        detectChars += description.length;
         const detStart = Date.now();
-        detectedLanguage = await detectLanguageWithRetry(description, lang);
+        const detection = await detectLanguageLocalOrAzure(description, lang);
+        detectedLanguage = detection.lang;
+        // Solo se imputan los caracteres que Azure factura (el detector local es gratis)
+        detectChars += detection.azureCharsBilled;
         detectDurationMs = Date.now() - detStart;
         if (detectedLanguage && detectedLanguage !== 'en') {
           // Traducción a inglés
