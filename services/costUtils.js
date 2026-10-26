@@ -134,6 +134,15 @@ function calculateTranscriptionPrice(usage = {}) {
   };
 }
 
+// prebuilt-layout factura $10 por cada 1000 páginas ($0.01 por página).
+const DOCUMENT_INTELLIGENCE_LAYOUT_USD_PER_1000_PAGES = 10;
+
+function calculateDocumentIntelligenceCost(pages = 0) {
+  const safePages = Math.max(0, Number(pages) || 0);
+  const totalCost = (safePages / 1000) * DOCUMENT_INTELLIGENCE_LAYOUT_USD_PER_1000_PAGES;
+  return parseFloat(totalCost.toFixed(6));
+}
+
 function formatCost(cost) {
   return `$${cost.toFixed(6)}`; // Siempre en dólares con 6 decimales
 }
@@ -145,8 +154,10 @@ function calculateTokens(text, model = 'gpt4o') {
   }
 
 module.exports = {
+  DOCUMENT_INTELLIGENCE_LAYOUT_USD_PER_1000_PAGES,
   calculatePrice,
   calculateTranscriptionPrice,
+  calculateDocumentIntelligenceCost,
   formatCost,
   calculateTokens
 }; 

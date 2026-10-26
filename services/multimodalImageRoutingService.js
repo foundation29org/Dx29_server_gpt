@@ -2,7 +2,7 @@
 
 const insights = require('./insights');
 const CostTrackingService = require('./costTrackingService');
-const { calculatePrice } = require('./costUtils');
+const { calculatePrice, calculateDocumentIntelligenceCost } = require('./costUtils');
 const {
   extractDocument,
   failedDocumentResult,
@@ -51,7 +51,7 @@ async function saveDocumentExtractionCost(documents, context, source) {
     (total, document) => total + (document.durationMs || 0),
     0
   );
-  const cost = (totalPagesProcessed / 1000) * 1.5;
+  const cost = calculateDocumentIntelligenceCost(totalPagesProcessed);
 
   await CostTrackingService.saveCostRecordBestEffort({
     myuuid: context.myuuid || 'default-uuid',

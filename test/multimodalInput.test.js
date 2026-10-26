@@ -107,7 +107,9 @@ stubModule('../services/email', {
   }
 });
 stubModule('../services/costTrackingService', {
-  saveCostRecordBestEffort: async () => undefined
+  saveCostRecordBestEffort: async (record) => {
+    state.costRecords.push(record);
+  }
 });
 stubModule('../services/pubsubService', {
   sendProgress: async () => undefined,
@@ -312,6 +314,7 @@ test.beforeEach(() => {
   state.preprocessingMessages = [];
   state.pubsubErrors = [];
   state.teamEmails = [];
+  state.costRecords = [];
 });
 
 test('accepts the signatures of every supported file type', () => {
@@ -1803,4 +1806,26 @@ test('DELETE /medical/upload requires an authenticated tenant or subscription', 
 
   assert.equal(res.statusCode, 400);
   assert.equal(state.uploadDeletions.length, 0);
+});
+
+test('records Document Intelligence extraction cost at prebuilt-layout pricing ($10 per 1000 pages)', async () => {
+  state.documentPages = 3;
+  const req = createMultipartRequest(validFields, [{
+    field: 'document',
+    name: 'labs.pdf',
+    type: 'application/pdf',
+    content: '%PDF-1.7 lab report'
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  const docCost = state.costRecords.find(
+    (record) => record.operation === 'multimodal_extract_document'
+  );
+  assert.ok(docCost);
+  assert.equal(docCost.totalCost, 0.03);
+  assert.equal(docCost.stages[0].cost, 0.03);
+  assert.equal(docCost.operationData.totalPages, 3);
 });
