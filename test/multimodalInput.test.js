@@ -613,8 +613,8 @@ test('fails the whole request when an image cannot be stored', async () => {
 test('returns one 400 response for a Multer file validation error', async () => {
   const req = createMultipartRequest(validFields, [{
     field: 'image',
-    name: 'payload.exe',
-    type: 'application/octet-stream',
+    name: 'clip.mp4',
+    type: 'video/mp4',
     content: 'not-an-image'
   }]);
   const res = createResponse();
@@ -631,6 +631,50 @@ test('returns one 400 response for a Multer file validation error', async () => 
   assert.equal(state.insightEvents.some(
     (event) => event.name === 'MultimodalAnalysisFailed'
   ), false);
+});
+
+test('accepts a PDF declared as application/octet-stream (common API client default)', async () => {
+  const req = createMultipartRequest(validFields, [{
+    field: 'document',
+    name: 'DxGPT_Sample_Fictional_Medical_Report (2).pdf',
+    type: 'application/octet-stream',
+    content: '%PDF-1.4\nReportLab Generated PDF document'
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.result, 'processing');
+  assert.equal(state.diagnoseCalls.length, 1);
+  const corrected = state.insightEvents.find(
+    (event) => event.name === 'MultimodalUploadTypeCorrected'
+  );
+  assert.ok(corrected);
+  assert.match(corrected.properties.corrections, /application\/octet-stream/);
+  assert.match(corrected.properties.corrections, /application\/pdf/);
+});
+
+test('rejects octet-stream when the content is not a supported file', async () => {
+  const req = createMultipartRequest(validFields, [{
+    field: 'document',
+    name: 'payload.bin',
+    type: 'application/octet-stream',
+    content: 'not-a-supported-document'
+  }]);
+  const res = createResponse();
+
+  await processMultimodalInput(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.responseCount, 1);
+  assert.equal(res.body.result, 'error');
+  assert.equal(res.body.details[0].field, 'document[0]');
+  assert.match(res.body.details[0].reason, /real Content-Type/);
+  assert.equal(state.diagnoseCalls.length, 0);
+  assert.ok(state.insightEvents.some(
+    (event) => event.name === 'MultimodalInputRejected'
+  ));
 });
 
 test('tracks a client that closes the connection mid-upload as an abort, not a rejection', async () => {
@@ -890,17 +934,35 @@ test('reconciles a mismatched type only to another type allowed in the same fiel
   const jpeg = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]);
   const ole = Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
   const both = Buffer.concat([DOCX_BYTES, Buffer.from('xl/workbook.xml')]);
+  // Cabecera de ReportLab y stream ASCII85: decodifica como texto Windows-1252 válido.
+  const asciiPdf = Buffer.concat([
+    Buffer.from('%PDF-1.4\n%'),
+    Buffer.from([0x93, 0x8C, 0x8B, 0x9E]),
+    Buffer.from(' ReportLab Generated PDF document\nstream\nGatm=fll+.&:O:SbbNo~>\nendstream\n%%EOF\n')
+  ]);
   const cases = [
     // [field, declared, content, expected type after reconciling]
     ['document', 'application/msword', DOCX_BYTES, DOCX_TYPE],
     ['document', DOCX_TYPE, XLSX_BYTES, XLSX_TYPE],
     ['document', 'text/plain', Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2D, 0x00, 0x01]), 'application/pdf'],
+    ['document', 'text/plain', asciiPdf, 'application/pdf'],
+    // Un texto que solo menciona la firma sigue siendo texto.
+    ['document', 'text/plain', Buffer.from('Nota: el adjunto %PDF-1.4 no abría.'), 'text/plain'],
+    ['document', 'application/octet-stream', Buffer.from('%PDF-1.7'), 'application/pdf'],
+    ['image', 'application/octet-stream', jpeg, 'image/jpeg'],
     ['image', 'image/png', jpeg, 'image/jpeg'],
     // Sin cambios: una foto en el campo de documentos, OLE (no distingue .doc de
     // .xls), un zip ambiguo, basura y un tipo que ya cuadra.
     ['document', 'application/pdf', jpeg, 'application/pdf'],
     ['document', 'application/pdf', ole, 'application/pdf'],
     ['document', 'application/msword', both, 'application/msword'],
+    ['document', 'application/octet-stream', Buffer.from('not-a-pdf'), 'application/octet-stream'],
+    // octet-stream nunca pasa a texto, ni a un tipo de otro campo.
+    ['document', 'application/octet-stream', Buffer.from('Informe en texto plano.'), 'application/octet-stream'],
+    ['image', 'application/octet-stream', Buffer.from('%PDF-1.7'), 'application/octet-stream'],
+    ['document', 'application/octet-stream', Buffer.from('MZ\x90\x00\x03\x00'), 'application/octet-stream'],
+    // Un tipo del otro campo no se corrige aunque el contenido sí encaje aquí.
+    ['document', 'image/png', Buffer.from('%PDF-1.7'), 'image/png'],
     ['image', 'image/png', Buffer.from('not-an-image'), 'image/png'],
     ['image', 'image/png', Buffer.from('%PDF-1.7'), 'image/png'],
     ['document', 'application/pdf', Buffer.from('%PDF-1.7'), 'application/pdf']
