@@ -893,6 +893,127 @@
                     }
                 }
             }
+        },
+        "/citation-support": {
+            "post": {
+                "tags": [
+                    "Medical questions"
+                ],
+                "summary": "Find the excerpt passages that support a cited sentence",
+                "description": "Client-only. When the user clicks a citation [n] in a medical answer, returns which blocks of that source's excerpt (paragraphs, list items or table rows, as displayed) state the information in the cited sentence. Works in any language. Uses gpt-5.6-luna.\n\n`data.blocks` are 0-based indexes into the request `blocks` (at most 4); the list is empty when no block supports the sentence.",
+                "operationId": "post-citation-support",
+                "parameters": [
+                    {
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "myuuid",
+                                    "sentence",
+                                    "blocks"
+                                ],
+                                "type": "object",
+                                "properties": {
+                                    "myuuid": {
+                                        "type": "string"
+                                    },
+                                    "timezone": {
+                                        "type": "string"
+                                    },
+                                    "lang": {
+                                        "type": "string"
+                                    },
+                                    "sentence": {
+                                        "maxLength": 1200,
+                                        "type": "string",
+                                        "description": "Sentence of the answer that ends with the citation."
+                                    },
+                                    "blocks": {
+                                        "maxItems": 150,
+                                        "type": "array",
+                                        "items": {
+                                            "maxLength": 2000,
+                                            "type": "string"
+                                        },
+                                        "description": "Excerpt blocks in display order. 30,000 characters in total at most."
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Indexes of the supporting blocks",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "result": {
+                                            "type": "string"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "blocks": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "integer"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "example": {
+                                        "result": "success",
+                                        "data": {
+                                            "blocks": [
+                                                1
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing headers or invalid request"
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Too many requests, please try again later"
+                                        }
+                                    }
+                                },
+                                "example": {
+                                    "error": "Too many requests, please try again later"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Model call failed"
+                    }
+                }
+            }
         }
     },
     "components": {

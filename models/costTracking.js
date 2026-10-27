@@ -24,7 +24,7 @@ const CostTrackingSchema = new Schema({
   operation: {
     type: String,
     required: true,
-    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'multimodal_extract_document', 'emergency_questions', 'process-follow-up', 'speech_transcribe'],
+    enum: ['diagnose', 'info_disease', 'opinion', 'follow_up_questions', 'er_questions', 'process_follow_up', 'summarize', 'general_feedback', 'multimodal_detect_type', 'multimodal_process_image', 'multimodal_extract_document', 'emergency_questions', 'process-follow-up', 'speech_transcribe', 'citation_support'],
     index: true
   },
 
@@ -39,7 +39,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe'],
+    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'gpt56luna', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe'],
     index: true
   },
   
@@ -78,7 +78,8 @@ const CostTrackingSchema = new Schema({
         'emergency_questions', // Verificación de escenario clínico
         'document_intelligence', // Lectura/analítica de documentos (Azure Document Intelligence)
         'image_classification', // Enrutamiento documento/imagen médica
-        'speech_transcription' // Dictado por voz (audio -> texto)
+        'speech_transcription', // Dictado por voz (audio -> texto)
+        'citation_support' // Fragmento del extracto que respalda una cita de la respuesta médica
       ]
     },
     cost: {
@@ -92,7 +93,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe']
+      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'gpt56luna', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe']
     },
     duration: {
       type: Number,  // Duración en milisegundos
