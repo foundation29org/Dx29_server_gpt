@@ -40,6 +40,10 @@ const SUPPORTED_IMAGE_TYPES = Object.freeze([
   'image/png',
   'image/webp'
 ]);
+// Clientes HTTP (.NET, Postman...) suelen mandar cualquier archivo como
+// octet-stream. Ese tipo no declara nada: el archivo solo se acepta si sus
+// firmas binarias demuestran un tipo soportado en su campo.
+const GENERIC_BINARY_MIME_TYPE = 'application/octet-stream';
 
 const SIGNATURES = {
   pdf: Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2D]),
@@ -155,7 +159,9 @@ function matchesDeclaredType(file) {
     case XLSX_MIME_TYPE:
       return hasZipSignature(buffer) && containsAscii(buffer, 'xl/');
     case 'text/plain':
-      return isValidText(buffer);
+      // Un PDF con streams ASCII85 (ReportLab) se decodifica como texto válido.
+      // busboy declara text/plain cuando la parte no trae Content-Type.
+      return !startsWith(buffer, SIGNATURES.pdf) && isValidText(buffer);
     case 'image/jpeg':
       return startsWith(buffer, SIGNATURES.jpeg);
     case 'image/png':
@@ -172,6 +178,14 @@ function isAllowedInField(fieldName, mimetype) {
   return fieldName === 'image'
     ? SUPPORTED_IMAGE_TYPES.includes(mimetype)
     : SUPPORTED_DOCUMENT_TYPES.includes(mimetype);
+}
+
+// Multer solo ve el Content-Type de la parte, todavía sin bytes. busboy ya lo
+// entrega en minúsculas y sin parámetros.
+function isAcceptableUploadMimeType(mimetype) {
+  return SUPPORTED_DOCUMENT_TYPES.includes(mimetype) ||
+    SUPPORTED_IMAGE_TYPES.includes(mimetype) ||
+    mimetype === GENERIC_BINARY_MIME_TYPE;
 }
 
 // Qué tipo soportado demuestra ser el contenido. El navegador declara el tipo por
@@ -198,15 +212,20 @@ function detectSupportedMimeType(buffer) {
 
 // Cuando el contenido contradice el tipo declarado pero es otro tipo que ya
 // aceptamos en ese mismo campo, manda el contenido: el archivo se procesa como lo
-// que es. Una foto en el campo de documentos o un archivo que no es nada soportado
-// siguen rechazándose en validateUploadedFiles. Muta los archivos de Multer y
-// devuelve las correcciones (sin nombres de archivo) para medirlas.
+// que es. Igual con octet-stream, que no declara ningún tipo. Una foto en el campo
+// de documentos o un archivo que no es nada soportado siguen rechazándose en
+// validateUploadedFiles. Muta los archivos de Multer y devuelve las correcciones
+// (sin nombres de archivo) para medirlas.
 function reconcileDeclaredTypes(files = {}) {
   const corrections = [];
   for (const fieldName of ['document', 'image']) {
     const uploaded = Array.isArray(files[fieldName]) ? files[fieldName] : [];
     uploaded.forEach((file, index) => {
-      if (!isAllowedInField(fieldName, file.mimetype) || matchesDeclaredType(file)) {
+      const isGeneric = file.mimetype === GENERIC_BINARY_MIME_TYPE;
+      if (
+        !isGeneric &&
+        (!isAllowedInField(fieldName, file.mimetype) || matchesDeclaredType(file))
+      ) {
         return;
       }
       const detected = detectSupportedMimeType(file.buffer);
@@ -272,10 +291,14 @@ function validateUploadedFiles(files = {}) {
 
   for (const file of uploadedFiles) {
     if (!isAllowedInField(file.fieldName, file.mimetype)) {
+      // Un octet-stream que llega aquí no se pudo identificar por firma: o no es
+      // un tipo soportado o es un TXT/.doc, que no tienen una firma inequívoca.
       errors.push({
         field: `${file.fieldName}[${file.index}]`,
         filename: file.originalname,
-        reason: `File type is not allowed in the ${file.fieldName} field`
+        reason: file.mimetype === GENERIC_BINARY_MIME_TYPE
+          ? `File content is not a supported type for the ${file.fieldName} field; send it with its real Content-Type`
+          : `File type is not allowed in the ${file.fieldName} field`
       });
       continue;
     }
@@ -397,6 +420,7 @@ module.exports = {
   decodeText,
   describeUploadedFiles,
   getSuccessfulSummary,
+  isAcceptableUploadMimeType,
   parseIframeParams,
   reconcileDeclaredTypes,
   validateParsedMultimodalInput,

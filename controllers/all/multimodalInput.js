@@ -15,10 +15,9 @@ const {
     MAX_MULTIPART_PARTS,
     MAX_NON_FILE_FIELDS,
     MAX_TOTAL_UPLOAD_BYTES,
-    SUPPORTED_DOCUMENT_TYPES,
-    SUPPORTED_IMAGE_TYPES,
     UUID_PATTERN,
     getSuccessfulSummary,
+    isAcceptableUploadMimeType,
     parseIframeParams,
     reconcileDeclaredTypes,
     validateParsedMultimodalInput,
@@ -59,12 +58,9 @@ const upload = multer({
         parts: MAX_MULTIPART_PARTS
     },
     fileFilter: function (req, file, cb) {
-        const allowedTypes = [
-            ...SUPPORTED_DOCUMENT_TYPES,
-            ...SUPPORTED_IMAGE_TYPES
-        ];
-        
-        if (allowedTypes.includes(file.mimetype)) {
+        // octet-stream se acepta aquí: el tipo real se confirma después con
+        // las firmas del fichero (reconcileDeclaredTypes + validateUploadedFiles).
+        if (isAcceptableUploadMimeType(file.mimetype)) {
             cb(null, true);
         } else {
             cb(new Error(`Tipo de archivo no soportado. Tipos permitidos: PDF, Word, Excel, TXT, JPG, PNG, WEBP`));
