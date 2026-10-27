@@ -526,4 +526,67 @@ paths:
           description: Transcription failed
         "503":
           description: Transcription service not configured
+  /internal/citation-support:
+    post:
+      summary: Find the excerpt passages that support a cited sentence
+      description: Client-only. When the user clicks a citation in a medical answer, returns which excerpt blocks (as displayed) state the information in the cited sentence. Any language. Uses gpt-5.6-luna.
+      tags:
+        - Medical questions
+      security:
+        - ApimSubscription: []
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - myuuid
+                - sentence
+                - blocks
+              properties:
+                myuuid:
+                  type: string
+                timezone:
+                  type: string
+                lang:
+                  type: string
+                sentence:
+                  type: string
+                  maxLength: 1200
+                blocks:
+                  type: array
+                  maxItems: 150
+                  items:
+                    type: string
+                    maxLength: 2000
+      responses:
+        "200":
+          description: 0-based indexes of the supporting blocks (at most 4); empty when none supports the sentence.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      blocks:
+                        type: array
+                        items:
+                          type: integer
+        "400":
+          description: Missing headers or invalid request
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+        "500":
+          description: Model call failed
 tags: []

@@ -27,7 +27,9 @@ const ROUTING_MODEL_ALIASES = {
   gpt56terra: 'gpt56terra',
   'gpt-5.6-terra': 'gpt56terra',
   gpt61sol: 'gpt61sol',
-  'gpt-6.1-sol': 'gpt61sol'
+  'gpt-6.1-sol': 'gpt61sol',
+  gpt56luna: 'gpt56luna',
+  'gpt-5.6-luna': 'gpt56luna'
 };
 const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt4o: 'gpt4o',
@@ -35,7 +37,8 @@ const ROUTING_TO_DEPLOYMENT_MODEL = {
   gpt5mini: 'gpt-5-mini',
   gpt54mini: 'gpt-5.4-mini',
   gpt56terra: 'gpt-5.6-terra',
-  gpt61sol: 'gpt-6.1-sol'
+  gpt61sol: 'gpt-6.1-sol',
+  gpt56luna: 'gpt-5.6-luna'
 };
 
 // Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
@@ -78,6 +81,10 @@ const modelConfig = {
   'gpt-6.1-sol': {
     apiVersion: '2025-04-01-preview',
     path: '/openai/deployments/gpt-6.1-sol/chat/completions'
+  },
+  'gpt-5.6-luna': {
+    apiVersion: '2025-04-01-preview',
+    path: '/openai/deployments/gpt-5.6-luna/chat/completions'
   }
 };
 
@@ -416,6 +423,41 @@ const endpointsMap = {
     other: [
       buildAzureOpenAIEndpoint('us2', 'gpt-6.1-sol'),
       buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-sol')
+    ]
+  },
+  // gpt-5.6-luna (modelo rápido para tareas cortas): mismas regiones y failover que Sol
+  gpt56luna: {
+    asia: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna')
+    ],
+    europe: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-luna')
+    ],
+    northamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna')
+    ],
+    southamerica: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna')
+    ],
+    africa: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-luna')
+    ],
+    oceania: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna')
+    ],
+    other: [
+      buildAzureOpenAIEndpoint('us2', 'gpt-5.6-luna'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna')
     ]
   }
 };

@@ -16,6 +16,7 @@ const systemStatusCtrl = require('../services/systemStatusService')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
 const permalinkCtrl = require('../controllers/all/permalink')
 const speechTranscribeCtrl = require('../controllers/all/speechTranscribe')
+const citationSupportCtrl = require('../services/citationSupportService')
 const pubsubRoutes = require('./pubsub')
 const reprocesarErrores = require('../scripts/reprocesar_errores')
 const api = express.Router()
@@ -62,6 +63,10 @@ api.get('/internal/permalink/:id', permalinkCtrl.getPermalink)
 
 // Dictado por voz: audio -> texto. Solo tenants, no forma parte de la API pública.
 api.post('/internal/speech/transcribe', speechTranscribeCtrl.transcribe)
+
+// Preguntas médicas: al pulsar una cita, qué parte del extracto respalda la frase.
+// Solo para el cliente propio, no forma parte de la API pública.
+api.post('/internal/citation-support', citationSupportCtrl.findCitationSupport)
 
 // Rutas de Azure Web PubSub
 api.use('/pubsub', pubsubRoutes)
