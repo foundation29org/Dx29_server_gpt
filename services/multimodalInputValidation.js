@@ -9,16 +9,15 @@ const MAX_IMAGE_FILES = 5;
 const MIN_TEXT_CHARS_WITHOUT_IMAGES = 10;
 // Multer deja fieldSize en 1 MB si no se indica. `text` es el único campo
 // grande y hoy ya puede acercarse a ese tamaño; el tope sigue siendo el mismo.
-// Busboy rechaza el valor en cuanto lo alcanza, así que cabe 1 byte menos.
+// Multer (>= 2.5) rechaza solo al superar el límite, así que cabe exactamente 1 MB.
 const MAX_FIELD_SIZE_BYTES = 1024 * 1024;
 // text, lang, myuuid, timezone, model, iframeParams, y los que /analyze
 // parsea para rechazarlos (uploadId, assetIds, imageUrls). Por encima, el
 // defecto de Multer es Infinity.
 const MAX_NON_FILE_FIELDS = 12;
-// Busboy emite partsLimit al alcanzar el número, así que el tope queda uno
-// por encima del máximo válido: campos + documentos + imágenes.
+// Multer (>= 2.5) rechaza solo al superar el número: campos + documentos + imágenes.
 const MAX_MULTIPART_PARTS =
-  MAX_NON_FILE_FIELDS + MAX_DOCUMENT_FILES + MAX_IMAGE_FILES + 1;
+  MAX_NON_FILE_FIELDS + MAX_DOCUMENT_FILES + MAX_IMAGE_FILES;
 const FILE_EMPTY_CODE = 'FILE_EMPTY';
 const FILE_CONTENT_MISMATCH_CODE = 'FILE_CONTENT_MISMATCH';
 const DOCX_MIME_TYPE =
