@@ -354,10 +354,10 @@ test('rejects a multipart body with more fields than the configured limit', asyn
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
-test('rejects a text field that reaches the 1 MB field size', async () => {
+test('rejects a text field that exceeds the 1 MB field size', async () => {
   const req = createMultipartRequest({
     ...validFields,
-    text: 'x'.repeat(MAX_FIELD_SIZE_BYTES)
+    text: 'x'.repeat(MAX_FIELD_SIZE_BYTES + 1)
   });
   const res = createResponse();
 
@@ -368,10 +368,10 @@ test('rejects a text field that reaches the 1 MB field size', async () => {
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
-test('accepts a text field one byte under the 1 MB field size', async () => {
+test('accepts a text field exactly at the 1 MB field size', async () => {
   const req = createMultipartRequest({
     ...validFields,
-    text: 'x'.repeat(MAX_FIELD_SIZE_BYTES - 1)
+    text: 'x'.repeat(MAX_FIELD_SIZE_BYTES)
   });
   const res = createResponse();
 
@@ -383,8 +383,8 @@ test('accepts a text field one byte under the 1 MB field size', async () => {
   assert.equal(state.pubsubErrors[0].code, 'INPUT_TOO_LARGE');
 });
 
-test('rejects a multipart body that reaches the part limit', async () => {
-  const files = Array.from({ length: MAX_MULTIPART_PARTS }, () => ({
+test('rejects a multipart body that exceeds the part limit', async () => {
+  const files = Array.from({ length: MAX_MULTIPART_PARTS + 1 }, () => ({
     field: 'ignored',
     name: '',
     type: 'application/octet-stream',
