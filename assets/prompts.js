@@ -88,9 +88,9 @@ Output: {"action":"enrich","reason":"non_medical"}
 
 INPUT:
 {{description}}`,
-        withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate N possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
+        withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate 5 possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
         Output format:
-        Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
+        Return a JSON array of 5 objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
         Output only valid JSON (no extra text, no XML, no formatting wrappers).
         Example:
         [
@@ -104,9 +104,9 @@ INPUT:
         ]
         PATIENT DESCRIPTION:
         {{description}}`,
-        withDiseases: `You are a diagnostic assistant. Given the patient case below, generate N more possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
+        withDiseases: `You are a diagnostic assistant. Given the patient case below, generate 5 more possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
         Output format:
-        Return a JSON array of N objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
+        Return a JSON array of 5 objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease
         Output only valid JSON (no extra text, no XML, no formatting wrappers).
         Example:
         [
