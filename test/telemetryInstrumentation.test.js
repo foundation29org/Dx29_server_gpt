@@ -15,6 +15,8 @@ test('drops internal Azure calls and keeps external services as dependencies', (
     ['dxgpt.webpubsub.azure.com', true],
     ['api.cognitive.microsofttranslator.com', true],
     ['DX29GPT.BLOB.CORE.WINDOWS.NET:443', true],
+    ['westeurope.livediagnostics.monitor.azure.com', true],
+    ['settings.sdk.monitor.azure.com', true],
     ['dxgptindia.openai.azure.com', false],
     ['dxgptdocumentai.cognitiveservices.azure.com', false],
     ['api.perplexity.ai', false],

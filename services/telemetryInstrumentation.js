@@ -11,7 +11,9 @@
 const UNTRACKED_DEPENDENCY_HOST_SUFFIXES = Object.freeze([
   '.blob.core.windows.net',
   '.webpubsub.azure.com',
-  '.microsofttranslator.com'
+  '.microsofttranslator.com',
+  // Llamadas del propio SDK: el ping de Live Metrics y la lectura de settings.
+  '.monitor.azure.com'
 ]);
 
 function requestHost(request) {
