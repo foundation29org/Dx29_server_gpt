@@ -120,23 +120,6 @@ components:
         status:
           type: string
           example: success
-    SystemStatusResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          enum:
-            - online
-            - degraded
-            - offline
-        services:
-          type: object
-          additionalProperties:
-            type: string
-            enum:
-              - online
-              - degraded
-              - offline
   responses:
     UnauthorizedError:
       description: Invalid or missing subscription key
@@ -201,63 +184,6 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "429":
           $ref: "#/components/responses/TooManyRequestsError"
-  /internal/status/{ticketId}:
-    post:
-      summary: Check status of queued diagnose request
-      description: Get the status of a request in the processing queue
-      tags:
-        - Queue
-      security:
-        - ApimSubscription: []
-      parameters:
-        - name: ticketId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Queue status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    enum:
-                      - pending
-                      - processing
-                      - completed
-                      - failed
-                  position:
-                    type: integer
-                  estimatedTime:
-                    type: integer
-                    description: Estimated time in seconds
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
-  /internal/getSystemStatus:
-    get:
-      summary: Get overall system status and health
-      description: Retrieve the current status of the system and its components
-      tags:
-        - System
-      security:
-        - ApimSubscription: []
-      responses:
-        "200":
-          description: System status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SystemStatusResponse"
-        "401":
-          $ref: "#/components/responses/UnauthorizedError"
-        "429":
-          $ref: "#/components/responses/TooManyRequestsError"
   /internal/health:
     get:
       summary: Simple health check endpoint
@@ -276,7 +202,10 @@ paths:
                 properties:
                   status:
                     type: string
-                    example: ok
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
         "401":
           $ref: "#/components/responses/UnauthorizedError"
         "429":

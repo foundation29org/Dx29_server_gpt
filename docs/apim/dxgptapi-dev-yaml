@@ -20,7 +20,7 @@
                     "Diagnosis"
                 ],
                 "summary": "Analyze medical description for possible disease diagnoses",
-                "description": "Analyzes a patient's medical description and returns a ranked differential diagnosis list.\n\n**Intent Routing:** Before diagnosis, the request is classified as:\n- **`go`**: patient case ready for differential diagnosis.\n- **`explain`**: the text is a medical question; the UI may suggest Ask.\n- **`enrich`**: more clinical context would improve the differential.\n\nThese actions suggest a path and never block diagnosis. Set `forceDiagnosis` to `true` when the user explicitly chooses to continue.\n\n**WebSocket Flow:**\n1. Call `/pubsub/negotiate` to establish a WebSocket connection.\n2. Send the diagnosis request to `/diagnose`.\n3. Receive an immediate HTTP response with `result: \"processing\"`.\n4. Monitor WebSocket for progress events.\n5. Receive the final result via WebSocket.\n\nSet `response_mode` to `direct` to wait for a synchronous HTTP response instead of using WebSocket.\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\nFor best results:\n- Provide relevant patient details (age, sex, main symptoms, onset/evolution).\n- Include relevant personal/family medical history where available.\n- Recommended length: **200-2000** characters.\n\n**Detailed Response Format:** For each suggested diagnosis, the system returns:\n- **Diagnosis**: condition name\n- **Description**: brief clinical summary\n- **Symptoms in common**: symptoms matching the condition\n- **Symptoms not in common**: symptoms that do not typically match\n\nThis format supports safer differential reasoning by showing both matching and conflicting evidence.\n\nThe response also includes language detection, anonymization metadata, and intent-routing fields (`queryType`, `intentAction`, `intentReason`, optional `suggestedPage`).\n\n**Using `diseases_list` parameter:** If you provide diseases in `diseases_list`, the system excludes them and proposes alternatives. This is useful when:\n- Initial diagnoses were not accurate and you want to explore alternatives.\n- You want a wider differential diagnosis.\n- You want to focus on less common conditions.\n\nExample input with `diseases_list`:\n```json\n{\n  \"description\": \"13-month-old patient. First focal seizure at three months. Multiple tonic-clonic seizures. Febrile seizures. One status epilepticus at eight months.\",\n  \"diseases_list\": \"Dravet syndrome, Lennox-Gastaut syndrome, Febrile seizures Plus (FS+)\",\n  \"myuuid\": \"01dd5910-de38-48df-9840-091bc918c943\"\n}\n```\n\n**Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description. If the optional parameter `lang` is not provided, the default language for responses will be English.\n\n**Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Importantly, age is NOT considered PII in this context and is preserved. All medical specifics (symptoms, diagnosis, treatment plans, and lab results) are maintained intact. The response provides both a text version with asterisks and an HTML-formatted version with blacked-out sections for visualization.\n\n**Queue System**: Requests may be queued during high traffic. A queue status will be returned for tracking, including the selected processing region based on user timezone and capacity.",
+                "description": "Analyzes a patient's medical description and returns a ranked differential diagnosis list.\n\n**Intent Routing:** Before diagnosis, the request is classified as:\n- **`go`**: patient case ready for differential diagnosis.\n- **`explain`**: the text is a medical question; the UI may suggest Ask.\n- **`enrich`**: more clinical context would improve the differential.\n\nThese actions suggest a path and never block diagnosis. Set `forceDiagnosis` to `true` when the user explicitly chooses to continue.\n\n**WebSocket Flow:**\n1. Call `/pubsub/negotiate` to establish a WebSocket connection.\n2. Send the diagnosis request to `/diagnose`.\n3. Receive an immediate HTTP response with `result: \"processing\"`.\n4. Monitor WebSocket for progress events.\n5. Receive the final result via WebSocket.\n\nSet `response_mode` to `direct` to wait for a synchronous HTTP response instead of using WebSocket.\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\nFor best results:\n- Provide relevant patient details (age, sex, main symptoms, onset/evolution).\n- Include relevant personal/family medical history where available.\n- Recommended length: **200-2000** characters.\n\n**Detailed Response Format:** For each suggested diagnosis, the system returns:\n- **Diagnosis**: condition name\n- **Description**: brief clinical summary\n- **Symptoms in common**: symptoms matching the condition\n- **Symptoms not in common**: symptoms that do not typically match\n\nThis format supports safer differential reasoning by showing both matching and conflicting evidence.\n\nThe response also includes language detection, anonymization metadata, and intent-routing fields (`queryType`, `intentAction`, `intentReason`, optional `suggestedPage`).\n\n**Using `diseases_list` parameter:** If you provide diseases in `diseases_list`, the system excludes them and proposes alternatives. This is useful when:\n- Initial diagnoses were not accurate and you want to explore alternatives.\n- You want a wider differential diagnosis.\n- You want to focus on less common conditions.\n\nExample input with `diseases_list`:\n```json\n{\n  \"description\": \"13-month-old patient. First focal seizure at three months. Multiple tonic-clonic seizures. Febrile seizures. One status epilepticus at eight months.\",\n  \"diseases_list\": \"Dravet syndrome, Lennox-Gastaut syndrome, Febrile seizures Plus (FS+)\",\n  \"myuuid\": \"01dd5910-de38-48df-9840-091bc918c943\"\n}\n```\n\n**Supported Languages**: The description can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input description. If the optional parameter `lang` is not provided, the default language for responses will be English.\n\n**Anonymization**: The response includes anonymized versions of the patient description where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Importantly, age is NOT considered PII in this context and is preserved. All medical specifics (symptoms, diagnosis, treatment plans, and lab results) are maintained intact. The response provides both a text version with asterisks and an HTML-formatted version with blacked-out sections for visualization.",
                 "operationId": "post-diagnose",
                 "parameters": [
                     {
@@ -80,42 +80,6 @@
                                     "oneOf": [
                                         {
                                             "$ref": "#/components/schemas/DiagnoseResponse"
-                                        },
-                                        {
-                                            "type": "object",
-                                            "properties": {
-                                                "result": {
-                                                    "type": "string",
-                                                    "example": "queued"
-                                                },
-                                                "queueInfo": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "ticketId": {
-                                                            "type": "string",
-                                                            "example": "ticket-123456"
-                                                        },
-                                                        "position": {
-                                                            "type": "integer",
-                                                            "example": 3
-                                                        },
-                                                        "estimatedWaitTime": {
-                                                            "type": "integer",
-                                                            "description": "Estimated wait time in minutes",
-                                                            "example": 5
-                                                        },
-                                                        "region": {
-                                                            "type": "string",
-                                                            "example": "EastUS"
-                                                        },
-                                                        "utilizationPercentage": {
-                                                            "type": "number",
-                                                            "format": "float",
-                                                            "example": 85.5
-                                                        }
-                                                    }
-                                                }
-                                            }
                                         },
                                         {
                                             "$ref": "#/components/schemas/ProcessingResponse"
@@ -1065,7 +1029,7 @@
                     "WebSocket"
                 ],
                 "summary": "Negotiate WebSocket connection for real-time updates",
-                "description": "Establishes a WebSocket connection for real-time updates during diagnosis, Ask, and multimodal processing.\n\nThis endpoint is used for long-running requests. The typical workflow is:\n\n1. Call this endpoint with a unique user ID (`myuuid`)\n2. Receive a WebSocket URL and access token\n3. Connect to the WebSocket using the provided credentials\n4. Send your request to `/diagnose`, `/ask`, or `/medical/analyze` with the same `myuuid`\n5. Receive real-time updates through the WebSocket:\n   - Progress updates with current step and percentage\n   - Queue status if the request is queued\n   - Final result when processing completes\n   - Error notifications if processing fails\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|medical_question|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as the HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n- **Queued**: `{\"type\":\"queued\",\"status\":\"queued\",\"queueInfo\":{...}}`\n\nThe connection remains active until processing is complete or an error occurs.\nClients should implement reconnection logic in case of network interruptions.\n\n`myuuid` is required and must be a UUID. The returned `hubName` is `diagnose` for all of these flows.\n",
+                "description": "Establishes a WebSocket connection for real-time updates during diagnosis, Ask, and multimodal processing.\n\nThis endpoint is used for long-running requests. The typical workflow is:\n\n1. Call this endpoint with a unique user ID (`myuuid`)\n2. Receive a WebSocket URL and access token\n3. Connect to the WebSocket using the provided credentials\n4. Send your request to `/diagnose`, `/ask`, or `/medical/analyze` with the same `myuuid`\n5. Receive real-time updates through the WebSocket:\n   - Progress updates with current step and percentage\n   - Final result when processing completes\n   - Error notifications if processing fails\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|medical_question|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as the HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\nThe connection remains active until processing is complete or an error occurs.\nClients should implement reconnection logic in case of network interruptions.\n\n`myuuid` is required and must be a UUID. The returned `hubName` is `diagnose` for all of these flows.\n",
                 "operationId": "post-pubsub-negotiate",
                 "requestBody": {
                     "required": true,
@@ -1149,7 +1113,7 @@
                     "Medical Questions"
                 ],
                 "summary": "Answer general medical questions",
-                "description": "Answers general medical questions with concise, evidence-based educational information.\n\nThis endpoint is the Ask companion to `/diagnose`. Use it when the user is asking about a condition, medication, test, or other medical topic rather than submitting a patient case for differential diagnosis.\n\n**Intent Routing:** Before answering, the request is classified as:\n- **`explain`**: medical question; the system returns an educational `medicalAnswer`.\n- **`go`**: the text looks like a patient case ready for differential diagnosis; the UI may suggest Diagnose.\n- **`enrich`**: more clinical context would improve a differential; the UI may suggest Diagnose.\n\nThese actions suggest a path and never block the user. A patient case submitted to Ask may still return a routing suggestion (`suggestedPage: \"home\"`) instead of forcing a diagnosis. To run differential diagnosis, call `/diagnose` (set `forceDiagnosis` to `true` when the user explicitly chooses to continue).\n\n**WebSocket Flow:**\n1. Call `/pubsub/negotiate` to establish a WebSocket connection.\n2. Send the question to `/ask`.\n3. Receive an immediate HTTP response with `result: \"processing\"`.\n4. Monitor WebSocket for progress events.\n5. Receive the final result via WebSocket.\n\nSet `response_mode` to `direct` to wait for a synchronous HTTP response instead of using WebSocket.\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|medical_question|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\n**Response:** A successful educational answer includes:\n- **`medicalAnswer`**: concise educational text in the same language as the question\n- **`data`**: empty array (Ask does not return a differential list)\n- language detection, anonymization metadata, and intent-routing fields (`queryType`, `intentAction`, `intentReason`, optional `suggestedPage`)\n\nThe answer does not diagnose the user. When the question describes symptoms, relevant urgent warning signs are included in the educational response.\n\n**Supported Languages**: The question can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input. If the optional parameter `lang` is not provided, the language is detected automatically.\n\n**Anonymization**: The response includes anonymized versions of the submitted text where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Age is NOT considered PII and is preserved.\n\n**Queue System**: Requests may be queued during high traffic. A queue status will be returned for tracking, including the selected processing region based on user timezone and capacity.\n",
+                "description": "Answers general medical questions with concise, evidence-based educational information.\n\nThis endpoint is the Ask companion to `/diagnose`. Use it when the user is asking about a condition, medication, test, or other medical topic rather than submitting a patient case for differential diagnosis.\n\n**Intent Routing:** Before answering, the request is classified as:\n- **`explain`**: medical question; the system returns an educational `medicalAnswer`.\n- **`go`**: the text looks like a patient case ready for differential diagnosis; the UI may suggest Diagnose.\n- **`enrich`**: more clinical context would improve a differential; the UI may suggest Diagnose.\n\nThese actions suggest a path and never block the user. A patient case submitted to Ask may still return a routing suggestion (`suggestedPage: \"home\"`) instead of forcing a diagnosis. To run differential diagnosis, call `/diagnose` (set `forceDiagnosis` to `true` when the user explicitly chooses to continue).\n\n**WebSocket Flow:**\n1. Call `/pubsub/negotiate` to establish a WebSocket connection.\n2. Send the question to `/ask`.\n3. Receive an immediate HTTP response with `result: \"processing\"`.\n4. Monitor WebSocket for progress events.\n5. Receive the final result via WebSocket.\n\nSet `response_mode` to `direct` to wait for a synchronous HTTP response instead of using WebSocket.\n\n**WebSocket Message Types:**\n- **Progress**: `{\"type\":\"progress\",\"step\":\"translation|ai_processing|anonymization|medical_question|finalizing\",\"message\":\"...\",\"percentage\":10-95}`\n- **Result**: `{\"type\":\"result\",\"status\":\"success\",\"data\":{...}}` (same payload shape as HTTP final response)\n- **Error**: `{\"type\":\"error\",\"message\":\"...\",\"code\":\"...\"}`\n\n**Response:** A successful educational answer includes:\n- **`medicalAnswer`**: concise educational text in the same language as the question\n- **`data`**: empty array (Ask does not return a differential list)\n- language detection, anonymization metadata, and intent-routing fields (`queryType`, `intentAction`, `intentReason`, optional `suggestedPage`)\n\nThe answer does not diagnose the user. When the question describes symptoms, relevant urgent warning signs are included in the educational response.\n\n**Supported Languages**: The question can be in any language supported by Azure AI Translator (see [supported languages](https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support)). The response will be returned in the same language as the input. If the optional parameter `lang` is not provided, the language is detected automatically.\n\n**Anonymization**: The response includes anonymized versions of the submitted text where personally identifiable information (PII) is replaced with [ANON-N] (where N is the character count), and then converted to asterisks in the final output. PII includes full names, addresses, contact details, Social Security Numbers, and any unique identification numbers. Age is NOT considered PII and is preserved.\n",
                 "operationId": "6aae4f8f0ba8dff0e73517cd",
                 "parameters": [
                     {
@@ -1180,16 +1144,13 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Medical answer, routing suggestion, queued request, or asynchronous processing acknowledgement",
+                        "description": "Medical answer, routing suggestion, or asynchronous processing acknowledgement",
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "oneOf": [
                                         {
                                             "$ref": "#/components/schemas/AskResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/QueuedResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ProcessingResponse"
@@ -1285,7 +1246,6 @@
                             "error",
                             "translation error",
                             "unsupported_language",
-                            "queued",
                             "processing"
                         ],
                         "type": "string",
@@ -1390,34 +1350,6 @@
                         "type": "object",
                         "description": "Profile information inferred from the submitted text.",
                         "additionalProperties": true
-                    },
-                    "queueInfo": {
-                        "type": "object",
-                        "properties": {
-                            "ticketId": {
-                                "type": "string",
-                                "example": "ticket-123456"
-                            },
-                            "position": {
-                                "type": "integer",
-                                "example": 3
-                            },
-                            "estimatedWaitTime": {
-                                "type": "integer",
-                                "description": "Estimated wait time in minutes",
-                                "example": 5
-                            },
-                            "region": {
-                                "type": "string",
-                                "example": "EastUS"
-                            },
-                            "utilizationPercentage": {
-                                "type": "number",
-                                "format": "float",
-                                "example": 85.5
-                            }
-                        },
-                        "description": "Queue information (only when result is queued)"
                     },
                     "message": {
                         "type": "string",
@@ -1572,45 +1504,6 @@
                         "type": "object",
                         "description": "Profile information inferred from the submitted text.",
                         "additionalProperties": true
-                    }
-                }
-            },
-            "QueuedResponse": {
-                "type": "object",
-                "required": [
-                    "result",
-                    "queueInfo"
-                ],
-                "properties": {
-                    "result": {
-                        "type": "string",
-                        "enum": [
-                            "queued"
-                        ]
-                    },
-                    "queueInfo": {
-                        "type": "object",
-                        "properties": {
-                            "ticketId": {
-                                "type": "string"
-                            },
-                            "position": {
-                                "type": "integer"
-                            },
-                            "estimatedWaitTime": {
-                                "type": "integer"
-                            },
-                            "region": {
-                                "type": "string"
-                            },
-                            "model": {
-                                "type": "string"
-                            },
-                            "utilizationPercentage": {
-                                "type": "number",
-                                "format": "float"
-                            }
-                        }
                     }
                 }
             },

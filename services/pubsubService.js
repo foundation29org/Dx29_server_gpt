@@ -91,20 +91,6 @@ class PubSubService {
     }
   }
 
-  // Enviar notificación de que el proceso fue encolado
-  async sendQueued(userId, queueInfo) {
-    try {
-      await this.client.sendToUser(userId, {
-        type: 'queued',
-        status: 'queued',
-        queueInfo: queueInfo,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error(`Error sending queued notification to user ${userId}:`, error);
-    }
-  }
-
   // Verificar si un usuario está conectado
   async isUserConnected(userId) {
     try {
