@@ -4,11 +4,13 @@
 */
 
 'use strict'
+// config solo lee process.env. Application Insights 3 (OpenTelemetry) tiene que
+// arrancar antes de cargar mongoose, express y el resto: si no, no instrumenta
+// las librerías de terceros. Desde la subida a la v3 (28/10/2026) no llegan
+// requests ni dependencies; si sigue igual, los avisos del SDK dirán por qué.
 const config = require('./config')
-const mongoose = require('mongoose');
-const app = require('./app')
 let appInsights = require('applicationinsights');
-const queueService = app.get('queueService');
+const { instrumentationOptions } = require('./services/telemetryInstrumentation');
 
 const insightsKey = config.insightsKey;
 const url = "InstrumentationKey="+insightsKey+";IngestionEndpoint=https://westeurope-5.in.applicationinsights.azure.com/;LiveEndpoint=https://westeurope.livediagnostics.monitor.azure.com/"
@@ -23,8 +25,15 @@ if(config.client_server!='http://localhost:4200'){
     .setUseDiskRetryCaching(true)
     .setSendLiveMetrics(true)
     .setDistributedTracingMode(appInsights.DistributedTracingModes.AI)
+    // Avisos del propio SDK (p. ej. un export fallido) a consola, y de ahí a traces.
+    .setInternalLogging(false, true)
+    .setAzureMonitorOptions({ instrumentationOptions: instrumentationOptions() })
     .start();
 }
+
+const mongoose = require('mongoose');
+const app = require('./app')
+const queueService = app.get('queueService');
 
 mongoose.Promise = global.Promise
 
