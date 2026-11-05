@@ -12,7 +12,6 @@ const followUpCtrl = require('../services/followUpService')
 const generalFeedbackCtrl = require('../services/generalFeedbackService')
 const questionsFeedbackCtrl = require('../services/questionsFeedbackService')
 const opinionCtrl = require('../services/opinionService')
-const systemStatusCtrl = require('../services/systemStatusService')
 const multimodalCtrl = require('../controllers/all/multimodalInput')
 const permalinkCtrl = require('../controllers/all/permalink')
 const speechTranscribeCtrl = require('../controllers/all/speechTranscribe')
@@ -46,10 +45,10 @@ api.post('/medical/summarize', summarizeCtrl.summarize)
 api.post('/medical/analyze', multimodalCtrl.processMultimodalInput)
 api.delete('/medical/upload/:uploadId', multimodalCtrl.deleteUpload)
 
-api.post('/internal/status/:ticketId', systemStatusCtrl.getQueueStatus)
-
-api.get('/internal/getSystemStatus', healthLimiter, systemStatusCtrl.getSystemStatus)
-api.get('/internal/health', healthLimiter, systemStatusCtrl.checkHealth)
+// Solo dice que el proceso responde; no consulta servicios externos.
+api.get('/internal/health', healthLimiter, (req, res) => {
+  res.status(200).send({ status: 'healthy', timestamp: new Date().toISOString() })
+})
 
 api.post('/internal/opinion', opinionCtrl.opinion)
 

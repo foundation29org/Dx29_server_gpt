@@ -33,7 +33,6 @@ if(config.client_server!='http://localhost:4200'){
 
 const mongoose = require('mongoose');
 const app = require('./app')
-const queueService = app.get('queueService');
 
 mongoose.Promise = global.Promise
 
@@ -48,9 +47,6 @@ process.on('SIGINT', () => handleShutdown());
 async function handleShutdown() {
     console.log('Iniciando cierre del servidor...');
     try {
-        if (queueService) {
-            await queueService.close();
-        }
         await mongoose.connection.close();
         server.close(() => {
             console.log('Servidor cerrado correctamente');

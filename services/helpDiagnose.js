@@ -4,7 +4,6 @@ const { anonymizeText } = require('./anonymizeService');
 const blobOpenDx29Ctrl = require('../services/blobOpenDx29')
 const serviceEmail = require('../services/email')
 const PROMPTS = require('../assets/prompts');
-const queueService = require('./queueService');
 const CostTrackingService = require('./costTrackingService');
 const DiagnoseSessionService = require('../services/diagnoseSessionService');
 const pubsubService = require('./pubsubService');
@@ -114,7 +113,7 @@ const toAnonymizedHtml = (txt) => {
 // para tenants específicos como centro médico, ámbito, especialidad, etc.
 
 // Extraer la lógica principal a una función reutilizable
-async function processAIRequest(data, requestInfo = null, model = defaultModel, region = null) {
+async function processAIRequest(data, requestInfo = null, model = defaultModel) {
   // Si es un modelo largo, usar WebPubSub con progreso
   const isLongModel = true;
   const userId = data.myuuid;
@@ -127,12 +126,11 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
       await pubsubService.sendProgress(userId, 'translation', 'Translating description...', 20);
 
       // Continuar con el procesamiento normal pero enviando progreso
-      const result = await processAIRequestInternal(data, requestInfo, model, userId, region);
+      const result = await processAIRequestInternal(data, requestInfo, model, userId);
 
       // Enviar resultado final via WebPubSub
       await pubsubService.sendResult(userId, result);
 
-      // Devolver resultado simple para la cola
       return { result: 'success', message: 'Sent via WebPubSub' };
 
     } catch (error) {
@@ -147,11 +145,11 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel, 
   }
 
   // Para modelos rápidos, procesamiento normal sin WebPubSub
-  return await processAIRequestInternal(data, requestInfo, model, userId, region);
+  return await processAIRequestInternal(data, requestInfo, model, userId);
 }
 
 // Función interna que contiene toda la lógica de procesamiento
-async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null, region = null) {
+async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null) {
   model = resolveDiagnoseModel(model);
   data.model = model;
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
@@ -196,7 +194,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let hasPersonalInfo = false;
 
   // El endpoint fija el flujo. El cliente no elige con betaPage ni tenant.
-  const isSelfHosted = config.IS_SELF_HOSTED;
   const flow = data.flow === 'ask' ? 'ask' : 'diagnose';
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
@@ -799,7 +796,7 @@ ${medicalQuestionForModel}
               const anonymStartDescription = Date.now();
               let anonymizedDescriptionResult = null;
               // Anonimizar consultas no diagnósticas (preguntas, other, o caso clínico en página de preguntas)
-              if((data.tenantId || isSelfHosted) && !shouldRunDiagnosis){
+              if(data.tenantId && !shouldRunDiagnosis){
                 anonymizedDescriptionResult = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
               }
               const anonymElapsedDescription = Date.now() - anonymStartDescription;
@@ -1849,11 +1846,6 @@ ${medicalQuestionForModel}
       }
     }
     throw error;
-  } finally {
-    // Libera el recurso SIEMPRE, aunque haya error
-    if (region) {
-      await queueService.releaseActiveRequest(region, model);
-    }
   }
 
 }
@@ -2151,43 +2143,13 @@ async function handleDiagnoseOrAsk(req, res, flow) {
       });
     }
 
-    // 1. Si la petición va a la cola, responde como siempre
-    // Nota: Sistema de colas desactivado para self-hosted
-    if (!config.IS_SELF_HOSTED) {
-      const queueProperties = await queueService.getQueueProperties(sanitizedData.timezone, model);
-      if (queueProperties.utilizationPercentage >= config.queueUtilizationThreshold) {
-        const queueInfo = await queueService.addToQueue(sanitizedData, requestInfo, model);
-        if (!queueInfo || !queueInfo.ticketId) {
-          return res.status(500).send({
-            result: 'error',
-            message: 'Error adding request to queue'
-          });
-        }
-        return res.status(200).send({
-          result: 'queued',
-          queueInfo: {
-            ticketId: queueInfo.ticketId,
-            position: queueInfo.queuePosition,
-            estimatedWaitTime: Math.ceil(queueInfo.estimatedWaitTime / 60),
-            region: queueInfo.region,
-            model: queueInfo.model,
-            utilizationPercentage: queueProperties.utilizationPercentage
-          }
-        });
-      }
-    }
-
-    // 2. Si es modelo largo, responde rápido y procesa en background
+    // 1. Si es modelo largo, responde rápido y procesa en background
     const isLongModel = isLongDiagnoseModel(model);
-    // Para self-hosted, no usar el sistema de colas
-    const { region, model: registeredModel, queueKey } = config.IS_SELF_HOSTED 
-      ? { region: null, model, queueKey: null }
-      : await queueService.registerActiveRequest(sanitizedData.timezone, model);
 
     // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos
     if (sanitizedData.response_mode === 'direct') {
       try {
-        const result = await processAIRequestInternal(sanitizedData, requestInfo, model, null, region);
+        const result = await processAIRequestInternal(sanitizedData, requestInfo, model, null);
         return res.status(200).send(result);
       } catch (error) {
         throw error;
@@ -2196,23 +2158,16 @@ async function handleDiagnoseOrAsk(req, res, flow) {
 
     if (isLongModel) {
       res.status(200).send({ result: 'processing' });
-      processAIRequest(sanitizedData, requestInfo, model, region)
+      processAIRequest(sanitizedData, requestInfo, model)
         .catch(error => {
           console.error('Error in background processing:', error);
         });
       return;
     }
 
-    // 3. Modelos rápidos: espera el resultado y responde por HTTP
-
-    try {
-      const result = await processAIRequest(sanitizedData, requestInfo, model, region);
-      //await queueService.releaseActiveRequest(region, model);
-      return res.status(200).send(result);
-    } catch (error) {
-      //await queueService.releaseActiveRequest(region, model);
-      throw error;
-    }
+    // 2. Modelos rápidos: espera el resultado y responde por HTTP
+    const result = await processAIRequest(sanitizedData, requestInfo, model);
+    return res.status(200).send(result);
   } catch (error) {
     console.error('Error:', error);
     insights.error({
