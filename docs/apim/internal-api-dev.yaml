@@ -156,163 +156,6 @@
                 }
             }
         },
-        "/status/{ticketId}": {
-            "post": {
-                "tags": [
-                    "Queue"
-                ],
-                "summary": "Check status of queued diagnose request",
-                "description": "Get the status of a request in the processing queue",
-                "operationId": "post-status-ticketid",
-                "parameters": [
-                    {
-                        "name": "ticketId",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Queue status",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "status": {
-                                            "enum": [
-                                                "pending",
-                                                "processing",
-                                                "completed",
-                                                "failed"
-                                            ],
-                                            "type": "string"
-                                        },
-                                        "position": {
-                                            "type": "integer"
-                                        },
-                                        "estimatedTime": {
-                                            "type": "integer",
-                                            "description": "Estimated time in seconds"
-                                        }
-                                    }
-                                },
-                                "example": {
-                                    "status": "pending",
-                                    "position": 0,
-                                    "estimatedTime": 0
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Invalid or missing subscription key",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Invalid or missing subscription key"
-                                        }
-                                    }
-                                },
-                                "example": {
-                                    "error": "Invalid or missing subscription key"
-                                }
-                            }
-                        }
-                    },
-                    "429": {
-                        "description": "Too many requests",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Too many requests, please try again later"
-                                        }
-                                    }
-                                },
-                                "example": {
-                                    "error": "Too many requests, please try again later"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/getSystemStatus": {
-            "get": {
-                "tags": [
-                    "System"
-                ],
-                "summary": "Get overall system status and health",
-                "description": "Retrieve the current status of the system and its components",
-                "operationId": "get-getsystemstatus",
-                "responses": {
-                    "200": {
-                        "description": "System status",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SystemStatusResponse"
-                                },
-                                "example": {
-                                    "status": "online",
-                                    "services": {}
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Invalid or missing subscription key",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Invalid or missing subscription key"
-                                        }
-                                    }
-                                },
-                                "example": {
-                                    "error": "Invalid or missing subscription key"
-                                }
-                            }
-                        }
-                    },
-                    "429": {
-                        "description": "Too many requests",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Too many requests, please try again later"
-                                        }
-                                    }
-                                },
-                                "example": {
-                                    "error": "Too many requests, please try again later"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/health": {
             "get": {
                 "tags": [
@@ -331,12 +174,17 @@
                                     "properties": {
                                         "status": {
                                             "type": "string",
-                                            "example": "ok"
+                                            "example": "healthy"
+                                        },
+                                        "timestamp": {
+                                            "type": "string",
+                                            "format": "date-time"
                                         }
                                     }
                                 },
                                 "example": {
-                                    "status": "ok"
+                                    "status": "healthy",
+                                    "timestamp": "2026-11-05T10:00:00.000Z"
                                 }
                             }
                         }
@@ -1164,30 +1012,6 @@
                     "status": {
                         "type": "string",
                         "example": "success"
-                    }
-                }
-            },
-            "SystemStatusResponse": {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "enum": [
-                            "online",
-                            "degraded",
-                            "offline"
-                        ],
-                        "type": "string"
-                    },
-                    "services": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "enum": [
-                                "online",
-                                "degraded",
-                                "offline"
-                            ],
-                            "type": "string"
-                        }
                     }
                 }
             },

@@ -694,7 +694,7 @@ const processMultimodalInput = async (req, res) => {
                 forceDiagnosis: req.body.forceDiagnosis === true
                     || req.body.forceDiagnosis === 'true'
             };
-            const diagnoseResult = await callDiagnoses(diagnoseData, requestInfo);
+            await callDiagnoses(diagnoseData, requestInfo);
             const completedUpload = getUploadObservability(req.files);
             insights.trackEvent('MultimodalAnalysisCompleted', {
                 correlationId,
@@ -744,12 +744,7 @@ const processMultimodalInput = async (req, res) => {
                 documents: publicDocuments,
                 isImageOnly: isImageOnly,
                 summarized: summarized,
-                correlationId,
-                // Con cola, el resultado no llega por PubSub: el cliente
-                // consulta el ticket, igual que en /diagnose.
-                ...(diagnoseResult?.result === 'queued'
-                    ? { isQueued: true, queueInfo: diagnoseResult.queueInfo }
-                    : {})
+                correlationId
             });
     } catch (error) {
         if (error.code === CLIENT_ABORT_CODE) {

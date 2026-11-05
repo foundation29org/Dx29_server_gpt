@@ -9,7 +9,6 @@
 // las llamadas HTTP externas que tardan o fallan: Azure OpenAI, Document
 // Intelligence, Perplexity y el backend de F29.
 const UNTRACKED_DEPENDENCY_HOST_SUFFIXES = Object.freeze([
-  '.servicebus.windows.net',
   '.blob.core.windows.net',
   '.webpubsub.azure.com',
   '.microsofttranslator.com'
@@ -26,8 +25,8 @@ function isUntrackedDependency(request) {
 }
 
 // El shim reemplaza su objeto entero por este, así que se nombran todas.
-// azureSdk son los spans InProc de los SDK de Azure (el sondeo de Service Bus,
-// sendToUser...). mongoDb no existía en la v2: cada consulta sería una dependency.
+// azureSdk son los spans InProc de los SDK de Azure (sendToUser de Web PubSub,
+// Blob Storage...). mongoDb no existía en la v2: cada consulta sería una dependency.
 function instrumentationOptions() {
   return {
     http: { enabled: true, ignoreOutgoingRequestHook: isUntrackedDependency },

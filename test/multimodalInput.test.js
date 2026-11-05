@@ -1289,29 +1289,6 @@ test('rejects iframeParams that are not a JSON object before any processing', as
   assert.equal(state.diagnoseCalls.length, 0);
 });
 
-test('tells the client when Diagnose queued the request: the result will not arrive over the socket', async () => {
-  const queueInfo = { ticketId: validFields.myuuid, position: 3, estimatedWaitTime: 2 };
-  state.diagnose = async (req, res) => res.status(200).send({ result: 'queued', queueInfo });
-
-  await processMultimodalInput(createMultipartRequest({
-    ...validFields,
-    text: 'Patient with fever and a persistent cough'
-  }), createResponse());
-
-  assert.equal(published().isQueued, true);
-  assert.deepEqual(published().queueInfo, queueInfo);
-});
-
-test('does not mark a normal request as queued', async () => {
-  await processMultimodalInput(createMultipartRequest({
-    ...validFields,
-    text: 'Patient with fever and a persistent cough'
-  }), createResponse());
-
-  assert.equal(published().isQueued, undefined);
-  assert.equal(published().queueInfo, undefined);
-});
-
 test('keeps image-only input on the direct vision path to Diagnose', async () => {
   const req = createMultipartRequest(validFields, [{
     field: 'image',
