@@ -66,8 +66,7 @@ const reprocesarErrores = async (req, res) => {
           },
           null, // requestInfo
           'gpt56terra', // modelo
-          errorData.myuuid,
-          null // region
+          errorData.myuuid
         );
         resultados.push({ blob: blob.name, status: 'OK', result });
       } catch (err) {
