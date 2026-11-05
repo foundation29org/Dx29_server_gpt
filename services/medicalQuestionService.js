@@ -612,21 +612,6 @@ ${contextBlock}`;
 }
 
 function getAzureResponsesEndpoints(timezone) {
-  if (
-    config.IS_SELF_HOSTED &&
-    config.AZURE_OPENAI_SELFHOSTED?.primary?.baseUrl &&
-    config.AZURE_OPENAI_SELFHOSTED?.primary?.apiKey
-  ) {
-    const list = [config.AZURE_OPENAI_SELFHOSTED.primary];
-    if (
-      config.AZURE_OPENAI_SELFHOSTED?.fallback?.baseUrl &&
-      config.AZURE_OPENAI_SELFHOSTED?.fallback?.apiKey
-    ) {
-      list.push(config.AZURE_OPENAI_SELFHOSTED.fallback);
-    }
-    return list;
-  }
-
   const tz = timezone?.split('/')[0]?.toLowerCase() || '';
   let regionOrder = ['us2', 'eu1', 'us1', 'as1'];
   if (tz.includes('europe') || tz.includes('africa')) {

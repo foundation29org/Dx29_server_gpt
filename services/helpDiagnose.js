@@ -194,7 +194,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   let hasPersonalInfo = false;
 
   // El endpoint fija el flujo. El cliente no elige con betaPage ni tenant.
-  const isSelfHosted = config.IS_SELF_HOSTED;
   const flow = data.flow === 'ask' ? 'ask' : 'diagnose';
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
@@ -797,7 +796,7 @@ ${medicalQuestionForModel}
               const anonymStartDescription = Date.now();
               let anonymizedDescriptionResult = null;
               // Anonimizar consultas no diagnósticas (preguntas, other, o caso clínico en página de preguntas)
-              if((data.tenantId || isSelfHosted) && !shouldRunDiagnosis){
+              if(data.tenantId && !shouldRunDiagnosis){
                 anonymizedDescriptionResult = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
               }
               const anonymElapsedDescription = Date.now() - anonymStartDescription;

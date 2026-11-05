@@ -6,8 +6,6 @@ const { normalizeCountryCode } = require('./locationContext');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const { jsonrepair } = require('jsonrepair');
 
-// Detectar si es deployment self-hosted (sin APIM)
-const isSelfHosted = config.IS_SELF_HOSTED || false;
 const DEFAULT_AI_MODEL = 'gpt56terra';
 const ROUTING_MODEL_ALIASES = {
   gpt4o: 'gpt4o',
@@ -31,30 +29,9 @@ const ROUTING_MODEL_ALIASES = {
   gpt56luna: 'gpt56luna',
   'gpt-5.6-luna': 'gpt56luna'
 };
-const ROUTING_TO_DEPLOYMENT_MODEL = {
-  gpt4o: 'gpt4o',
-  gpt5nano: 'gpt-5-nano',
-  gpt5mini: 'gpt-5-mini',
-  gpt54mini: 'gpt-5.4-mini',
-  gpt56terra: 'gpt-5.6-terra',
-  gpt61sol: 'gpt-6.1-sol',
-  gpt56luna: 'gpt-5.6-luna'
-};
 
-// Mapeo de regiones: usar self-hosted si está configurado y no hay APIM, sino usar regiones SaaS
-const getRegionToAzureOpenAI = () => {
-  if (isSelfHosted && config.AZURE_OPENAI_SELFHOSTED?.primary?.baseUrl && config.AZURE_OPENAI_SELFHOSTED?.primary?.apiKey) {
-    // Self-hosted: usar PRIMARY y FALLBACK
-    return {
-      primary: config.AZURE_OPENAI_SELFHOSTED.primary,
-      fallback: config.AZURE_OPENAI_SELFHOSTED.fallback
-    };
-  }
-  // SaaS Multi-tenant: usar regiones específicas (as1, as2, eu1, us1, us2)
-  return config.AZURE_OPENAI_REGIONS;
-};
-
-const regionToAzureOpenAI = getRegionToAzureOpenAI();
+// Recursos de Azure OpenAI por región (as1, as2, eu1, us1, us2)
+const regionToAzureOpenAI = config.AZURE_OPENAI_REGIONS;
 
 // Mapeo de modelos a deployments y api-versions
 const modelConfig = {
@@ -90,7 +67,7 @@ const modelConfig = {
 
 /**
  * Construye la URL completa de Azure OpenAI para un endpoint específico
- * @param {string} region - Región (as1, as2, eu1, us1, us2 para SaaS) o (primary, fallback para self-hosted)
+ * @param {string} region - Región (as1, as2, eu1, us1, us2)
  * @param {string} model - Modelo (gpt4o, gpt-5-mini, gpt-5.4-mini, gpt-5-nano, gpt-5.6-terra)
  * @returns {Object} - { url, apiKey, region, deployment } o null
  */
@@ -210,32 +187,6 @@ const translatorEndpoints = [
   }
   // Puedes agregar más si es necesario
 ];
-
-/**
- * Obtiene los endpoints simplificados para self-hosted (solo PRIMARY y FALLBACK)
- */
-function getSelfHostedEndpoints(model) {
-  const endpoints = [];
-  const deploymentModel = ROUTING_TO_DEPLOYMENT_MODEL[model] || ROUTING_TO_DEPLOYMENT_MODEL[DEFAULT_AI_MODEL];
-  
-  // PRIMARY siempre está disponible si está configurado
-  if (regionToAzureOpenAI.primary && regionToAzureOpenAI.primary.baseUrl && regionToAzureOpenAI.primary.apiKey) {
-    const primaryEndpoint = buildAzureOpenAIEndpoint('primary', deploymentModel);
-    if (primaryEndpoint) {
-      endpoints.push(primaryEndpoint);
-    }
-  }
-  
-  // FALLBACK solo si está configurado
-  if (regionToAzureOpenAI.fallback && regionToAzureOpenAI.fallback.baseUrl && regionToAzureOpenAI.fallback.apiKey) {
-    const fallbackEndpoint = buildAzureOpenAIEndpoint('fallback', deploymentModel);
-    if (fallbackEndpoint) {
-      endpoints.push(fallbackEndpoint);
-    }
-  }
-  
-  return endpoints;
-}
 
 // Mapa de endpoints para IA - ahora apunta directamente a Azure OpenAI
 // El formato es: { url: string, apiKey: string }
@@ -481,17 +432,7 @@ function resolveDiagnoseModel(requestedModel) {
 function getEndpointsByTimezone(timezone, model = DEFAULT_AI_MODEL) {
   const normalizedModel = normalizeRoutingModel(model);
 
-  // Si es self-hosted, usar endpoints simplificados (PRIMARY y FALLBACK)
-  if (isSelfHosted && regionToAzureOpenAI.primary) {
-    const endpoints = getSelfHostedEndpoints(normalizedModel);
-    if (endpoints.length > 0) {
-      return endpoints;
-    }
-    // Si no hay endpoints configurados para self-hosted, lanzar error
-    throw new Error('No hay endpoints de Azure OpenAI configurados para self-hosted. Configura AZURE_OPENAI_SELFHOSTED_PRIMARY_BASE_URL y AZURE_OPENAI_SELFHOSTED_PRIMARY_KEY');
-  }
-
-  // Para SaaS Multi-tenant, usar lógica de regiones geográficas
+  // Región geográfica según la zona horaria
   const tz = timezone?.split('/')[0]?.toLowerCase();
   const region = (() => {
     if (tz?.includes('america')) return 'northamerica';

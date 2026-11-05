@@ -4,7 +4,6 @@
 // la región primaria y el orden de failover. Antes había además una cola de
 // Service Bus por modelo-región, pero nunca decidía a qué región se llamaba.
 const REGIONS = ['as1', 'as2', 'eu1', 'us1', 'us2'];
-process.env.IS_SELF_HOSTED = 'false';
 for (const region of REGIONS) {
   const key = region.toUpperCase();
   process.env[`AZURE_OPENAI_${key}_BASE_URL`] = `https://${region}.openai.test`;
