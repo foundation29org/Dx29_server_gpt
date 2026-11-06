@@ -1,4 +1,5 @@
-const { translateTextWithRetry, translateInvertWithRetry, callAiWithFailover, sanitizeAiData, suspiciousContentErrors } = require('./aiUtils');
+const { translateTextWithRetry, callAiWithFailover, sanitizeAiData, suspiciousContentErrors } = require('./aiUtils');
+const { translateTexts, costStages } = require('./llmTranslation');
 const { detectLanguageSmart } = require('./languageDetect');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -121,7 +122,7 @@ async function summarize(req, res) {
       iframeParams: req.body.iframeParams || {}
     };
   let translationChars = 0;
-  let reverseTranslationChars = 0;
+  let reverseStages = [];
   let detectChars = 0;
 
     // 1. Detectar idioma (smart) y traducir a inglés si es necesario (LLM primero, fallback Azure)
@@ -233,8 +234,8 @@ async function summarize(req, res) {
     // 3. Llamar a AI con failover
     let aiStartTime = Date.now();
     const dataRequest = {
-      tenantId: req.body.tenantId,
-      subscriptionId: req.body.subscriptionId,
+      tenantId: tenantId,
+      subscriptionId: subscriptionId,
       myuuid: req.body.myuuid
     };
 
@@ -275,56 +276,15 @@ async function summarize(req, res) {
     // 4. Obtener el resumen
     let summary = summarizeResponse.data.choices[0].message.content.trim();
 
-    // 5. Traducir el resumen al idioma original si es necesario (LLM primero, fallback Azure)
-    let reverseLLMUsed = false;
-    let reverseLLMCost = null;
-    let reverseStart = 0, reverseEnd = 0;
+    // 5. Traducir el resumen al idioma original si es necesario: gpt-6.1-terra con
+    // Azure de respaldo (ver llmTranslation.js)
     if (detectedLanguage !== 'en') {
-      /*try {
-        reverseStart = Date.now();
-        const translatePrompt = `Translate the following text into ${detectedLanguage}. Return ONLY the translated text.`;
-        const requestBodyLLM = {
-          model: "gpt-5-mini",
-          messages: [
-            { role: "user", content: translatePrompt },
-            { role: "user", content: summary }
-          ],
-          reasoning_effort: "low"
-        };
-        const dataReq = {
-          tenantId: req.body.tenantId,
-          subscriptionId: req.body.subscriptionId,
-          myuuid: req.body.myuuid
-        };
-        const llmResp = await callAiWithFailover(requestBodyLLM, req.body.timezone, modelTranslation, 0, dataReq);
-        reverseEnd = Date.now();
-        if (!llmResp.data.choices?.[0]?.message?.content) {
-          throw new Error('Empty LLM translation response');
-        }
-        const translated = llmResp.data.choices[0].message.content.trim();
-        summary = translated;
-        if (llmResp.data.usage) {
-          reverseLLMCost = calculatePrice(llmResp.data.usage, modelTranslation);
-          reverseLLMUsed = true;
-        }
-      } catch (translationError) {
-        // Fallback Azure
-        try {
-          reverseTranslationChars += (summary ? summary.length : 0);
-          const revAzStart = Date.now();
-          summary = await translateInvertWithRetry(summary, detectedLanguage);
-          var reverseAzureDuration = Date.now() - revAzStart;
-        } catch (translationError2) {
-          console.error('Translation error (LLM+Azure):', translationError2);
-          throw translationError2;
-        }
-      }*/
-
-        // Nueva implementación: usar Azure Translator directamente (rápido y barato)
-      reverseTranslationChars += (summary ? summary.length : 0);
-      const revAzStart = Date.now();
-      summary = await translateInvertWithRetry(summary, detectedLanguage);
-      var reverseAzureDuration = Date.now() - revAzStart;
+      const translated = await translateTexts([summary], detectedLanguage, {
+        timezone: req.body.timezone,
+        requestData: dataRequest
+      });
+      summary = translated.texts[0];
+      reverseStages = costStages(translated, 'reverse_translation');
     }
 
     // 6. Guardar cost tracking solo en caso de éxito
@@ -392,28 +352,7 @@ async function summarize(req, res) {
         success: true
       });
 
-      if (reverseLLMUsed && reverseLLMCost) {
-        stages.push({
-          name: 'reverse_translation',
-          cost: reverseLLMCost.totalCost,
-          tokens: { input: reverseLLMCost.inputTokens, output: reverseLLMCost.outputTokens, total: reverseLLMCost.totalTokens },
-          model: modelTranslation,
-          duration: reverseEnd - reverseStart,
-          success: true
-        });
-      } 
-      if (reverseTranslationChars > 0) {
-        console.log('reverseTranslationChars:', reverseTranslationChars);
-        const reverseCost = (reverseTranslationChars / 1000000) * 10;
-        stages.push({
-          name: 'reverse_translation',
-          cost: reverseCost,
-          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
-          model: 'translation_service',
-          duration: reverseAzureDuration || 0,
-          success: true
-        });
-      }
+      stages.push(...reverseStages);
 
       // Desglose de costes por tipo
       const sumBy = (arr, key) => arr.reduce((s, x) => s + (x?.[key] || 0), 0);

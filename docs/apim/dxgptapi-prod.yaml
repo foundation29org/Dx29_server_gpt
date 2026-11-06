@@ -1156,6 +1156,11 @@
                         "description": "List of previously identified diseases (optional)",
                         "example": "Migraine, Tension headache, Cluster headache"
                     },
+                    "diseases_list_en": {
+                        "type": "boolean",
+                        "description": "Optional. True when diseases_list is already in English (for example built from diagnosis_en), so it is not translated again.",
+                        "example": true
+                    },
                     "forceDiagnosis": {
                         "type": "boolean",
                         "description": "When true, explicitly continues to differential diagnosis after the user confirms that choice.",
@@ -1204,10 +1209,20 @@
                                     "items": {
                                         "type": "string"
                                     }
+                                },
+                                "diagnosis_en": {
+                                    "type": "string",
+                                    "description": "Original English name of the diagnosis, present when the answer was translated and the name differs. Send it back in English (diseases_list with diseases_list_en, or /disease/info) instead of the translated name. Show it under the translated name when showEnglishName is true.",
+                                    "example": "Accommodative insufficiency"
                                 }
                             }
                         },
                         "description": "Response data (only when result is success)"
+                    },
+                    "showEnglishName": {
+                        "type": "boolean",
+                        "description": "True when the answer was translated into a language where the original English name should be shown under each translated name (Hindi, Bengali, Urdu, Arabic and other South Asian languages)",
+                        "example": false
                     },
                     "anonymization": {
                         "type": "object",
@@ -1617,6 +1632,11 @@
                         "type": "string",
                         "description": "List of suggested diseases that didn't match the patient's experience",
                         "example": "Migraine, Tension headache, Cluster headache"
+                    },
+                    "diseases_en": {
+                        "type": "boolean",
+                        "description": "Optional. True when diseases is already in English (for example built from diagnosis_en), so it is not translated again.",
+                        "example": true
                     },
                     "myuuid": {
                         "pattern": "^[0-9a-fA-F-]{36}$",

@@ -1,4 +1,5 @@
-const { translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError, DEFAULT_AI_MODEL } = require('./aiUtils');
+const { sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError, DEFAULT_AI_MODEL } = require('./aiUtils');
+const { translateTexts, costStages } = require('./llmTranslation');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -148,7 +149,6 @@ async function callInfoDisease(req, res) {
     };
     
     const stages = [];
-    let reverseTranslationStartTime, reverseTranslationEndTime;
     let aiStartTime, aiEndTime;
     try {
       // Validar los datos de entrada
@@ -419,85 +419,46 @@ async function callInfoDisease(req, res) {
       }
   
       let processedContent = contentArray.join(splitChar);
-  
-      // Procesar según el tipo de pregunta
-      if (sanitizedData.questionType === 3) {
-        // Eliminar asteriscos dobles
-        processedContent = processedContent.replace(/\*\*/g, '');
-  
-        // Traducir si es necesario
-        if (sanitizedData.detectedLang !== 'en') {
-          try {
-            reverseTranslationStartTime = Date.now();
-            const translatedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
-            reverseTranslationEndTime = Date.now();
-            processedContent = translatedContent;
-            
-            // Agregar etapa de traducción inversa
-            stages.push({
-              name: 'reverse_translation',
-              cost: 0,
-              tokens: { input: 0, output: 0, total: 0 },
-              model: 'translation_service',
-              duration: reverseTranslationEndTime - reverseTranslationStartTime,
-              success: true
-            });
-          } catch (translationError) {
-            console.error('Translation error:', translationError);
-            let infoError = {
-              error: translationError,
-              requestInfo: requestInfo,
-              myuuid: req.body.myuuid,
-              tenantId: tenantId,
-              operation: 'callInfoDisease',
-              subscriptionId: subscriptionId
-            };
-            insights.error(infoError);
-          }
-        }
-  
-        // Procesar lista de síntomas
-        const symptoms = processedContent.split("\n")
-          .filter(line => line !== '' && line !== ' ' && line !== ':')
-          .map(line => {
-            let index = line.indexOf('.');
-            let name = line.split(".")[1];
-            if (index !== -1) {
-              name = line.substring(index + 1);
-            }
-            name = name.trim();
-            if (name.endsWith('.')) {
-              name = name.slice(0, -1);
-            }
-            return { name, checked: false };
+
+      // Traducción de vuelta con gpt-6.1-terra y Azure de respaldo (ver
+      // llmTranslation.js). Si fallan los dos se devuelve el inglés, como antes, y
+      // se registra el error y lo ya gastado.
+      const translateInfoAnswer = async (texts) => {
+        try {
+          const translated = await translateTexts(texts, sanitizedData.detectedLang, {
+            timezone: sanitizedData.timezone,
+            requestData: dataRequest
           });
-  
-      // Guardar cost tracking multi-etapa (AI + reverse_translation si aplica)
-      try {
-        if (sanitizedData.detectedLang !== 'en') {
-          reverseTranslationStartTime = Date.now();
-          const origLen = processedContent ? processedContent.length : 0;
-          // Ya traducido arriba ➔ solo contamos caracteres
-          reverseTranslationEndTime = Date.now();
-          const reverseCost = (origLen / 1000000) * 10;
-          if (origLen > 0) {
-            stages.push({
-              name: 'reverse_translation',
-              cost: reverseCost,
-              tokens: { input: origLen, output: origLen, total: origLen },
-              model: 'translation_service',
-              duration: reverseTranslationEndTime - reverseTranslationStartTime,
-              success: true
-            });
+          stages.push(...costStages(translated, 'reverse_translation'));
+          return translated.texts;
+        } catch (translationError) {
+          if (translationError.translationResult) {
+            stages.push(...costStages(translationError.translationResult, 'reverse_translation')
+              .map(stage => ({ ...stage, success: false })));
           }
+          console.error('Translation error:', translationError);
+          insights.error({
+            message: 'Disease info translation failed (gpt-6.1-terra and Azure Translator)',
+            error: translationError.message,
+            requestInfo: requestInfo,
+            myuuid: req.body.myuuid,
+            tenantId: tenantId,
+            operation: 'callInfoDisease',
+            subscriptionId: subscriptionId
+          });
+          return texts;
         }
+      };
+
+      // Registro de costes de las dos ramas: la IA y, si la hubo, la traducción de vuelta
+      const saveInfoCostRecord = (context) => {
         const totalCost = stages.reduce((sum, st) => sum + (st.cost || 0), 0);
         const totalTokens = {
           input: stages.reduce((sum, st) => sum + (st.tokens?.input || 0), 0),
           output: stages.reduce((sum, st) => sum + (st.tokens?.output || 0), 0),
           total: stages.reduce((sum, st) => sum + (st.tokens?.total || 0), 0)
         };
-        const infoDiseaseCostRecord = {
+        void CostTrackingService.saveCostRecordBestEffort({
           myuuid: costTrackingData.myuuid,
           tenantId: costTrackingData.tenantId,
           subscriptionId: costTrackingData.subscriptionId,
@@ -508,14 +469,48 @@ async function callInfoDisease(req, res) {
           stages,
           totalCost,
           totalTokens,
-          description: costTrackingData.description,
+          descriptionLength: costTrackingData.description.length,
           status: 'success',
           iframeParams: costTrackingData.iframeParams,
-          operationData: { detectedLanguage: costTrackingData.lang }
-        };
-        void CostTrackingService.saveCostRecordBestEffort(infoDiseaseCostRecord, {
-          context: 'callInfoDisease differential save'
-        });
+          operationData: {
+            questionType: costTrackingData.questionType,
+            disease: costTrackingData.disease,
+            detectedLanguage: costTrackingData.lang
+          }
+        }, { context });
+        return { totalCost, totalTokens };
+      };
+
+      // Procesar según el tipo de pregunta
+      if (sanitizedData.questionType === 3) {
+        // Eliminar asteriscos dobles
+        processedContent = processedContent.replace(/\*\*/g, '');
+  
+        // Lista de síntomas en inglés. Se traduce después, como lista (un nombre por
+        // elemento, igual que los diagnósticos): antes se traducía el bloque numerado
+        // con Azure y luego se partía por líneas.
+        let symptomNames = processedContent.split("\n")
+          .filter(line => line !== '' && line !== ' ' && line !== ':')
+          .map(line => {
+            let index = line.indexOf('.');
+            let name = line.split(".")[1];
+            if (index !== -1) {
+              name = line.substring(index + 1);
+            }
+            name = (name || '').trim();
+            if (name.endsWith('.')) {
+              name = name.slice(0, -1);
+            }
+            return name;
+          })
+          // Una línea sin número (un título como «Possible symptoms») quedaría vacía
+          .filter(name => name.length > 0);
+        symptomNames = await translateInfoAnswer(symptomNames);
+        const symptoms = symptomNames.map(name => ({ name, checked: false }));
+
+      // Guardar cost tracking multi-etapa (AI + reverse_translation si aplica)
+      try {
+        const { totalCost, totalTokens } = saveInfoCostRecord('callInfoDisease differential save');
         // Desglose de costos en consola
         console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (Differential):`);
         stages.forEach((stage, index) => {
@@ -542,53 +537,22 @@ async function callInfoDisease(req, res) {
         });
   
       } else {
-        // Para otros tipos de preguntas
-        if (sanitizedData.detectedLang !== 'en') {
-          try {
-            reverseTranslationStartTime = Date.now();
-            processedContent = await translateInvertWithRetry(processedContent, sanitizedData.detectedLang);
-            reverseTranslationEndTime = Date.now();
-            
-            // Agregar etapa de traducción inversa
-            stages.push({
-              name: 'reverse_translation',
-              cost: 0,
-              tokens: { input: 0, output: 0, total: 0 },
-              model: 'translation_service',
-              duration: reverseTranslationEndTime - reverseTranslationStartTime,
-              success: true
-            });
-          } catch (translationError) {
-            console.error('Translation error:', translationError);
-            let infoError = {
-              error: translationError,
-              requestInfo: requestInfo,
-              myuuid: req.body.myuuid,
-              tenantId: tenantId,
-              operation: 'callInfoDisease',
-              subscriptionId: subscriptionId
-            };
-            insights.error(infoError);
-          }
+        // Para otros tipos de preguntas: la respuesta es HTML y se traduce entera
+        // (llmTranslation comprueba que conserva las etiquetas)
+        if (processedContent.trim()) {
+          [processedContent] = await translateInfoAnswer([processedContent]);
         }
-  
-        // Guardar cost tracking
+
+        // Guardar cost tracking (la IA y, si la hubo, la traducción de vuelta)
         try {
-          void CostTrackingService.saveSimpleOperationCostBestEffort(
-            costTrackingData,
-            'info_disease',
-            stages[0], // La etapa de IA
-            'success'
-          );
+          const { totalCost, totalTokens } = saveInfoCostRecord('callInfoDisease general save');
           // Desglose de costos en consola (general)
-          const totalCost = stages.reduce((sum, stage) => sum + (stage.cost || 0), 0);
-          const totalTokens = stages.reduce((sum, stage) => sum + (stage.tokens?.total || 0), 0);
           console.log(`\n💰 RESUMEN DE COSTOS callInfoDisease (General):`);
           stages.forEach((stage, index) => {
             console.log(`   Etapa ${index + 1} - ${stage.name}: $${formatCost(stage.cost)} (${stage.tokens?.total || 0} tokens, ${stage.duration || 0}ms, model=${stage.model})`);
           });
           console.log(`   ──────────────────────────`);
-          console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens} tokens)`);
+          console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens.total} tokens)`);
         } catch (costError) {
           console.error('Error guardando cost tracking:', costError);
           insights.error({
