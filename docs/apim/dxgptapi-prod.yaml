@@ -1204,6 +1204,11 @@
                                     "items": {
                                         "type": "string"
                                     }
+                                },
+                                "diagnosis_en": {
+                                    "type": "string",
+                                    "description": "Original English name of the diagnosis. Only present when the answer was translated into a language where the English name is shown too (Hindi, Bengali, Urdu, Arabic and other South Asian languages).",
+                                    "example": "Accommodative insufficiency"
                                 }
                             }
                         },

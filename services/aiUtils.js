@@ -27,7 +27,9 @@ const ROUTING_MODEL_ALIASES = {
   gpt61sol: 'gpt61sol',
   'gpt-6.1-sol': 'gpt61sol',
   gpt56luna: 'gpt56luna',
-  'gpt-5.6-luna': 'gpt56luna'
+  'gpt-5.6-luna': 'gpt56luna',
+  gpt61terra: 'gpt61terra',
+  'gpt-6.1-terra': 'gpt61terra'
 };
 
 // Recursos de Azure OpenAI por región (as1, as2, eu1, us1, us2)
@@ -62,6 +64,10 @@ const modelConfig = {
   'gpt-5.6-luna': {
     apiVersion: '2025-04-01-preview',
     path: '/openai/deployments/gpt-5.6-luna/chat/completions'
+  },
+  'gpt-6.1-terra': {
+    apiVersion: '2025-04-01-preview',
+    path: '/openai/deployments/gpt-6.1-terra/chat/completions'
   }
 };
 
@@ -409,6 +415,41 @@ const endpointsMap = {
     other: [
       buildAzureOpenAIEndpoint('us2', 'gpt-5.6-luna'),
       buildAzureOpenAIEndpoint('eu1', 'gpt-5.6-luna')
+    ]
+  },
+  // gpt-6.1-terra traduce las respuestas al idioma del usuario (llmTranslation.js).
+  // Desplegado en as1, us1 y eu1 (no en us2): mismas listas que Sol, con us1 en el
+  // lugar de us2. Si fallan todas, la traducción vuelve a Azure Translator.
+  gpt61terra: {
+    asia: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra')
+    ],
+    europe: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra')
+    ],
+    northamerica: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra')
+    ],
+    southamerica: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra')
+    ],
+    africa: [
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra')
+    ],
+    oceania: [
+      buildAzureOpenAIEndpoint('as1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra')
+    ],
+    other: [
+      buildAzureOpenAIEndpoint('us1', 'gpt-6.1-terra'),
+      buildAzureOpenAIEndpoint('eu1', 'gpt-6.1-terra')
     ]
   }
 };

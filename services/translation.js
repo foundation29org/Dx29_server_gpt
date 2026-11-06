@@ -6,6 +6,17 @@ const axios = require('axios');
 const SUPPORTED = require('./translatorSupported.json');
 const NORMALIZE = require('./langNormalize.json');
 
+// Los códigos llegan en minúsculas, pero en translatorSupported.json algunos
+// llevan escritura con mayúscula (zh-Hans, sr-Latn, mn-Cyrl): sin esta tabla
+// esos idiomas no se encontraban y la respuesta se quedaba en inglés.
+const SUPPORTED_BY_LOWERCASE = Object.fromEntries(
+  Object.keys(SUPPORTED).map((code) => [code.toLowerCase(), code])
+);
+
+function supportedCode(code) {
+  return SUPPORTED_BY_LOWERCASE[String(code).toLowerCase()] || null;
+}
+
 // Azure Translator responde en menos de un segundo. Sin tope, una conexión
 // parada bloquea la petición hasta el timeout del sistema (decenas de
 // segundos) y los reintentos de aiUtils nunca llegan a actuar.
@@ -22,11 +33,8 @@ function normalizeSourceLang(lang) {
   }
 
   // Si después de normalizar sigue sin estar soportado, dejamos que Azure autodetecte
-  if (!SUPPORTED[code]) {
-    return null; // clave: null => no pondremos &from=
-  }
-
-  return code;
+  // (null => no pondremos &from=)
+  return supportedCode(code);
 }
 
 function normalizeTargetLang(lang) {
@@ -39,11 +47,7 @@ function normalizeTargetLang(lang) {
   }
 
   // Si no está soportado, devolvemos 'en' como fallback
-  if (!SUPPORTED[code]) {
-    return 'en';
-  }
-
-  return code;
+  return supportedCode(code) || 'en';
 }
 
 
@@ -272,5 +276,6 @@ async function translateInvert(text, targetLang, endpoint) {
 module.exports = {
   detectLanguage,
   translateText,
-  translateInvert
+  translateInvert,
+  normalizeTargetLang
 }

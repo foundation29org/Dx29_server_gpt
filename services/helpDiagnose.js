@@ -20,6 +20,7 @@ const {
   suspiciousContentErrors
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
+const { translateDiagnoses, showsEnglishName, costStages } = require('./llmTranslation');
 const { calculatePrice, formatCost } = require('./costUtils');
 const {
   loadImageDataUrls,
@@ -1296,70 +1297,40 @@ ${medicalQuestionForModel}
       }
     }
 
-    // Traducir la respuesta si es necesario (Azure únicamente, sin LLM)
+    // Traducir la respuesta si es necesario: gpt-6.1-terra, un diagnóstico por
+    // llamada y todos a la vez, con Azure de respaldo (ver llmTranslation.js)
     if (detectedLanguage !== 'en' && parsedResponse.length > 0) {
       try {
-        let reverseInChars = 0;
-        for (const diagnosis of parsedResponse) {
-          reverseInChars += (diagnosis.diagnosis ? diagnosis.diagnosis.length : 0);
-          reverseInChars += (diagnosis.description ? diagnosis.description.length : 0);
-          if (Array.isArray(diagnosis.symptoms_in_common)) {
-            for (const s of diagnosis.symptoms_in_common) reverseInChars += (s ? s.length : 0);
-          }
-          if (Array.isArray(diagnosis.symptoms_not_in_common)) {
-            for (const s of diagnosis.symptoms_not_in_common) reverseInChars += (s ? s.length : 0);
-          }
-        }
         // Esta fase puede durar varios segundos y antes seguía mostrando
         // "Anonymizing" desde el 80 %. Se avisa del último tramo.
         if (userId) {
           await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 88);
         }
-        // Traducir por campos con Azure. Todos los campos a la vez: antes
-        // diagnosis y description iban en serie, y cada serie sumaba su espera.
-        const revDisStart = Date.now();
-        parsedResponse = await Promise.all(
-          parsedResponse.map(async diagnosis => {
-            const [translatedDiagnosis, translatedDescription, symptomsInCommon, symptomsNotInCommon] =
-              await Promise.all([
-                translateInvertWithRetry(diagnosis.diagnosis, detectedLanguage),
-                translateInvertWithRetry(diagnosis.description, detectedLanguage),
-                Promise.all(
-                  diagnosis.symptoms_in_common.map(symptom =>
-                    translateInvertWithRetry(symptom, detectedLanguage)
-                  )
-                ),
-                Promise.all(
-                  diagnosis.symptoms_not_in_common.map(symptom =>
-                    translateInvertWithRetry(symptom, detectedLanguage)
-                  )
-                )
-              ]);
-            return {
-              diagnosis: translatedDiagnosis,
-              description: translatedDescription,
-              symptoms_in_common: symptomsInCommon,
-              symptoms_not_in_common: symptomsNotInCommon
-            };
-          })
-        );
-        const revDisElapsed = Date.now() - revDisStart;
-        // Registrar coste Azure específico de diagnósticos
-        const reverseCost = (reverseInChars / 1000000) * 10;
-        if (reverseInChars > 0) {
+        const translated = await translateDiagnoses(parsedResponse, detectedLanguage, {
+          timezone: data.timezone,
+          requestData: dataRequest
+        });
+        // En los idiomas con más errores de traducción, el nombre original en
+        // inglés va también, para mostrarlo bajo el traducido
+        const withEnglishName = showsEnglishName(detectedLanguage);
+        parsedResponse = translated.items.map((item, i) => (withEnglishName
+          ? { ...item, diagnosis_en: parsedResponse[i].diagnosis }
+          : item));
+        const stages = costStages(translated, 'reverse_diseases');
+        if (stages.length) {
+          // Una etapa por servicio (gpt61terra y, si hubo respaldo, translation_service):
+          // el esquema de CostTracking solo admite un modelo conocido por etapa
           costTracking.reverse_diseases = {
-            cost: reverseCost,
-            tokens: { input: reverseInChars, output: reverseInChars, total: reverseInChars },
-            model: 'translation_service',
-            duration: revDisElapsed,
-            success: true
+            cost: translated.cost,
+            duration: translated.durationMs,
+            stages
           };
-          costTracking.total.cost += reverseCost;
+          costTracking.total.cost += translated.cost;
         }
       } catch (fallbackError) {
-        console.error('Azure Translator error:', fallbackError.message);
+        console.error('Answer translation error:', fallbackError.message);
         insights.error({
-          message: 'Azure Translator failed',
+          message: 'Answer translation failed (gpt-6.1-terra and Azure Translator)',
           error: fallbackError.message,
           detectedLanguage: detectedLanguage
         });
@@ -1602,14 +1573,7 @@ ${medicalQuestionForModel}
       });
     }
     if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
-      stages.push({
-        name: 'reverse_diseases',
-        cost: costTracking.reverse_diseases.cost,
-        tokens: costTracking.reverse_diseases.tokens,
-        model: costTracking.reverse_diseases.model || modelTranslation,
-        duration: costTracking.reverse_diseases.duration || 0,
-        success: true
-      });
+      stages.push(...costTracking.reverse_diseases.stages);
     }
     if (costTracking.reverse_anonymization && costTracking.reverse_anonymization.cost > 0) {
       stages.push({

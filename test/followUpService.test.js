@@ -13,7 +13,7 @@ function stubModule(modulePath, exports) {
   };
 }
 
-const state = { prompts: [], detectCalls: 0, translateCalls: 0, aiContent: '[]' };
+const state = { prompts: [], detectCalls: 0, translateCalls: 0, reverseCalls: [], aiContent: '[]' };
 
 stubModule('../services/aiUtils', {
   detectLanguageWithRetry: async () => {
@@ -37,6 +37,15 @@ stubModule('../services/aiUtils', {
     };
   },
   parseJsonWithFixes: async (content) => JSON.parse(content)
+});
+// La traducción de vuelta (gpt-6.1-terra con Azure de respaldo) tiene sus propias
+// pruebas en llmTranslation.test.js; aquí solo se comprueba que se llama.
+stubModule('../services/llmTranslation', {
+  translateTexts: async (texts, lang) => {
+    state.reverseCalls.push({ texts, lang });
+    return { texts: texts.map((text) => `[${lang}] ${text}`), promptTokens: 10, completionTokens: 20 };
+  },
+  costStages: (result, name) => [{ name, cost: 0, tokens: { input: 10, output: 20, total: 30 }, model: 'gpt61terra', duration: 0, success: true }]
 });
 stubModule('../services/costUtils', {
   calculatePrice: () => ({ totalCost: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
@@ -85,6 +94,7 @@ test.beforeEach(() => {
   state.prompts = [];
   state.detectCalls = 0;
   state.translateCalls = 0;
+  state.reverseCalls = [];
 });
 
 test('image-only hypothesis follow-up works without a description', async () => {
@@ -99,7 +109,8 @@ test('image-only hypothesis follow-up works without a description', async () => 
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.result, 'success');
-  assert.deepEqual(res.body.data.questions, ['¿Fuma?']);
+  assert.deepEqual(res.body.data.questions, ['[es] ¿Fuma?'], 'the questions are translated back to Spanish');
+  assert.deepEqual(state.reverseCalls, [{ texts: ['¿Fuma?'], lang: 'es' }]);
   assert.equal(res.body.detectedLang, 'es');
   assert.equal(state.detectCalls, 0);
   assert.equal(state.translateCalls, 1, 'only the disease list is translated');
@@ -151,7 +162,7 @@ test('image-only guided questions before diagnosis work without a description', 
 
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   assert.equal(res.body.result, 'success');
-  assert.deepEqual(res.body.data.questions, ['¿Qué edad tiene?']);
+  assert.deepEqual(res.body.data.questions, ['[es] ¿Qué edad tiene?'], 'the questions are translated back to Spanish');
   assert.equal(state.detectCalls, 0);
   assert.equal(state.translateCalls, 0);
   assert.match(state.prompts[0], /submitted as medical images/);

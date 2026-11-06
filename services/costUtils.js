@@ -54,6 +54,10 @@ const PRICING = {
     input: 0.00075,   // Temporal: misma tarifa que gpt-5.4-mini hasta confirmar la de gpt-5.6-luna
     output: 0.0045    // Temporal: misma tarifa que gpt-5.4-mini hasta confirmar la de gpt-5.6-luna
   },
+  gpt61terra: {
+    input: 0.0012,    // Temporal: $1.20 per 1M tokens, tarifa de Azure en Europa según terceros
+    output: 0.006     // Temporal: $6.00 per 1M tokens, hasta confirmar la de gpt-6.1-terra
+  },
   perplexity_search: {
     input: 0,
     output: 0,
@@ -84,6 +88,8 @@ const PRICING_ALIASES = {
   'gpt-6.1-sol': 'gpt61sol',
   gpt56luna: 'gpt56luna',
   'gpt-5.6-luna': 'gpt56luna',
+  gpt61terra: 'gpt61terra',
+  'gpt-6.1-terra': 'gpt61terra',
   'perplexity-search': 'perplexity_search',
   perplexity_search: 'perplexity_search'
 };

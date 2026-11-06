@@ -1,4 +1,5 @@
-const { translateTextWithRetry, translateInvertWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
+const { translateTextWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
+const { translateTexts, costStages } = require('./llmTranslation');
 const { detectLanguageLocalOrAzure } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
@@ -189,11 +190,10 @@ async function generateFollowUpQuestions(req, res) {
       iframeParams: req.body.iframeParams || {}
     };
   let translationChars = 0;
-  let reverseTranslationChars = 0;
+  let reverseStages = [];
   let detectChars = 0;
   let detectDurationMs = 0;
   let forwardDurationMs = 0;
-  let reverseDurationMs = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -465,13 +465,13 @@ async function generateFollowUpQuestions(req, res) {
     // 4. Traducir las preguntas al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
-        // Contabilizar caracteres previos a la traducción inversa
-        reverseTranslationChars += questions.reduce((sum, q) => sum + (q ? q.length : 0), 0);
-        const revStart = Date.now();
-        questions = await Promise.all(
-          questions.map(question => translateInvertWithRetry(question, detectedLanguage))
-        );
-        reverseDurationMs = Date.now() - revStart;
+        // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
+        const translated = await translateTexts(questions, detectedLanguage, {
+          timezone: sanitizedData.timezone,
+          requestData: dataRequest
+        });
+        questions = translated.texts;
+        reverseStages = costStages(translated, 'reverse_translation');
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -511,17 +511,7 @@ async function generateFollowUpQuestions(req, res) {
         duration: aiEndTime - aiStartTime,
         success: true
       });
-      if (reverseTranslationChars > 0) {
-        const reverseCost = (reverseTranslationChars / 1000000) * 10;
-        stages.push({
-          name: 'reverse_translation',
-          cost: reverseCost,
-          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
-          model: 'translation_service',
-          duration: reverseDurationMs,
-          success: true
-        });
-      }
+      stages.push(...reverseStages);
       const totalCost = stages.reduce((s, st) => s + (st.cost || 0), 0);
       const totalTokens = {
         input: stages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
@@ -558,11 +548,13 @@ async function generateFollowUpQuestions(req, res) {
       const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
       const transAzure = toSummary(group('translation', m => m === 'translation_service'));
       const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const revLlm = toSummary(group('reverse_translation', m => m !== 'translation_service'));
       const aiCall = toSummary(group('ai_call'));
       console.log(`\n💰 RESUMEN DE COSTOS generateFollowUpQuestions:`);
       console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
       console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
       console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (gpt-6.1-terra): $${formatCost(revLlm.cost)} (${revLlm.tokens} tokens)`);
       console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking:', costError);
@@ -747,11 +739,10 @@ async function processFollowUpAnswers(req, res) {
       iframeParams: req.body.iframeParams || {}
     };
   let translationChars = 0;
-  let reverseTranslationChars = 0;
+  let reverseStages = [];
   let detectChars = 0;
   let detectDurationMs = 0;
   let forwardDurationMs = 0;
-  let reverseDurationMs = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -968,7 +959,7 @@ async function processFollowUpAnswers(req, res) {
         success: true
       });
 
-      // Guardaremos al final tras calcular reverseTranslationChars
+      // Guardaremos al final, tras la traducción de vuelta
       var followUpStages = stages;
     } catch (costError) {
       console.error('Error saving cost tracking (pre-reverse):', costError);
@@ -991,10 +982,13 @@ async function processFollowUpAnswers(req, res) {
     // 4. Traducir la descripción actualizada al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
-        reverseTranslationChars = (updatedDescription ? updatedDescription.length : 0);
-        const revStart = Date.now();
-        updatedDescription = await translateInvertWithRetry(updatedDescription, detectedLanguage);
-        reverseDurationMs = Date.now() - revStart;
+        // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
+        const translated = await translateTexts([updatedDescription], detectedLanguage, {
+          timezone: sanitizedData.timezone,
+          requestData: dataRequest
+        });
+        updatedDescription = translated.texts[0];
+        reverseStages = costStages(translated, 'reverse_translation');
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -1003,17 +997,7 @@ async function processFollowUpAnswers(req, res) {
 
     // Añadir stage de reverse_translation y guardar definitivamente el cost tracking
     try {
-      if (reverseTranslationChars > 0) {
-        const reverseCost = (reverseTranslationChars / 1000000) * 10;
-        followUpStages.push({
-          name: 'reverse_translation',
-          cost: reverseCost,
-          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
-          model: 'translation_service',
-          duration: reverseDurationMs || 0,
-          success: true
-        });
-      }
+      followUpStages.push(...reverseStages);
       const totalCost = followUpStages.reduce((s, st) => s + (st.cost || 0), 0);
       const totalTokens = {
         input: followUpStages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
@@ -1051,11 +1035,13 @@ async function processFollowUpAnswers(req, res) {
       const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
       const transAzure = toSummary(group('translation', m => m === 'translation_service'));
       const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const revLlm = toSummary(group('reverse_translation', m => m !== 'translation_service'));
       const aiCall = toSummary(group('ai_call'));
       console.log(`\n💰 RESUMEN DE COSTOS processFollowUpAnswers:`);
       console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
       console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
       console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (gpt-6.1-terra): $${formatCost(revLlm.cost)} (${revLlm.tokens} tokens)`);
       console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error saving final cost tracking:', costError);
@@ -1209,11 +1195,10 @@ async function generateERQuestions(req, res) {
       iframeParams: req.body.iframeParams || {}
     };
   let translationChars = 0;
-  let reverseTranslationChars = 0;
+  let reverseStages = [];
   let detectChars = 0;
   let detectDurationMs = 0;
   let forwardDurationMs = 0;
-  let reverseDurationMs = 0;
 
   
 
@@ -1406,7 +1391,7 @@ async function generateERQuestions(req, res) {
         duration: aiEndTime - aiStartTime,
         success: true
       });
-      // reverseTranslationChars se calculará tras traducir preguntas
+      // reverse_translation se añade tras traducir las preguntas
       var erStages = stages;
     } catch (costError) {
       console.error('Error guardando cost tracking (pre-reverse):', costError);
@@ -1471,12 +1456,13 @@ async function generateERQuestions(req, res) {
     // 4. Traducir las preguntas al idioma original si es necesario
     if (detectedLanguage !== 'en') {
       try {
-        reverseTranslationChars = questions.reduce((sum, q) => sum + (q ? q.length : 0), 0);
-        const revStart = Date.now();
-        questions = await Promise.all(
-          questions.map(question => translateInvertWithRetry(question, detectedLanguage))
-        );
-        reverseDurationMs = Date.now() - revStart;
+        // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
+        const translated = await translateTexts(questions, detectedLanguage, {
+          timezone: sanitizedData.timezone,
+          requestData: dataRequest
+        });
+        questions = translated.texts;
+        reverseStages = costStages(translated, 'reverse_translation');
       } catch (translationError) {
         console.error('Translation error:', translationError);
         throw translationError;
@@ -1485,17 +1471,7 @@ async function generateERQuestions(req, res) {
 
     // Añadir reverse_translation y guardar definitivamente
     try {
-      if (reverseTranslationChars > 0) {
-        const reverseCost = (reverseTranslationChars / 1000000) * 10;
-        erStages.push({
-          name: 'reverse_translation',
-          cost: reverseCost,
-          tokens: { input: reverseTranslationChars, output: reverseTranslationChars, total: reverseTranslationChars },
-          model: 'translation_service',
-          duration: reverseDurationMs,
-          success: true
-        });
-      }
+      erStages.push(...reverseStages);
       const totalCost = erStages.reduce((s, st) => s + (st.cost || 0), 0);
       const totalTokens = {
         input: erStages.reduce((s, st) => s + (st.tokens?.input || 0), 0),
@@ -1532,11 +1508,13 @@ async function generateERQuestions(req, res) {
       const detectAzure = toSummary(group('detect_language', m => m === 'translation_service'));
       const transAzure = toSummary(group('translation', m => m === 'translation_service'));
       const revAzure = toSummary(group('reverse_translation', m => m === 'translation_service'));
+      const revLlm = toSummary(group('reverse_translation', m => m !== 'translation_service'));
       const aiCall = toSummary(group('ai_call'));
       console.log(`\n💰 RESUMEN DE COSTOS generateERQuestions:`);
       console.log(`   Detect language (Azure): $${formatCost(detectAzure.cost)} (${detectAzure.tokens} chars)`);
       console.log(`   Translation (Azure): $${formatCost(transAzure.cost)} (${transAzure.tokens} chars)`);
       console.log(`   AI Call: $${formatCost(aiCall.cost)} (${aiCall.tokens} tokens, ${aiCall.duration}ms)`);
+      console.log(`   Reverse Translation (gpt-6.1-terra): $${formatCost(revLlm.cost)} (${revLlm.tokens} tokens)`);
       console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
       console.error('Error guardando cost tracking (final):', costError);
