@@ -422,11 +422,16 @@ await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
 
 ## Backlog de reevaluacion (coste/latencia)
 
-### Reevaluar traduccion con LLM (pospuesto)
+### Traduccion de vuelta con LLM (adoptada en nov-2026)
 
-- **Estado actual**: no entra en el ambito de la evaluacion actual.
-- **Motivo**: en pruebas internas, traducir con LLM resulto mas barato en algunos casos, pero aumento la latencia total frente a Azure Translator.
-- **Decision vigente**: mantener Azure Translator en produccion hasta nueva evidencia.
+- **Decision vigente**: las respuestas (diagnosticos, preguntas de seguimiento, descripcion actualizada y resumen) se traducen con `gpt-6.1-terra` en `services/llmTranslation.js`: una llamada por diagnostico, todas a la vez, y Azure Translator de respaldo para la parte que falle.
+- **Motivo**: en la prueba del 5/6-nov-2026 (respuestas reales de Sol en 10 idiomas, juez a ciegas), Azure campo a campo dejo algun error critico en el 81 % de las respuestas, frente al 3 % de gpt-6.1-terra con material dificil. Con una llamada por diagnostico en paralelo tarda unos 2,5 s y corre a la vez que la anonimizacion. Coste estimado: unos 56 $/mes frente a unos 176 $/mes de Azure.
+- **Etapas**: `reverse_diseases` y `reverse_translation` llevan una etapa `gpt61terra` (tokens) y, si hubo respaldo, otra `translation_service` (caracteres). Cada respaldo se registra en Application Insights como evento `LlmTranslationFallback`, con el motivo (`problem`, `statusCode`, `providerErrorCode`).
+- El contexto historico de abajo es de cuando se decidio mantener Azure.
+
+#### Contexto historico: por que se pospuso (antes de nov-2026)
+
+- En pruebas internas, traducir con LLM resulto mas barato en algunos casos, pero aumento la latencia total frente a Azure Translator.
 
 #### Datos de referencia (produccion real)
 

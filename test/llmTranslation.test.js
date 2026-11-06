@@ -13,26 +13,35 @@ function stubModule(modulePath, exports) {
   };
 }
 
-// Respuestas que dará el modelo, en orden; cuando se acaban, repite la última
-const state = { replies: [], calls: 0, azureCalls: 0, events: [] };
+// Respuestas que dará el modelo, en orden; cuando se acaban, repite la última.
+// Una respuesta 'echo' devuelve tal cual lo que se le pidió traducir.
+const state = { replies: [], calls: 0, azureCalls: 0, events: [], azureFails: false };
 
 stubModule('../services/aiUtils', {
-  callAiWithFailover: async (requestBody) => {
+  callAiWithFailover: async (requestBody, timezone, model, retryCount, requestData, options) => {
     state.calls += 1;
     state.lastRequest = requestBody;
+    state.lastOptions = options;
     const reply = state.replies.length > 1 ? state.replies.shift() : state.replies[0];
     if (reply instanceof Error) throw reply;
+    const content = reply === 'echo'
+      ? requestBody.messages[1].content
+      : (typeof reply === 'string' ? reply : JSON.stringify(reply));
     return {
       data: {
         usage: { prompt_tokens: 100, completion_tokens: 200 },
-        choices: [{ message: { content: typeof reply === 'string' ? reply : JSON.stringify(reply) } }]
+        choices: [{ message: { content } }]
       }
     };
   },
   translateInvertWithRetry: async (text, lang) => {
     state.azureCalls += 1;
+    if (state.azureFails) throw new Error('Azure Translator down');
     return `[azure:${lang}] ${text}`;
-  }
+  },
+  extractProviderError: (error) => (error.response?.data?.error
+    ? { providerErrorCode: String(error.response.data.error.code) }
+    : {})
 });
 stubModule('../services/insights', {
   trackEvent: (name, properties) => state.events.push({ name, properties }),
@@ -63,12 +72,19 @@ const SPANISH = {
   symptoms_in_common: ['Visión borrosa de cerca', 'Fatiga ocular'],
   symptoms_not_in_common: []
 };
+const HINDI = {
+  diagnosis: 'समंजन अपर्याप्तता',
+  description: 'पास की चीज़ों पर ध्यान केंद्रित करने की क्षमता में कमी।',
+  symptoms_in_common: ['पास की धुंधली दृष्टि', 'आँखों में थकान'],
+  symptoms_not_in_common: []
+};
 
 function reset(replies) {
   state.replies = replies;
   state.calls = 0;
   state.azureCalls = 0;
   state.events = [];
+  state.azureFails = false;
 }
 
 test('a translation with the same shape is accepted, and an empty list may come back without its key', () => {
@@ -85,13 +101,36 @@ test('a translation with other symptoms, an empty text or another script is reje
   assert.equal(readDiagnosis(SOURCE, null, 'es'), null);
 });
 
-test('the script check lets gene symbols and Greek letters through in every language', () => {
+test('the English answer returned untranslated is rejected, but a name that stays the same is fine', () => {
+  assert.equal(readDiagnosis(SOURCE, SOURCE, 'es'), null);
+  assert.equal(readDiagnosis(SOURCE, SOURCE, 'hi'), null);
+  const cadasil = { ...SOURCE, diagnosis: 'CADASIL' };
+  assert.ok(readDiagnosis(cadasil, { ...SPANISH, diagnosis: 'CADASIL' }, 'es'));
+  assert.equal(readTexts(['Do you smoke every day?'], { 1: 'Do you smoke every day?' }, 'es'), null);
+});
+
+test('the script check lets gene symbols, Greek letters and shared signs through in every language', () => {
   assert.equal(hasForeignLetters(['RPGRIP1 से संबंधित लेबर जन्मजात अंधता', 'β-थैलेसीमिया'], 'hi'), false);
   assert.equal(hasForeignLetters(['ضمور المخيخ'], 'bn'), true);
   assert.equal(hasForeignLetters(['Атрофия мозжечка'], 'ru'), false);
   assert.equal(hasForeignLetters(['Атрофия mózgu'], 'pl'), true);
+  // ー (japonés), µ (micro), ʻ (uzbeko) y el tatweel árabe son letras de escritura Common
+  assert.equal(hasForeignLetters(['アレルギー性鼻炎', 'パーキンソン病'], 'ja'), false);
+  assert.equal(hasForeignLetters(['Creatinina 120 µmol/L'], 'es'), false);
+  assert.equal(hasForeignLetters(['Oʻzbekiston'], 'uz'), false);
+  assert.equal(hasForeignLetters(['مـرض'], 'ar'), false);
   // Un idioma sin escritura conocida no se comprueba
   assert.equal(hasForeignLetters(['texto'], 'xx-unknown'), false);
+});
+
+test('HTML answers keep their tags', () => {
+  const source = ['<p><strong>Treatment</strong></p><ul><li>Rest</li></ul>'];
+  assert.deepEqual(readTexts(source, { 1: '<p><strong>Tratamiento</strong></p><ul><li>Reposo</li></ul>' }, 'es'),
+    ['<p><strong>Tratamiento</strong></p><ul><li>Reposo</li></ul>']);
+  assert.equal(readTexts(source, { 1: '<p>Tratamiento</p><ul><li>Reposo</li></ul>' }, 'es'), null);
+  // Un «<» del texto que no abre una etiqueta puede cambiar al traducirse
+  assert.deepEqual(readTexts(['<p>Ferritin <normal range</p>'], { 1: '<p>Ferritina < rango normal</p>' }, 'es'),
+    ['<p>Ferritina < rango normal</p>']);
 });
 
 test('texts keep their [ANON-N] tags', () => {
@@ -102,12 +141,14 @@ test('texts keep their [ANON-N] tags', () => {
   assert.equal(readTexts(sources, { 1: 'El paciente [ANON-1] refiere dolor.' }, 'es'), null);
 });
 
-test('diagnoses are translated one call each, and the cost comes from the tokens', async () => {
+test('diagnoses are translated one call each, with a deadline, quietly, and the cost comes from the tokens', async () => {
   reset([SPANISH]);
+  const before = Date.now();
   const result = await translateDiagnoses([SOURCE, SOURCE], 'es', { timezone: 'Europe/Madrid' });
   assert.equal(state.calls, 2);
   assert.equal(state.azureCalls, 0);
-  assert.deepEqual(result.items, [SPANISH, SPANISH]);
+  const withName = { ...SPANISH, diagnosis_en: 'Accommodative insufficiency' };
+  assert.deepEqual(result.items, [withName, withName]);
   assert.equal(result.fallbacks, 0);
   assert.equal(result.promptTokens, 200);
   assert.equal(result.completionTokens, 400);
@@ -115,7 +156,29 @@ test('diagnoses are translated one call each, and the cost comes from the tokens
   assert.equal(state.lastRequest.reasoning_effort, 'none');
   assert.deepEqual(state.lastRequest.response_format, { type: 'json_object' });
   assert.match(state.lastRequest.messages[0].content, /from English to Spanish/);
-  assert.deepEqual(costStages(result, 'reverse_diseases').map((stage) => stage.model), ['gpt61terra']);
+  // El plazo llega a callAiWithFailover, que corta la petición; quiet evita excepciones en Insights
+  assert.equal(state.lastOptions.quiet, true);
+  assert.ok(state.lastOptions.deadline > before && state.lastOptions.deadline <= Date.now() + 15000);
+  const stages = costStages(result, 'reverse_diseases');
+  assert.deepEqual(stages.map((stage) => stage.model), ['gpt61terra']);
+  assert.equal(stages[0].success, true);
+});
+
+test('every translated diagnosis carries its English name, except when it is the same', async () => {
+  reset([HINDI]);
+  const translated = await translateDiagnoses([SOURCE], 'hi');
+  assert.equal(translated.items[0].diagnosis_en, 'Accommodative insufficiency');
+
+  reset([{ ...HINDI, diagnosis: 'CADASIL' }]);
+  const same = await translateDiagnoses([{ ...SOURCE, diagnosis: 'CADASIL' }], 'hi');
+  assert.equal(same.items[0].diagnosis_en, undefined);
+
+  // También en castellano: el cliente lo usa para pedir más información en inglés
+  // (solo lo muestra si showsEnglishName)
+  reset([SPANISH]);
+  const spanish = await translateDiagnoses([SOURCE], 'es');
+  assert.equal(spanish.items[0].diagnosis_en, 'Accommodative insufficiency');
+  assert.equal(showsEnglishName('es'), false);
 });
 
 test('a wrong answer is retried once and then that diagnosis goes to Azure', async () => {
@@ -126,11 +189,24 @@ test('a wrong answer is retried once and then that diagnosis goes to Azure', asy
   assert.equal(result.items[0].diagnosis, '[azure:es] Accommodative insufficiency');
   assert.deepEqual(result.items[0].symptoms_not_in_common, []);
   assert.ok(result.azureChars > 0);
-  assert.deepEqual(costStages(result, 'reverse_diseases').map((stage) => stage.model), ['gpt61terra', 'translation_service']);
-  assert.equal(state.events[0].name, 'LlmTranslationFallback');
-  assert.equal(state.events[0].properties.reason, 'invalid_output');
-  assert.equal(state.events[0].properties.problem, 'list_length');
-  assert.equal(state.events[0].properties.attempts, '2');
+  const stages = costStages(result, 'reverse_diseases');
+  assert.deepEqual(stages.map((stage) => stage.model), ['gpt61terra', 'translation_service']);
+  // El tiempo se reparte entre las dos etapas, sin contarlo dos veces
+  assert.equal(stages[0].duration + stages[1].duration, result.durationMs);
+  assert.equal(stages[0].success, false);
+  const event = state.events[0];
+  assert.equal(event.name, 'LlmTranslationFallback');
+  assert.equal(event.properties.reason, 'invalid_output');
+  assert.equal(event.properties.problem, 'list_length,list_length');
+  assert.equal(event.properties.attempts, 2);
+});
+
+test('an untranslated echo goes to Azure too', async () => {
+  reset(['echo']);
+  const result = await translateDiagnoses([SOURCE], 'hi');
+  assert.equal(result.fallbacks, 1);
+  assert.equal(state.events[0].properties.problem, 'untranslated,untranslated');
+  assert.equal(result.items[0].diagnosis, '[azure:hi] Accommodative insufficiency');
 });
 
 test('a failed call goes straight to Azure, with the cause in the event', async () => {
@@ -147,6 +223,12 @@ test('a failed call goes straight to Azure, with the cause in the event', async 
   assert.equal(event.statusCode, '400');
   assert.equal(event.providerErrorCode, 'content_filter');
   assert.match(event.errorMessage, /status code 400/);
+
+  // El plazo cortado por axios o por callAiWithFailover cuenta como timeout
+  reset([Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' })]);
+  await translateTexts(['No fever.'], 'es');
+  assert.equal(state.events[0].properties.reason, 'timeout');
+  assert.equal(state.events[0].properties.statusCode, 'network');
 });
 
 test('broken JSON is asked again before going to Azure', async () => {
@@ -155,7 +237,7 @@ test('broken JSON is asked again before going to Azure', async () => {
   assert.deepEqual(broken.texts, ['[azure:es] No fever.']);
   assert.equal(state.calls, 2);
   assert.equal(state.events[0].properties.reason, 'invalid_output');
-  assert.equal(state.events[0].properties.problem, 'invalid_json');
+  assert.equal(state.events[0].properties.problem, 'invalid_json,invalid_json');
 
   reset(['{"1": "Sin fie', { 1: 'Sin fiebre.' }]);
   const second = await translateTexts(['No fever.'], 'es');
@@ -163,10 +245,34 @@ test('broken JSON is asked again before going to Azure', async () => {
   assert.equal(state.events.length, 0);
 });
 
+test('a long text gets a longer deadline than a diagnosis', async () => {
+  reset([{ 1: 'Texto largo traducido.' }]);
+  const before = Date.now();
+  await translateTexts(['word '.repeat(1000)], 'es');
+  assert.ok(state.lastOptions.deadline - before > 20000);
+  assert.ok(state.lastOptions.deadline - before <= 45000);
+});
+
+test('if Azure also fails, the error carries what the model already cost', async () => {
+  reset([{ ...SPANISH, symptoms_in_common: ['solo uno'] }]);
+  state.azureFails = true;
+  // Dos diagnósticos, dos intentos cada uno: las 4 llamadas cuentan, también las del
+  // diagnóstico que seguía en marcha cuando el otro falló
+  await assert.rejects(translateDiagnoses([SOURCE, SOURCE], 'es'), (error) => {
+    assert.equal(error.message, 'Azure Translator down');
+    assert.equal(state.calls, 4);
+    assert.equal(error.translationResult.promptTokens, 400);
+    assert.ok(error.translationResult.llmCost > 0);
+    return true;
+  });
+});
+
 test('languages Azure cannot target and English are left as they are', async () => {
   reset([SPANISH]);
   assert.equal(needsTranslation('hi-Latn'), false);
   assert.equal(needsTranslation('en'), false);
+  assert.equal(needsTranslation('en-US'), false);
+  assert.equal(needsTranslation(undefined), false);
   assert.equal(needsTranslation('hi'), true);
   const result = await translateDiagnoses([SOURCE], 'hi-Latn');
   assert.deepEqual(result.items, [SOURCE]);
@@ -192,9 +298,20 @@ test('codes with a capitalized script, such as zh-Hans, are translated', () => {
   assert.equal(hasForeignLetters(['急性阑尾炎'], 'zh-Hans'), false);
 });
 
-test("Azure's Kurdish (ku) is Central Kurdish, in Arabic script", () => {
+test('the prompt names the language as Azure would translate it', () => {
+  assert.equal(languageName('es'), 'Spanish');
+  assert.equal(languageName('zh-Hans'), 'Simplified Chinese');
+  assert.equal(languageName('zh'), 'Simplified Chinese');
+  assert.equal(languageName('pt_br'), 'Brazilian Portuguese');
+  // Intl no conoce estos códigos de Azure: se usa el nombre de su tabla
+  assert.equal(languageName('yua'), 'Yucatec Maya');
+  assert.equal(languageName('hne'), 'Chhattisgarhi');
+  // Azure escribe el tártaro en latino y el kurdo central (ku) en árabe
+  assert.equal(languageName('tt'), 'Tatar (Latin script)');
+  assert.equal(hasForeignLetters(['Yuqarı sulış yulları infektsiyäse'], 'tt'), false);
   assert.equal(languageName('ku'), 'Central Kurdish (Sorani)');
   assert.equal(hasForeignLetters(['هەوکردنی ئاپێندیکس'], 'ku'), false);
+  assert.equal(languageName('kmr'), 'Northern Kurdish (Kurmanji)');
 });
 
 test('the cost record accepts gpt61terra as the model of a stage', () => {
@@ -211,10 +328,4 @@ test('the cost record accepts gpt61terra as the model of a stage', () => {
   const error = record.validateSync();
   assert.equal(error?.errors?.['stages.0.model'], undefined);
   assert.equal(error?.errors?.['stages.1.model'], undefined);
-});
-
-test('the prompt names the language in English', () => {
-  assert.equal(languageName('es'), 'Spanish');
-  assert.equal(languageName('zh-Hans'), 'Simplified Chinese');
-  assert.equal(languageName('not a code'), 'not a code');
 });

@@ -6,21 +6,26 @@
 // dejó algún error crítico en el 81 % de las respuestas: «Accommodative
 // insufficiency» salía «Suficiencia acomodativa». gpt-6.1-terra, con una llamada
 // por diagnóstico y todas a la vez, lo dejó en el 3 % con material difícil y
-// tarda unos 2,5 s por respuesta. Si el modelo devuelve otra estructura u otro
-// alfabeto se le pide otra vez; si sigue mal, falla o tarda demasiado, esa parte
-// se traduce con Azure como antes.
+// tarda unos 2,5 s por respuesta. Si el modelo devuelve otra estructura, otro
+// alfabeto o el inglés sin traducir se le pide otra vez; si sigue mal, falla o
+// se acaba el plazo, esa parte se traduce con Azure como antes.
 
-const { callAiWithFailover, translateInvertWithRetry } = require('./aiUtils');
+const { callAiWithFailover, translateInvertWithRetry, extractProviderError } = require('./aiUtils');
 const { normalizeTargetLang } = require('./translation');
-const { calculatePrice } = require('./costUtils');
+const { calculatePrice, calculateTranslatorCost } = require('./costUtils');
+const SUPPORTED = require('./translatorSupported.json');
 const insights = require('./insights');
 
 const MODEL = 'gpt61terra';
-// Plazo para todos los intentos de un diagnóstico o de una lista de textos; lo
-// que quede, a Azure. Terra tarda unos 2,5 s (p90 3,5 s).
+// Plazo para todos los intentos de un diagnóstico (Terra tarda unos 2,5 s, p90
+// 3,5 s). Un texto largo tiene más (ver textBudgetMs); lo que quede, a Azure.
 const TRANSLATION_TIMEOUT_MS = 15000;
+const MAX_TRANSLATION_TIMEOUT_MS = 45000;
+const MS_PER_CHAR_OVER_1000 = 6;
+// Otro intento solo si queda al menos esto: con menos se cortaría sin terminar.
+const MIN_RETRY_BUDGET_MS = 5000;
 const LLM_ATTEMPTS = 2;
-const AZURE_USD_PER_CHAR = 10 / 1000000;
+const TIMEOUT_ERROR_CODES = new Set(['ECONNABORTED', 'ETIMEDOUT', 'AI_DEADLINE_EXCEEDED']);
 
 // Idiomas en que se muestra el nombre original en inglés bajo el traducido. En la
 // prueba, el hindi y el árabe fueron los que más errores críticos tuvieron, y en el
@@ -37,19 +42,32 @@ const SCRIPTS = {
   Grek: ['Greek'], Hebr: ['Hebrew'], Thai: ['Thai'], Taml: ['Tamil'], Telu: ['Telugu'],
   Gujr: ['Gujarati'], Guru: ['Gurmukhi'], Knda: ['Kannada'], Mlym: ['Malayalam'], Orya: ['Oriya'],
   Sinh: ['Sinhala'], Geor: ['Georgian'], Armn: ['Armenian'], Ethi: ['Ethiopic'], Khmr: ['Khmer'],
-  Laoo: ['Lao'], Mymr: ['Myanmar']
+  Laoo: ['Lao'], Mymr: ['Myanmar'], Mtei: ['Meetei_Mayek']
 };
 
-// Códigos de Azure que Intl interpreta de otra forma: el 'ku' de Azure es kurdo
-// central (sorani), en alfabeto árabe, e Intl lo toma por kurmanji, en latino.
+// Códigos de Azure (translatorSupported.json) que Intl nombra o escribe de otra
+// forma. El nombre va al prompt y la escritura a la comprobación de alfabeto, para
+// que el modelo y el respaldo de Azure den la misma variante.
 const LANGUAGE_OVERRIDES = {
-  ku: { name: 'Central Kurdish (Sorani)', script: 'Arab' }
+  ku: { name: 'Central Kurdish (Sorani)', script: 'Arab' },
+  kmr: { name: 'Northern Kurdish (Kurmanji)' },
+  pt: { name: 'Brazilian Portuguese' },
+  tt: { name: 'Tatar (Latin script)', script: 'Latn' },
+  mni: { name: 'Manipuri (Meitei Mayek script)', script: 'Mtei' }
 };
+
+const DISPLAY_NAMES = new Intl.DisplayNames(['en'], { type: 'language', fallback: 'none' });
 
 const LIST_FIELDS = ['symptoms_in_common', 'symptoms_not_in_common'];
 
 function baseLanguage(lang) {
   return String(lang || '').trim().toLowerCase().split('-')[0];
+}
+
+// Lenguas que Azure no admite como destino (p. ej. hi-Latn) siguen recibiendo el
+// inglés, como antes: no hay respaldo con el que comparar.
+function needsTranslation(lang) {
+  return normalizeTargetLang(lang) !== 'en';
 }
 
 // Solo si la respuesta se traduce: hi-Latn o bn-Latn se quedan en inglés y el
@@ -58,30 +76,39 @@ function showsEnglishName(lang) {
   return ENGLISH_NAME_LANGS.has(baseLanguage(lang)) && needsTranslation(lang);
 }
 
+// El nombre del idioma en inglés para el prompt, del código que usará Azure si
+// hace falta el respaldo (pt_br -> pt, zh -> zh-Hans). Si Intl no lo conoce (hne,
+// otq, yua), el de la tabla de Azure.
 function languageName(lang) {
-  const override = LANGUAGE_OVERRIDES[String(lang || '').toLowerCase()];
-  if (override) return override.name;
+  const code = normalizeTargetLang(lang);
+  const override = LANGUAGE_OVERRIDES[code.toLowerCase()];
+  if (override?.name) return override.name;
   try {
-    return new Intl.DisplayNames(['en'], { type: 'language' }).of(lang) || lang;
+    const name = DISPLAY_NAMES.of(code);
+    if (name) return name;
   } catch {
-    return lang;
+    // Código que Intl no entiende: se usa la tabla de Azure
   }
+  return SUPPORTED[code] || code;
 }
 
 // Una letra de otro alfabeto delata una traducción rota: en la prueba salieron
 // síntomas en polaco convertidos en «و» y frases en árabe dentro del bengalí.
-// El latino (genes, siglas) y el griego (α, β) valen en todos los idiomas.
+// Valen en todos los idiomas el latino (genes, siglas), el griego (α, β) y las
+// letras de escritura Common o Inherited (µ, ʻ, ʼ). Se usa Script_Extensions
+// porque ー (japonés) o el tatweel árabe son Common pero propios de una escritura.
 function foreignLetterPattern(lang) {
-  let script = LANGUAGE_OVERRIDES[String(lang || '').toLowerCase()]?.script;
+  const code = normalizeTargetLang(lang);
+  let script = LANGUAGE_OVERRIDES[code.toLowerCase()]?.script;
   try {
-    script = script || new Intl.Locale(lang).maximize().script;
+    script = script || new Intl.Locale(code).maximize().script;
   } catch {
     return null;
   }
   const own = SCRIPTS[script];
   if (!own) return null;
-  const allowed = ['Latin', 'Greek', ...own].map((name) => `\\p{Script=${name}}`).join('');
-  return new RegExp(`(?=\\p{L})[^${allowed}]`, 'u');
+  const allowed = ['Latin', 'Greek', ...own].map((name) => `\\p{scx=${name}}`).join('');
+  return new RegExp(`(?=\\p{L})[^${allowed}\\p{Script=Common}\\p{Script=Inherited}]`, 'u');
 }
 
 function hasForeignLetters(texts, lang) {
@@ -93,14 +120,35 @@ function anonTags(text) {
   return (String(text || '').match(/\[ANON-\d+\]/g) || []).sort().join(',');
 }
 
+// Las respuestas de /api/disease/info son HTML: la traducción debe conservar las
+// mismas etiquetas para que se pinten igual. Solo cuenta lo que se cierra con «>»:
+// un «<normal» o un «x<y» del texto no es una etiqueta.
+function htmlTags(text) {
+  return Array.from(String(text || '').matchAll(/<(\/?)([a-z][a-z0-9]*)\b[^<>]*>/gi),
+    ([, slash, name]) => `${slash}${name.toLowerCase()}`).sort().join(',');
+}
+
+function sameText(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+// El inglés devuelto tal cual no es una traducción. Basta con que cambie un texto:
+// nombres como «CADASIL» o «MELAS» se quedan igual, pero una frase no.
+function untranslated(sources, outputs) {
+  const words = (text) => (String(text || '').match(/\p{L}+/gu) || []).length;
+  return sources.some((source) => words(source) >= 3) && outputs.every((out, i) => sameText(out, sources[i]));
+}
+
 // Qué falla en una traducción, o null si está bien: cada texto es una cadena,
-// no vacía si el original no lo era, con las etiquetas [ANON-N] del original y
-// en el alfabeto del idioma. El motivo va a la telemetría del respaldo.
+// no vacía si el original no lo era, con las etiquetas [ANON-N] del original, en
+// el alfabeto del idioma y traducida. El motivo va a la telemetría del respaldo.
 function textsProblem(sources, outputs, lang) {
-  if (outputs.length !== sources.length || outputs.some((out) => typeof out !== 'string')) return 'missing_text';
+  if (outputs.some((out) => typeof out !== 'string')) return 'missing_text';
   if (outputs.some((out, i) => out.trim() === '' && String(sources[i] || '').trim())) return 'empty_text';
   if (outputs.some((out, i) => anonTags(out) !== anonTags(sources[i]))) return 'anon_tags';
+  if (outputs.some((out, i) => htmlTags(out) !== htmlTags(sources[i]))) return 'html_tags';
   if (hasForeignLetters(outputs, lang)) return 'foreign_script';
+  if (untranslated(sources, outputs)) return 'untranslated';
   return null;
 }
 
@@ -112,7 +160,8 @@ function diagnosisPrompt(language) {
 
 function textPrompt(language) {
   return `Translate the JSON values from English to ${language}. Use the standard ${language} medical terms. ` +
-    'Keep the JSON keys, the line breaks, the formatting and any [ANON-N] tags exactly as they are. Return only JSON.';
+    'Keep the JSON keys, the line breaks, the formatting (HTML tags included) and any [ANON-N] tags exactly as ' +
+    'they are. Return only JSON.';
 }
 
 function diagnosisSource(item) {
@@ -157,22 +206,12 @@ function readTexts(sources, out, lang) {
   return checkTexts(sources, out, lang).value || null;
 }
 
-function withTimeout(promise, ms) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      const error = new Error(`LLM translation timed out after ${ms} ms`);
-      error.code = 'LLM_TRANSLATION_TIMEOUT';
-      reject(error);
-    }, ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
 // La respuesta del modelo ya leída como JSON, o { problem: 'invalid_json' }. Los
-// errores de la llamada (HTTP, timeout) se lanzan.
-async function callModel(systemPrompt, payload, ctx, totals, timeoutMs) {
-  const response = await withTimeout(callAiWithFailover(
+// errores de la llamada (HTTP, plazo) se lanzan. El plazo corta la petición en
+// callAiWithFailover, y quiet evita registrar como excepción un fallo que aquí
+// tiene respaldo.
+async function callModel(systemPrompt, payload, ctx, totals, deadline) {
+  const response = await callAiWithFailover(
     {
       messages: [
         { role: 'developer', content: systemPrompt },
@@ -184,8 +223,9 @@ async function callModel(systemPrompt, payload, ctx, totals, timeoutMs) {
     ctx.timezone,
     MODEL,
     0,
-    ctx.requestData
-  ), timeoutMs);
+    ctx.requestData,
+    { deadline, quiet: true }
+  );
   const usage = response?.data?.usage;
   if (usage) {
     totals.promptTokens += usage.prompt_tokens || 0;
@@ -200,10 +240,10 @@ async function callModel(systemPrompt, payload, ctx, totals, timeoutMs) {
 
 function describeError(error) {
   return {
-    reason: error.code === 'LLM_TRANSLATION_TIMEOUT' ? 'timeout' : 'error',
+    reason: TIMEOUT_ERROR_CODES.has(error.code) ? 'timeout' : 'error',
     errorMessage: String(error.message || '').slice(0, 300),
-    statusCode: String(error.response?.status || 'none'),
-    providerErrorCode: String(error.response?.data?.error?.code || 'none')
+    statusCode: String(error.response?.status || 'network'),
+    ...extractProviderError(error)
   };
 }
 
@@ -213,16 +253,12 @@ function safelyTrackFallback(kind, lang, failure, attempts, ctx) {
   try {
     insights.trackEvent('LlmTranslationFallback', {
       kind,
-      lang: String(lang),
-      reason: failure.reason,
-      problem: String(failure.problem || 'none'),
-      errorMessage: String(failure.errorMessage || 'none'),
-      statusCode: String(failure.statusCode || 'none'),
-      providerErrorCode: String(failure.providerErrorCode || 'none'),
-      attempts: String(attempts),
+      lang,
+      ...failure,
+      attempts,
       model: MODEL,
-      myuuid: String(ctx.requestData?.myuuid || 'unknown'),
-      tenantId: String(ctx.requestData?.tenantId || 'unknown')
+      myuuid: ctx.requestData?.myuuid || 'unknown',
+      tenantId: ctx.requestData?.tenantId || 'unknown'
     });
   } catch (telemetryError) {
     console.error('No se pudo registrar LlmTranslationFallback:', telemetryError.message);
@@ -230,27 +266,33 @@ function safelyTrackFallback(kind, lang, failure, attempts, ctx) {
 }
 
 // Se repite solo si el modelo contestó algo que no vale (otra estructura, otro
-// alfabeto, JSON roto). Un error de la llamada va directo a Azure:
-// callAiWithFailover ya probó las otras regiones, y repetir no arregla un 400
-// (filtro de contenido) ni un timeout. Todos los intentos comparten un plazo.
-async function translateWithFallback(kind, lang, ctx, totals, tryModel, useAzure) {
-  const deadline = Date.now() + TRANSLATION_TIMEOUT_MS;
-  let failure = { reason: 'timeout' };
+// alfabeto, inglés sin traducir, JSON roto) y queda plazo para otra llamada. Un
+// error de la llamada va directo a Azure: callAiWithFailover ya probó las otras
+// regiones, y repetir no arregla un 400 (filtro de contenido) ni un timeout.
+async function translateWithFallback(kind, lang, ctx, totals, tryModel, useAzure, budgetMs = TRANSLATION_TIMEOUT_MS) {
+  const deadline = Date.now() + budgetMs;
+  const problems = [];
+  let failure = { reason: 'invalid_output' };
   let attempts = 0;
-  while (attempts < LLM_ATTEMPTS && deadline - Date.now() > 0) {
+  while (attempts < LLM_ATTEMPTS && (attempts === 0 || deadline - Date.now() >= MIN_RETRY_BUDGET_MS)) {
     attempts += 1;
     try {
-      const { value, problem } = await tryModel(deadline - Date.now());
+      const { value, problem } = await tryModel(deadline);
       if (value) return value;
-      failure = { reason: 'invalid_output', problem };
+      problems.push(problem);
     } catch (error) {
       failure = describeError(error);
       break;
     }
   }
   totals.fallbacks += 1;
-  safelyTrackFallback(kind, lang, failure, attempts, ctx);
-  return useAzure();
+  safelyTrackFallback(kind, lang, problems.length ? { ...failure, problem: problems.join(',') } : failure, attempts, ctx);
+  const azureStartedAt = Date.now();
+  try {
+    return await useAzure();
+  } finally {
+    totals.azureMs = Math.max(totals.azureMs, Date.now() - azureStartedAt);
+  }
 }
 
 async function azureText(text, lang, totals) {
@@ -270,14 +312,15 @@ async function azureDiagnosis(source, lang, totals) {
 }
 
 function newTotals() {
-  return { promptTokens: 0, completionTokens: 0, azureChars: 0, fallbacks: 0, startedAt: Date.now() };
+  return { promptTokens: 0, completionTokens: 0, azureChars: 0, azureMs: 0, fallbacks: 0, startedAt: Date.now() };
 }
 
 function summarize(totals) {
   const llmCost = totals.promptTokens || totals.completionTokens
     ? calculatePrice({ prompt_tokens: totals.promptTokens, completion_tokens: totals.completionTokens }, MODEL).totalCost
     : 0;
-  const azureCost = totals.azureChars * AZURE_USD_PER_CHAR;
+  const azureCost = calculateTranslatorCost(totals.azureChars);
+  const durationMs = Date.now() - totals.startedAt;
   return {
     model: MODEL,
     promptTokens: totals.promptTokens,
@@ -285,14 +328,16 @@ function summarize(totals) {
     llmCost,
     azureChars: totals.azureChars,
     azureCost,
+    azureMs: Math.min(totals.azureMs, durationMs),
     cost: llmCost + azureCost,
     fallbacks: totals.fallbacks,
-    durationMs: Date.now() - totals.startedAt
+    durationMs
   };
 }
 
 // Etapas de coste con el formato de CostTrackingService: una para el modelo y
-// otra para Azure si hubo respaldo.
+// otra para Azure si hubo respaldo. Se reparten el tiempo (suman la duración del
+// paso), y la del modelo no cuenta como correcta si algo tuvo que ir a Azure.
 function costStages(result, name) {
   const stages = [];
   if (result.promptTokens || result.completionTokens) {
@@ -305,8 +350,8 @@ function costStages(result, name) {
         total: result.promptTokens + result.completionTokens
       },
       model: result.model,
-      duration: result.durationMs,
-      success: true
+      duration: result.durationMs - result.azureMs,
+      success: result.fallbacks === 0
     });
   }
   if (result.azureChars > 0) {
@@ -315,22 +360,33 @@ function costStages(result, name) {
       cost: result.azureCost,
       tokens: { input: result.azureChars, output: result.azureChars, total: result.azureChars },
       model: 'translation_service',
-      duration: result.durationMs,
+      duration: result.azureMs,
       success: true
     });
   }
   return stages;
 }
 
-// Lenguas que Azure no admite como destino (p. ej. hi-Latn) siguen recibiendo el
-// inglés, como antes: no hay respaldo con el que comparar.
-function needsTranslation(lang) {
-  return Boolean(lang) && baseLanguage(lang) !== 'en' && normalizeTargetLang(lang) !== 'en';
+// Un texto largo (la descripción actualizada del seguimiento llega a 5000
+// caracteres) necesita más tiempo de generación que un diagnóstico.
+function textBudgetMs(texts) {
+  const chars = texts.reduce((sum, text) => sum + String(text || '').length, 0);
+  return Math.min(MAX_TRANSLATION_TIMEOUT_MS,
+    TRANSLATION_TIMEOUT_MS + Math.max(0, chars - 1000) * MS_PER_CHAR_OVER_1000);
+}
+
+// Si la traducción acaba en error (el respaldo de Azure también falla), el coste
+// ya gastado viaja en el error para que quien llama pueda registrarlo.
+function withPartialResult(error, totals) {
+  error.translationResult = summarize(totals);
+  return error;
 }
 
 /**
  * Traduce los diagnósticos de una respuesta, cada uno en su propia llamada y
- * todos a la vez.
+ * todos a la vez. Cada uno lleva diagnosis_en con el nombre original, salvo que
+ * coincida con el traducido: el cliente lo usa para pedir más información o más
+ * diagnósticos en inglés, y lo muestra si showsEnglishName(lang).
  * @param {Array<{diagnosis, description, symptoms_in_common, symptoms_not_in_common}>} diagnoses
  * @param {string} lang - idioma detectado del usuario
  * @param {{timezone?: string, requestData?: object}} ctx
@@ -343,18 +399,27 @@ async function translateDiagnoses(diagnoses, lang, ctx = {}) {
     return { items: diagnoses, ...summarize(totals) };
   }
   const prompt = diagnosisPrompt(languageName(lang));
-  const items = await Promise.all(diagnoses.map((item) => {
+  // allSettled: si un diagnóstico falla del todo, se espera a los demás para que
+  // el coste parcial incluya todas las llamadas ya pagadas
+  const settled = await Promise.allSettled(diagnoses.map(async (item) => {
     const source = diagnosisSource(item);
-    return translateWithFallback(
+    const translated = await translateWithFallback(
       'diagnosis', lang, ctx, totals,
-      async (timeoutMs) => {
-        const { data, problem } = await callModel(prompt, source, ctx, totals, timeoutMs);
+      async (deadline) => {
+        const { data, problem } = await callModel(prompt, source, ctx, totals, deadline);
         return problem ? { problem } : checkDiagnosis(source, data, lang);
       },
       () => azureDiagnosis(source, lang, totals)
     );
+    return sameText(translated.diagnosis, source.diagnosis)
+      ? translated
+      : { ...translated, diagnosis_en: source.diagnosis };
   }));
-  return { items, ...summarize(totals) };
+  const failed = settled.find((outcome) => outcome.status === 'rejected');
+  if (failed) {
+    throw withPartialResult(failed.reason, totals);
+  }
+  return { items: settled.map((outcome) => outcome.value), ...summarize(totals) };
 }
 
 /**
@@ -371,15 +436,21 @@ async function translateTexts(texts, lang, ctx = {}) {
     return { texts, ...summarize(totals) };
   }
   const payload = Object.fromEntries(texts.map((text, i) => [String(i + 1), text]));
-  const translated = await translateWithFallback(
-    'text', lang, ctx, totals,
-    async (timeoutMs) => {
-      const { data, problem } = await callModel(textPrompt(languageName(lang)), payload, ctx, totals, timeoutMs);
-      return problem ? { problem } : checkTexts(texts, data, lang);
-    },
-    () => Promise.all(texts.map((text) => azureText(text, lang, totals)))
-  );
-  return { texts: translated, ...summarize(totals) };
+  const prompt = textPrompt(languageName(lang));
+  try {
+    const translated = await translateWithFallback(
+      'text', lang, ctx, totals,
+      async (deadline) => {
+        const { data, problem } = await callModel(prompt, payload, ctx, totals, deadline);
+        return problem ? { problem } : checkTexts(texts, data, lang);
+      },
+      () => Promise.all(texts.map((text) => azureText(text, lang, totals))),
+      textBudgetMs(texts)
+    );
+    return { texts: translated, ...summarize(totals) };
+  } catch (error) {
+    throw withPartialResult(error, totals);
+  }
 }
 
 module.exports = {
@@ -391,6 +462,5 @@ module.exports = {
   hasForeignLetters,
   readDiagnosis,
   readTexts,
-  languageName,
-  MODEL
+  languageName
 };

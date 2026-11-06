@@ -234,8 +234,8 @@ async function summarize(req, res) {
     // 3. Llamar a AI con failover
     let aiStartTime = Date.now();
     const dataRequest = {
-      tenantId: req.body.tenantId,
-      subscriptionId: req.body.subscriptionId,
+      tenantId: tenantId,
+      subscriptionId: subscriptionId,
       myuuid: req.body.myuuid
     };
 

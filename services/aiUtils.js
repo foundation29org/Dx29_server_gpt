@@ -306,7 +306,7 @@ const endpointsMap = {
     ],
     africa: [
       buildAzureOpenAIEndpoint('us1', 'gpt-5.4-mini'),
-      buildAzureOpenAIEndpoint('as2', 'gpt-5-mini')
+      buildAzureOpenAIEndpoint('as2', 'gpt-5.4-mini')
     ],
     oceania: [
       buildAzureOpenAIEndpoint('as2', 'gpt-5.4-mini'),
@@ -592,9 +592,31 @@ function safelyTrackError(message, properties) {
   }
 }
 
-async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, _dataRequest = null) {
+// Con plazo (options.deadline), saltar a otra región solo si quedan al menos
+// MIN_FAILOVER_BUDGET_MS: una llamada corta tarda 2-3 s y con menos se cortaría
+// sin terminar. Y la espera antes del salto se limita a MAX_DEADLINE_RETRY_DELAY_MS:
+// el Retry-After es de la región que falló, no de la siguiente.
+const MIN_FAILOVER_BUDGET_MS = 3000;
+const MAX_DEADLINE_RETRY_DELAY_MS = 250;
+
+/**
+ * Llama a Azure OpenAI con failover entre regiones.
+ * options.deadline (epoch ms): plazo total para todos los saltos; cada petición
+ *   se corta (timeout de axios) al llegar, sin dejar llamadas abiertas detrás.
+ * options.quiet: quien llama tiene su propio respaldo (p. ej. llmTranslation
+ *   vuelve a Azure Translator), así que el fallo final se registra como evento y
+ *   no como excepción, para no disparar la alerta de errores.
+ */
+async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODEL, retryCount = 0, _dataRequest = null, options = {}) {
   const normalizedModel = normalizeRoutingModel(model);
-  const timeoutMs = config.AZURE_OPENAI_TIMEOUT_MS || 180000;
+  const remainingMs = options.deadline ? options.deadline - Date.now() : Infinity;
+  const timeoutMs = Math.min(config.AZURE_OPENAI_TIMEOUT_MS || 180000, remainingMs);
+  if (timeoutMs <= 0) {
+    const deadlineError = new Error(`Deadline exceeded before calling ${normalizedModel}`);
+    deadlineError.code = 'AI_DEADLINE_EXCEEDED';
+    throw deadlineError;
+  }
+  const trackFinalError = options.quiet ? () => {} : safelyTrackError;
 
   const endpoints = getEndpointsByTimezone(timezone, normalizedModel);
   const endpoint = endpoints[retryCount];
@@ -610,13 +632,13 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
     };
     safelyTrackEvent('AiEndpointConfigurationMissing', properties);
     if (retryCount < endpoints.length - 1) {
-      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, _dataRequest);
+      return callAiWithFailover(requestBody, timezone, normalizedModel, retryCount + 1, _dataRequest, options);
     }
     const configurationError = new Error(
       `No hay endpoints configurados para modelo ${normalizedModel} en región ${timezone}`
     );
     safelyTrackEvent('AiAllEndpointsFailed', properties);
-    safelyTrackError('All AI endpoints failed', properties);
+    trackFinalError('All AI endpoints failed', properties);
     throw configurationError;
   }
 
@@ -638,8 +660,13 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
     const statusCode = error.response?.status;
     const nextEndpoint = endpoints[retryCount + 1];
     const retryableError = isRetryableEndpointError(error);
+    const retryDelayMs = options.deadline
+      ? Math.min(getRetryDelayMs(error, retryCount), MAX_DEADLINE_RETRY_DELAY_MS)
+      : getRetryDelayMs(error, retryCount);
+    const budgetLeftMs = options.deadline ? options.deadline - Date.now() - retryDelayMs : Infinity;
     const shouldRetry = retryableError &&
-      retryCount < endpoints.length - 1;
+      retryCount < endpoints.length - 1 &&
+      budgetLeftMs >= MIN_FAILOVER_BUDGET_MS;
     const properties = buildFailureTelemetry(
       endpoint,
       nextEndpoint,
@@ -652,7 +679,6 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
     );
 
     if (shouldRetry) {
-      const retryDelayMs = getRetryDelayMs(error, retryCount);
       safelyTrackEvent('AiEndpointFallbackUsed', {
         ...properties,
         retryDelayMs: String(retryDelayMs)
@@ -668,16 +694,17 @@ async function callAiWithFailover(requestBody, timezone, model = DEFAULT_AI_MODE
         timezone,
         normalizedModel,
         retryCount + 1,
-        _dataRequest
+        _dataRequest,
+        options
       );
     }
 
     if (retryableError) {
       safelyTrackEvent('AiAllEndpointsFailed', properties);
-      safelyTrackError('All AI endpoints failed', properties);
+      trackFinalError('All AI endpoints failed', properties);
     } else {
       safelyTrackEvent('AiRequestRejected', properties);
-      safelyTrackError('AI request rejected without fallback', properties);
+      trackFinalError('AI request rejected without fallback', properties);
     }
     throw error;
   }

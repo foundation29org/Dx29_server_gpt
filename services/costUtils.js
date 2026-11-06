@@ -155,6 +155,13 @@ function calculateDocumentIntelligenceCost(pages = 0) {
   return parseFloat(totalCost.toFixed(6));
 }
 
+// Azure Translator factura $10 por millón de caracteres.
+const TRANSLATOR_USD_PER_MILLION_CHARS = 10;
+
+function calculateTranslatorCost(chars = 0) {
+  return (Math.max(0, Number(chars) || 0) / 1000000) * TRANSLATOR_USD_PER_MILLION_CHARS;
+}
+
 function formatCost(cost) {
   return `$${cost.toFixed(6)}`; // Siempre en dólares con 6 decimales
 }
@@ -170,6 +177,8 @@ module.exports = {
   calculatePrice,
   calculateTranscriptionPrice,
   calculateDocumentIntelligenceCost,
+  TRANSLATOR_USD_PER_MILLION_CHARS,
+  calculateTranslatorCost,
   formatCost,
   calculateTokens
 }; 

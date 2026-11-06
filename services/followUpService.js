@@ -222,7 +222,8 @@ async function generateFollowUpQuestions(req, res) {
           englishDescription = await translateTextWithRetry(description, detectedLanguage);
           forwardDurationMs += (Date.now() - fwdStart1);
         }
-        if (englishDiseases) {
+        // diseases_en: el cliente ya manda los nombres en inglés (diagnosis_en)
+        if (englishDiseases && sanitizedData.diseases_en !== true) {
           translationChars += (diseases ? diseases.length : 0);
           const fwdStart2 = Date.now();
           englishDiseases = await translateTextWithRetry(diseases, detectedLanguage);
@@ -584,7 +585,7 @@ async function generateFollowUpQuestions(req, res) {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        'Error in processFollowUpAnswers',
+        'Error in generateFollowUpQuestions',
         error.message,
         tenantId,
         subscriptionId
@@ -1251,7 +1252,7 @@ async function generateERQuestions(req, res) {
           message: translationError.message,
           tenantId: tenantId,
           subscriptionId: subscriptionId,
-          operation: 'generateFollowUpQuestions',
+          operation: 'generateERQuestions',
           requestInfo: requestInfo
         });
 
@@ -1267,7 +1268,7 @@ async function generateERQuestions(req, res) {
         message: translationError.message,
         tenantId: tenantId,
         subscriptionId: subscriptionId,
-        operation: 'generateFollowUpQuestions',
+        operation: 'generateERQuestions',
         requestInfo: requestInfo
       });
 
@@ -1545,7 +1546,7 @@ async function generateERQuestions(req, res) {
       let lang = req.body.lang ? req.body.lang : 'en';
       await serviceEmail.sendMailErrorGPTIP(
         lang,
-        'Error in processFollowUpAnswers',
+        'Error in generateERQuestions',
         error.message,
         tenantId,
         subscriptionId

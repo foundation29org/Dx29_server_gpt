@@ -20,7 +20,7 @@ const {
   suspiciousContentErrors
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
-const { translateDiagnoses, showsEnglishName, costStages } = require('./llmTranslation');
+const { translateDiagnoses, costStages, showsEnglishName } = require('./llmTranslation');
 const { calculatePrice, formatCost } = require('./costUtils');
 const {
   loadImageDataUrls,
@@ -199,6 +199,27 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
 
   console.log(`🚀 Iniciando processAIRequestInternal con modelo: ${model}`);
 
+  // La traducción de la respuesta se lanza tras el parseo y se espera después, a la
+  // vez que la anonimización. Fuera del try para que el catch final pueda
+  // registrar su coste si algo falla mientras se traduce.
+  let translationPromise = null;
+  // Una etapa por servicio (gpt61terra y, si hubo respaldo, translation_service):
+  // el esquema de CostTracking solo admite un modelo conocido por etapa. La
+  // duración guardada es la espera que la traducción añadió a la respuesta
+  // (exposedMs), no la de sus llamadas, que corren en paralelo con la
+  // anonimización: scripts/daily-operation-durations.js suma las etapas.
+  const recordTranslationCost = (result, exposedMs) => {
+    if (!result || costTracking.reverse_diseases.stages) return;
+    const stages = costStages(result, 'reverse_diseases');
+    if (!stages.length) return;
+    const scale = result.durationMs > 0 ? Math.min(1, exposedMs / result.durationMs) : 0;
+    costTracking.reverse_diseases = {
+      cost: result.cost,
+      stages: stages.map((stage) => ({ ...stage, duration: Math.round(stage.duration * scale) }))
+    };
+    costTracking.total.cost += result.cost;
+  };
+
   try {
     // 1. Detectar idioma y traducir a inglés si es necesario
     //console.log('data.description', data.description)
@@ -252,7 +273,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
           englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
           forwardTranslationDurationMs += (Date.now() - fwdStart1);
         }
-        if (englishDiseasesList) {
+        // diseases_list_en: el cliente ya manda los nombres en inglés (diagnosis_en)
+        // y traducirlos otra vez podría deformarlos
+        if (englishDiseasesList && data.diseases_list_en !== true) {
           translationChars += (data.diseases_list ? data.diseases_list.length : 0);
           const fwdStart2 = Date.now();
           englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
@@ -1196,6 +1219,15 @@ ${medicalQuestionForModel}
       };
     }
 
+    // La traducción solo necesita la respuesta en inglés, así que empieza ya y corre
+    // a la vez que la anonimización (en serie sumaba ~2,5 s a cada respuesta). El
+    // catch vacío evita un rechazo sin manejar si algo falla antes del await; el
+    // error se trata donde se espera.
+    translationPromise = detectedLanguage !== 'en' && parsedResponse.length > 0
+      ? translateDiagnoses(parsedResponse, detectedLanguage, { timezone: data.timezone, requestData: dataRequest })
+      : null;
+    translationPromise?.catch(() => {});
+
     //vars for anonymization
     let anonymizedResult = {
       hasPersonalInfo: false,
@@ -1297,37 +1329,23 @@ ${medicalQuestionForModel}
       }
     }
 
-    // Traducir la respuesta si es necesario: gpt-6.1-terra, un diagnóstico por
-    // llamada y todos a la vez, con Azure de respaldo (ver llmTranslation.js)
-    if (detectedLanguage !== 'en' && parsedResponse.length > 0) {
+    // Esperar la traducción lanzada tras el parseo: gpt-6.1-terra, un diagnóstico
+    // por llamada y todos a la vez, con Azure de respaldo (ver llmTranslation.js).
+    // translateDiagnoses ya añade diagnosis_en en los idiomas que lo muestran.
+    if (translationPromise) {
+      const waitStartedAt = Date.now();
       try {
         // Esta fase puede durar varios segundos y antes seguía mostrando
         // "Anonymizing" desde el 80 %. Se avisa del último tramo.
         if (userId) {
           await pubsubService.sendProgress(userId, 'finalizing', 'Finalizing diagnosis...', 88);
         }
-        const translated = await translateDiagnoses(parsedResponse, detectedLanguage, {
-          timezone: data.timezone,
-          requestData: dataRequest
-        });
-        // En los idiomas con más errores de traducción, el nombre original en
-        // inglés va también, para mostrarlo bajo el traducido
-        const withEnglishName = showsEnglishName(detectedLanguage);
-        parsedResponse = translated.items.map((item, i) => (withEnglishName
-          ? { ...item, diagnosis_en: parsedResponse[i].diagnosis }
-          : item));
-        const stages = costStages(translated, 'reverse_diseases');
-        if (stages.length) {
-          // Una etapa por servicio (gpt61terra y, si hubo respaldo, translation_service):
-          // el esquema de CostTracking solo admite un modelo conocido por etapa
-          costTracking.reverse_diseases = {
-            cost: translated.cost,
-            duration: translated.durationMs,
-            stages
-          };
-          costTracking.total.cost += translated.cost;
-        }
+        const translated = await translationPromise;
+        parsedResponse = translated.items;
+        recordTranslationCost(translated, Date.now() - waitStartedAt);
       } catch (fallbackError) {
+        // Lo ya gastado en el modelo se registra aunque Azure también haya fallado
+        recordTranslationCost(fallbackError.translationResult, Date.now() - waitStartedAt);
         console.error('Answer translation error:', fallbackError.message);
         insights.error({
           message: 'Answer translation failed (gpt-6.1-terra and Azure Translator)',
@@ -1680,6 +1698,8 @@ ${medicalQuestionForModel}
     const result = {
       result: 'success',
       data: diseasesList,
+      // Si el cliente debe mostrar diagnosis_en bajo el nombre traducido (hindi, árabe...)
+      showEnglishName: showsEnglishName(detectedLanguage),
       anonymization: {
         hasPersonalInfo,
         anonymizedText: anonymizedDescription,
@@ -1694,6 +1714,16 @@ ${medicalQuestionForModel}
     };
     return result;
   } catch (error) {
+    // Si algo falló antes de esperar la traducción (anonimización, guardado...),
+    // su coste se registra con lo que termine en unos segundos, sin retrasar más
+    // la respuesta de error
+    if (translationPromise && !costTracking.reverse_diseases.stages) {
+      const settled = await Promise.race([
+        translationPromise.then((result) => result, (failure) => failure.translationResult),
+        new Promise((resolve) => setTimeout(resolve, 3000, null))
+      ]);
+      recordTranslationCost(settled, 0);
+    }
     // Guardar costos en caso de error (si hay costos calculados)
     if (costTracking && costTracking.total.cost > 0) {
       try {
@@ -1783,6 +1813,9 @@ ${medicalQuestionForModel}
             duration: reverseTranslationDurationMs || 0,
             success: false
           });
+        }
+        if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
+          stages.push(...costTracking.reverse_diseases.stages.map((stage) => ({ ...stage, success: false })));
         }
         if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
           stages.push({

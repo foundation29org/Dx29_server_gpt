@@ -8,7 +8,7 @@ const NORMALIZE = require('./langNormalize.json');
 
 // Los códigos llegan en minúsculas, pero en translatorSupported.json algunos
 // llevan escritura con mayúscula (zh-Hans, sr-Latn, mn-Cyrl): sin esta tabla
-// esos idiomas no se encontraban y la respuesta se quedaba en inglés.
+// esos idiomas no se encontraban como destino y la respuesta se quedaba en inglés.
 const SUPPORTED_BY_LOWERCASE = Object.fromEntries(
   Object.keys(SUPPORTED).map((code) => [code.toLowerCase(), code])
 );
@@ -33,8 +33,10 @@ function normalizeSourceLang(lang) {
   }
 
   // Si después de normalizar sigue sin estar soportado, dejamos que Azure autodetecte
-  // (null => no pondremos &from=)
-  return supportedCode(code);
+  // (null => no pondremos &from=). Aquí no se usa supportedCode: zh-Hans, sr-Latn y
+  // similares siguen con autodetección en la ida, como siempre; solo la vuelta
+  // necesitaba encontrarlos.
+  return SUPPORTED[code] ? code : null;
 }
 
 function normalizeTargetLang(lang) {

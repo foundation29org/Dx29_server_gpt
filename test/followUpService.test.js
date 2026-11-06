@@ -117,6 +117,22 @@ test('image-only hypothesis follow-up works without a description', async () => 
   assert.match(state.prompts[0], /submitted as medical images/);
 });
 
+test('a disease sent in English (diseases_en) is not translated again', async () => {
+  state.aiContent = '["¿Fuma?"]';
+  const res = await call(generateFollowUpQuestions, {
+    ...baseBody,
+    description: '',
+    diseases: 'Giant bullous emphysema',
+    diseases_en: true,
+    mode: 'hypothesis',
+    uploadId: UPLOAD_ID
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.translateCalls, 0);
+  assert.match(state.prompts[0], /Giant bullous emphysema/);
+});
+
 test('follow-up still requires a description without an upload', async () => {
   const res = await call(generateFollowUpQuestions, {
     ...baseBody,
