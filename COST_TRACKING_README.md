@@ -422,11 +422,27 @@ await CostTrackingService.saveDiagnoseCost(data, stages, 'success');
 
 ## Backlog de reevaluacion (coste/latencia)
 
-### Reevaluar traduccion con LLM (pospuesto)
+### Traduccion de vuelta con LLM (adoptada en nov-2026)
 
-- **Estado actual**: no entra en el ambito de la evaluacion actual.
-- **Motivo**: en pruebas internas, traducir con LLM resulto mas barato en algunos casos, pero aumento la latencia total frente a Azure Translator.
-- **Decision vigente**: mantener Azure Translator en produccion hasta nueva evidencia.
+- **Decision vigente**: las respuestas (diagnosticos, preguntas de seguimiento, descripcion actualizada y resumen) se traducen con `gpt-6.1-terra` en `services/llmTranslation.js`: una llamada por diagnostico, todas a la vez, y Azure Translator de respaldo para la parte que falle.
+- **Motivo**: en la prueba del 5/6-nov-2026 (respuestas reales de Sol en 10 idiomas, juez a ciegas), Azure campo a campo dejo algun error critico en el 81 % de las respuestas, frente al 3 % de gpt-6.1-terra con material dificil. Con una llamada por diagnostico en paralelo tarda unos 2,5 s y corre a la vez que la anonimizacion. Coste estimado: unos 56 $/mes frente a unos 176 $/mes de Azure.
+- **Etapas**: `reverse_diseases` y `reverse_translation` llevan una etapa `gpt61terra` (tokens) y, si hubo respaldo, otra `translation_service` (caracteres). Cada respaldo se registra en Application Insights como evento `LlmTranslationFallback`, con el motivo (`problem`, `statusCode`, `providerErrorCode`).
+- El contexto historico de abajo es de cuando se decidio mantener Azure.
+
+### Traduccion de ida con LLM (adoptada en nov-2026)
+
+- **Decision vigente**: lo que escribe el usuario (la descripcion, los diagnosticos previos y, en «mejorar», las preguntas con sus respuestas) se traduce al ingles con `gpt-6.1-terra` (`translateToEnglish` y `translateAnswersToEnglish` en `services/llmTranslation.js`), con Azure Translator de respaldo. En el resumen, solo hasta 8 000 caracteres; un documento mas largo sigue yendo a Azure.
+- **Motivo**: en la prueba del 6-nov-2026 (60 casos reales de urgencias en castellano, casos de la literatura en ruso, hindi y arabe y respuestas cortas de «mejorar»; juez a ciegas), Azure dejo algun error critico en el 47 % de los casos y en el 29 % de los juegos de respuestas; gpt-6.1-terra, en el 1 % y el 0 %. Anade unos 2 s de mediana antes del diagnostico. Coste estimado: unos 45 $/mes frente a unos 67 $/mes de Azure.
+- **Etapas**: `translation` lleva una etapa `gpt61terra` y, si hubo respaldo, otra `translation_service`. En «mejorar» puede haber dos de cada (descripcion y respuestas, que corren a la vez).
+
+### Texto anonimizado en otro idioma (nov-2026)
+
+- Solo se anonimiza el ingles. Si hay datos personales y el usuario escribio en otro idioma, el ingles anonimizado se traduce con `gpt-6.1-terra`, que conserva las marcas [ANON-N]. La etapa es `reverse_anonymization`, con Azure de respaldo. Antes lo hacia Azure.
+- Se probo a anonimizar tambien el texto original y ensenarselo al usuario si tapaba lo mismo que el ingles. Se descarto: varias revisiones encontraron datos que seguian a la vista, como un apellido declinado en una segunda mencion o una fecha tapada solo en parte. No se puede comprobar con garantias que dos anonimizaciones de un LLM en dos idiomas tapen lo mismo.
+
+#### Contexto historico: por que se pospuso (antes de nov-2026)
+
+- En pruebas internas, traducir con LLM resulto mas barato en algunos casos, pero aumento la latencia total frente a Azure Translator.
 
 #### Datos de referencia (produccion real)
 

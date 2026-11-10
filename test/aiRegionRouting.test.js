@@ -41,6 +41,19 @@ test('each model keeps its own region list', () => {
   assert.deepEqual(regionsFor('America/New_York', 'gpt61sol'), ['us2', 'us1', 'eu1']);
 });
 
+test('gpt-6.1-terra, which translates the answers, follows Sol without us2, where it is not deployed', () => {
+  assert.deepEqual(regionsFor('Europe/Madrid', 'gpt61terra'), ['eu1', 'us1']);
+  assert.deepEqual(regionsFor('Africa/Lagos', 'gpt61terra'), ['eu1', 'us1']);
+  assert.deepEqual(regionsFor('Asia/Kolkata', 'gpt61terra'), ['as1', 'us1', 'eu1']);
+  assert.deepEqual(regionsFor('Australia/Sydney', 'gpt61terra'), ['as1', 'us1', 'eu1']);
+  assert.deepEqual(regionsFor('America/New_York', 'gpt61terra'), ['us1', 'eu1']);
+  assert.deepEqual(regionsFor('America/Sao_Paulo', 'gpt61terra'), ['us1', 'eu1']);
+  assert.deepEqual(regionsFor('UTC', 'gpt61terra'), ['us1', 'eu1']);
+  for (const endpoint of getEndpointsByTimezone('Asia/Kolkata', 'gpt61terra')) {
+    assert.match(endpoint.url, /\/openai\/deployments\/gpt-6\.1-terra\/chat\/completions\?api-version=/);
+  }
+});
+
 test('an unknown model is routed as Terra', () => {
   assert.deepEqual(
     regionsFor('Europe/Madrid', 'not-a-model'),
