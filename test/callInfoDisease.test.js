@@ -3,6 +3,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// callInfoDisease escribe mucho en stdout, y con node --test ese texto a veces corrompe
+// los mensajes del runner («Unable to deserialize cloned data»). Los errores siguen
+// saliendo por stderr.
+console.log = () => {};
+
 function stubModule(modulePath, exports) {
   const resolvedPath = require.resolve(modulePath);
   require.cache[resolvedPath] = {
@@ -31,8 +36,13 @@ stubModule('../services/aiUtils', {
 // comprueba qué se le pide traducir y qué se hace con el resultado.
 const TRANSLATION_STAGE = { name: 'reverse_translation', cost: 0.001, tokens: { input: 10, output: 20, total: 30 }, model: 'gpt61terra', duration: 5, success: true };
 stubModule('../services/llmTranslation', {
-  translateTexts: async (texts, lang) => {
+  translateTexts: async (texts, lang, ctx, options) => {
     state.translations.push({ texts, lang });
+    state.translationOptions.push(options);
+    state.order.push('translate:start');
+    // Un respiro: si las llamadas fueran una tras otra, cada una acabaría antes de empezar la siguiente
+    await new Promise((resolve) => setImmediate(resolve));
+    state.order.push('translate:end');
     if (state.translateFails) {
       const error = new Error('Azure Translator down');
       error.translationResult = { promptTokens: 10, completionTokens: 20 };
@@ -40,7 +50,9 @@ stubModule('../services/llmTranslation', {
     }
     return { texts: texts.map((text) => `[${lang}] ${text}`) };
   },
-  costStages: () => [{ ...TRANSLATION_STAGE }]
+  costStages: () => [{ ...TRANSLATION_STAGE }],
+  // Como el real: lo que le queda a la petición de sus 40 s
+  syncBudget: (startedAt, cap = 40000) => ({ maxBudgetMs: Math.min(cap, 40000 - (Date.now() - startedAt)) })
 });
 stubModule('../services/costUtils', {
   calculatePrice: () => ({ totalCost: 0.002, inputTokens: 100, outputTokens: 200, totalTokens: 300 }),
@@ -94,6 +106,8 @@ async function call(body) {
 
 test.beforeEach(() => {
   state.translations = [];
+  state.translationOptions = [];
+  state.order = [];
   state.translateFails = false;
   state.costRecords = [];
   state.errors = [];
@@ -109,6 +123,27 @@ test('the differential list is translated name by name, without empty lines', as
     { name: '[es] Blurred near vision', checked: false },
     { name: '[es] Eye strain', checked: false }
   ]);
+});
+
+test('a long answer is translated in chunks at the same time and joined in order', async () => {
+  // Seis bloques de unos 620 caracteres: dos por trozo, tres trozos
+  const SEP = '\n\n';
+  const blocks = Array.from({ length: 6 }, (_, i) => `<p>Block ${i + 1} ${'x'.repeat(600)}</p>`);
+  state.aiContent = blocks.join(SEP);
+  const res = await call({ ...baseBody, questionType: 1 });
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  const chunks = [0, 2, 4].map((i) => blocks.slice(i, i + 2).join(SEP));
+  assert.deepEqual(state.translations.map(({ texts }) => texts), chunks.map((chunk) => [chunk]));
+  assert.equal(res.body.data.content, chunks.map((chunk) => `[es] ${chunk}`).join(SEP));
+  // A la vez: las tres empiezan antes de que acabe ninguna
+  assert.deepEqual(state.order.slice(0, 3), ['translate:start', 'translate:start', 'translate:start']);
+  // Con el plazo que le queda a la petición, y la espera real en el coste, no la suma
+  assert.ok(state.translationOptions.every((o) => o.maxBudgetMs > 30000 && o.maxBudgetMs <= 40000));
+  const [record] = state.costRecords;
+  const waits = record.stages.filter((stage) => stage.name === 'reverse_translation').map((stage) => stage.duration);
+  assert.equal(waits.length, 3);
+  assert.ok(waits.reduce((a, b) => a + b, 0) < 15, `the 3 chunks ran together: ${waits}`);
 });
 
 test('an HTML answer is translated whole and its cost record keeps the question and the disease', async () => {

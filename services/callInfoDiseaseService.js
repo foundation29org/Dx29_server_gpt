@@ -1,5 +1,5 @@
 const { sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError, DEFAULT_AI_MODEL } = require('./aiUtils');
-const { translateTexts, costStages } = require('./llmTranslation');
+const { translateTexts, costStages, syncBudget } = require('./llmTranslation');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -16,6 +16,25 @@ const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
 // diagnóstico). Se quedó en gpt-5 desde abril, cuando el resto aún no había migrado.
 const CALL_INFO_DISEASE_IMAGE_MODEL = DEFAULT_AI_MODEL;
 const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5.6-terra';
+// La respuesta general (questionType 1) tiene unos 2.000 tokens de mediana: traducida
+// en una llamada, Terra tardaba unos 10 s más que Azure. Se traduce por trozos de este
+// tamaño a la vez, como los diagnósticos, y tarda lo que el trozo más largo.
+const INFO_TRANSLATION_CHUNK_CHARS = 1500;
+
+// Junta bloques seguidos (separados por separator) en trozos de hasta maxChars; un
+// bloque más largo va solo
+function chunkBlocks(blocks, separator, maxChars) {
+  const chunks = [];
+  for (const block of blocks) {
+    const last = chunks.length - 1;
+    if (last >= 0 && chunks[last].length + separator.length + block.length <= maxChars) {
+      chunks[last] += separator + block;
+    } else {
+      chunks.push(block);
+    }
+  }
+  return chunks;
+}
 
 // Cuerpo del email de error: NUNCA serializar el AxiosError entero (incluye api-key y las imágenes en base64).
 function buildSafeErrorEmailBody(error, myuuid) {
@@ -100,6 +119,8 @@ function validateQuestionRequest(data) {
   }
 
 async function callInfoDisease(req, res) {
+  // Responde en la misma petición HTTP: la traducción cuenta su plazo desde aquí
+  const requestStartedAt = Date.now();
     const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
     const origin = req.get('origin');
     const header_language = req.headers['accept-language'];
@@ -428,7 +449,7 @@ async function callInfoDisease(req, res) {
           const translated = await translateTexts(texts, sanitizedData.detectedLang, {
             timezone: sanitizedData.timezone,
             requestData: dataRequest
-          });
+          }, syncBudget(requestStartedAt));
           stages.push(...costStages(translated, 'reverse_translation'));
           return translated.texts;
         } catch (translationError) {
@@ -448,6 +469,41 @@ async function callInfoDisease(req, res) {
           });
           return texts;
         }
+      };
+
+      // La respuesta larga, por trozos a la vez. La etapa de coste guarda la espera
+      // real, no la suma de los trozos. Si falla alguno (gpt-6.1-terra y Azure), se
+      // devuelve el inglés entero, como en translateInfoAnswer.
+      const translateLongAnswer = async (content, separator) => {
+        const chunks = chunkBlocks(content.split(separator), separator, INFO_TRANSLATION_CHUNK_CHARS);
+        const ctx = { timezone: sanitizedData.timezone, requestData: dataRequest };
+        const startedAt = Date.now();
+        const results = await Promise.allSettled(chunks.map((chunk) =>
+          translateTexts([chunk], sanitizedData.detectedLang, ctx, syncBudget(requestStartedAt))));
+        const waitMs = Date.now() - startedAt;
+        const chunkStages = results.flatMap((result) => {
+          const spent = result.status === 'fulfilled' ? result.value : result.reason?.translationResult;
+          return spent ? costStages(spent, 'reverse_translation')
+            .map((stage) => (result.status === 'fulfilled' ? stage : { ...stage, success: false })) : [];
+        });
+        const summedMs = chunkStages.reduce((sum, stage) => sum + (stage.duration || 0), 0);
+        stages.push(...chunkStages.map((stage) => ({
+          ...stage,
+          duration: summedMs > 0 ? Math.round((stage.duration || 0) * waitMs / summedMs) : 0
+        })));
+        const failed = results.find((result) => result.status === 'rejected');
+        if (!failed) return results.map((result) => result.value.texts[0]).join(separator);
+        console.error('Translation error:', failed.reason);
+        insights.error({
+          message: 'Disease info translation failed (gpt-6.1-terra and Azure Translator)',
+          error: failed.reason?.message,
+          requestInfo: requestInfo,
+          myuuid: req.body.myuuid,
+          tenantId: tenantId,
+          operation: 'callInfoDisease',
+          subscriptionId: subscriptionId
+        });
+        return content;
       };
 
       // Registro de costes de las dos ramas: la IA y, si la hubo, la traducción de vuelta
@@ -537,10 +593,10 @@ async function callInfoDisease(req, res) {
         });
   
       } else {
-        // Para otros tipos de preguntas: la respuesta es HTML y se traduce entera
-        // (llmTranslation comprueba que conserva las etiquetas)
+        // Para otros tipos de preguntas: la respuesta es HTML y se traduce entera, por
+        // trozos a la vez (llmTranslation comprueba que cada uno conserva sus etiquetas)
         if (processedContent.trim()) {
-          [processedContent] = await translateInfoAnswer([processedContent]);
+          processedContent = await translateLongAnswer(processedContent, splitChar);
         }
 
         // Guardar cost tracking (la IA y, si la hubo, la traducción de vuelta)
