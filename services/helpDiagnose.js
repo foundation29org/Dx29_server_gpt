@@ -12,15 +12,13 @@ const { classifyIntent, shouldSuggestDiagnosisPage } = require('./intentClassifi
 const {
   DEFAULT_AI_MODEL,
   callAiWithFailover,
-  translateTextWithRetry,
-  translateInvertWithRetry,
   sanitizeAiData,
   parseJsonWithFixes,
   resolveDiagnoseModel,
   suspiciousContentErrors
 } = require('./aiUtils');
 const { detectLanguageSmart } = require('./languageDetect');
-const { translateDiagnoses, costStages, showsEnglishName } = require('./llmTranslation');
+const { translateDiagnoses, translateTexts, translateToEnglish, costStages, showsEnglishName } = require('./llmTranslation');
 const { calculatePrice, formatCost } = require('./costUtils');
 const {
   loadImageDataUrls,
@@ -173,10 +171,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
   };
 
   // Seguimiento de caracteres para costes de traducción (Azure Translator: $10/M chars)
-  let translationChars = 0; // solo traducción a inglés (Azure)
   let detectChars = 0; // detección de idioma (Azure)
   let detectAzureDurationMs = 0; // duración detección Azure
-  let forwardTranslationDurationMs = 0; // duración traducción a inglés (Azure)
   let reverseTranslationDurationMs = 0; // duración traducción inversa genérica (Azure)
   let reverseTranslationChars = 0; // traducción inversa al idioma original
   // Hoist queryType and shouldAnswerMedical to function scope so they're available in error paths
@@ -189,8 +185,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     usedFallback: false
   };
   let inferredProfile = getDefaultInferredProfile(profileInferenceConfidenceThreshold);
-  let modelTranslation = 'gpt5nano'; //'gpt5mini';
-  
+
   // Variable para rastrear si se detectó información personal (PII)
   let hasPersonalInfo = false;
 
@@ -219,6 +214,17 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     };
     costTracking.total.cost += result.cost;
   };
+  // La traducción de ida (gpt61terra y, si hubo respaldo, translation_service) y
+  // la del texto anonimizado al idioma del usuario, con el mismo formato
+  const recordStepCost = (key, name, result) => {
+    if (!result || costTracking[key]?.stages) return;
+    const stages = costStages(result, name);
+    if (!stages.length) return;
+    costTracking[key] = { cost: result.cost, stages };
+    costTracking.total.cost += result.cost;
+  };
+  const stepStages = (key, success = true) =>
+    (costTracking[key]?.stages || []).map((stage) => (success ? stage : { ...stage, success: false }));
 
   try {
     // 1. Detectar idioma y traducir a inglés si es necesario
@@ -242,7 +248,6 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         detectChars += det.azureCharsBilled;
         detectAzureDurationMs += (det.durationMs || 0);
       }
-      modelTranslation = det.modelUsed;
       // Si la detección usó LLM, acumular coste en detect_language (no mezclar con traducción)
       if (det.usage && (det.modelUsed === 'gpt5mini' || det.modelUsed === 'gpt5nano')) {
         const dCost = calculatePrice(det.usage, det.modelUsed);
@@ -263,23 +268,25 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         costTracking.total.tokens.output += dCost.outputTokens;
         costTracking.total.tokens.total += dCost.totalTokens;
       }
-      forwardTranslationDurationMs = 0;
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Con imágenes la descripción puede venir vacía; el traductor la rechaza.
-        if (data.description?.trim()) {
-          // Azure Translator únicamente (sin LLM) — se cobra por carácter
-          translationChars += data.description.length;
-          const fwdStart1 = Date.now();
-          englishDescription = await translateTextWithRetry(data.description, detectedLanguage);
-          forwardTranslationDurationMs += (Date.now() - fwdStart1);
-        }
-        // diseases_list_en: el cliente ya manda los nombres en inglés (diagnosis_en)
-        // y traducirlos otra vez podría deformarlos
-        if (englishDiseasesList && data.diseases_list_en !== true) {
-          translationChars += (data.diseases_list ? data.diseases_list.length : 0);
-          const fwdStart2 = Date.now();
-          englishDiseasesList = await translateTextWithRetry(data.diseases_list, detectedLanguage);
-          forwardTranslationDurationMs += (Date.now() - fwdStart2);
+        // Con imágenes la descripción puede venir vacía. diseases_list_en: el cliente
+        // ya manda los nombres en inglés (diagnosis_en) y traducirlos otra vez podría
+        // deformarlos. Los dos van en una llamada a gpt-6.1-terra, con Azure de
+        // respaldo (ver llmTranslation.js).
+        const translateDescription = Boolean(data.description?.trim());
+        const translateDiseases = Boolean(englishDiseasesList) && data.diseases_list_en !== true;
+        const sources = [];
+        if (translateDescription) sources.push(data.description);
+        if (translateDiseases) sources.push(data.diseases_list);
+        if (sources.length) {
+          const forward = await translateToEnglish(sources, detectedLanguage, {
+            timezone: data.timezone,
+            requestData: { tenantId: data.tenantId, subscriptionId: data.subscriptionId, myuuid: data.myuuid }
+          });
+          recordStepCost('translation', 'translation', forward);
+          const texts = [...forward.texts];
+          if (translateDescription) englishDescription = texts.shift();
+          if (translateDiseases) englishDiseasesList = texts.shift();
         }
       }
 
@@ -289,6 +296,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
+      // Lo ya gastado en Terra si después también falló Azure
+      recordStepCost('translation', 'translation', translationError.translationResult);
       if (requestInfo) {
         let infoErrorlang = {
           body: data,
@@ -630,17 +639,8 @@ ${medicalQuestionForModel}
             success: true
           });
         }
-        // Añadir coste LLM de traducción a inglés si existe
-        if (costTracking.translation && costTracking.translation.cost > 0 && (costTracking.translation.model === 'gpt5mini' || costTracking.translation.model === 'gpt5nano')) {
-          stages.push({
-            name: 'translation',
-            cost: costTracking.translation.cost,
-            tokens: costTracking.translation.tokens,
-            model: costTracking.translation.model,
-            duration: costTracking.translation.duration || 0,
-            success: true
-          });
-        }
+        // Traducción a inglés (gpt61terra y, si hubo respaldo, Azure)
+        stages.push(...stepStages('translation'));
         // Coste Azure de detección
         if (detectChars > 0) {
           const detectCost = (detectChars / 1000000) * 10;
@@ -654,26 +654,7 @@ ${medicalQuestionForModel}
           });
           costTracking.total.cost += detectCost;
         }
-        if (translationChars > 0) {
-          const translationCost = (translationChars / 1000000) * 10;
-          costTracking.translation = {
-            cost: translationCost,
-            tokens: { input: translationChars, output: translationChars, total: translationChars },
-            model: 'translation_service',
-            duration: forwardTranslationDurationMs,
-            success: true
-          };
-          costTracking.total.cost += translationCost;
-          stages.push({
-            name: 'translation',
-            cost: translationCost,
-            tokens: { input: translationChars, output: translationChars, total: translationChars },
-            model: 'translation_service',
-            duration: forwardTranslationDurationMs,
-            success: true
-          });
-        }
-        
+
         // Añadir costes de traducción inversa
         if (reverseTranslationChars > 0) {
           const reverseCost = (reverseTranslationChars / 1000000) * 10;
@@ -914,17 +895,8 @@ ${medicalQuestionForModel}
                   success: true
                 });
               }
-              // Traducción a inglés (LLM)
-              if (costTracking.translation && costTracking.translation.cost > 0 && (costTracking.translation.model === 'gpt5mini' || costTracking.translation.model === 'gpt5nano')) {
-                stages.push({
-                  name: 'translation',
-                  cost: costTracking.translation.cost,
-                  tokens: costTracking.translation.tokens,
-                  model: costTracking.translation.model,
-                  duration: costTracking.translation.duration || 0,
-                  success: true
-                });
-              }
+              // Traducción a inglés (gpt61terra y, si hubo respaldo, Azure)
+              stages.push(...stepStages('translation'));
               // Detección (Azure)
               if (detectChars > 0) {
                 const detectCost = (detectChars / 1000000) * 10;
@@ -935,18 +907,6 @@ ${medicalQuestionForModel}
                   tokens: { input: detectChars, output: detectChars, total: detectChars },
                   model: 'translation_service',
                   duration: detectAzureDurationMs,
-                  success: true
-                });
-              }
-              if (translationChars > 0) {
-                const translationCost = (translationChars / 1000000) * 10;
-                // Solo incluir en stages para guardar (no sobrescribir costTracking.translation si ya tiene costos de LLM)
-                stages.push({
-                  name: 'translation',
-                  cost: translationCost,
-                  tokens: { input: translationChars, output: translationChars, total: translationChars },
-                  model: 'translation_service',
-                  duration: forwardTranslationDurationMs,
                   success: true
                 });
               }
@@ -1262,35 +1222,37 @@ ${medicalQuestionForModel}
         costTracking.total.tokens.total += etapa3Cost.totalTokens;
         console.log(`💰 Etapa 2 - Anonimización: ${formatCost(etapa3Cost.totalCost)} (${etapa3Cost.totalTokens} tokens)`);
       }
-      
+      // Lo que ve el usuario, y lo que el cliente pone en lugar de su texto: el inglés
+      // anonimizado, traducido a su idioma si escribió en otro. En nov-2026 se probó a
+      // anonimizar también el texto original y enseñarlo si tapaba lo mismo, pero varias
+      // revisiones encontraron datos que seguían a la vista (un apellido declinado en
+      // una segunda mención, una fecha tapada solo en parte). No se puede comprobar con
+      // garantías que dos anonimizaciones de un LLM en dos idiomas tapen lo mismo.
       if (hasPersonalInfo && detectedLanguage !== 'en') {
-        // Azure Translator únicamente para texto anonimizado
-        const anonChars = (anonymizedDescription ? anonymizedDescription.length : 0);
-        console.log('anonChars', anonChars);
-        if (anonChars > 0) {
-          try {
-            const revAnonStart = Date.now();
-            // Traducir texto taggeado con [ANON-N] y luego construir HTML y texto plano
-            const translatedTagged = await translateInvertWithRetry(anonymizedResult.htmlText, detectedLanguage);
-            anonymizedResult.htmlText = toAnonymizedHtml(translatedTagged);
-            anonymizedDescription = translatedTagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
-            const revAnonElapsed = Date.now() - revAnonStart;
-            const reverseCost = (anonChars / 1000000) * 10;
-            costTracking.reverse_anonymization = {
-              cost: reverseCost,
-              tokens: { input: anonChars, output: anonChars, total: anonChars },
-              model: 'translation_service',
-              duration: revAnonElapsed,
-              success: true
-            };
-            costTracking.total.cost += reverseCost;
-          } catch (translationErrorAzure) {
-            console.error('Error en la traducción inversa (Azure):', translationErrorAzure.message);
-            insights.error({ message: translationErrorAzure.message, phase: 'translation', detectedLanguage });
-            throw translationErrorAzure;
-          }
+        // Se traduce el inglés anonimizado con gpt-6.1-terra, que conserva las
+        // marcas [ANON-N], con Azure de respaldo. Así no queda a la vista un dato
+        // tapado en inglés.
+        try {
+          const translated = await translateTexts([anonymizedResult.htmlText], detectedLanguage, {
+            timezone: data.timezone,
+            requestData: dataRequest
+          });
+          recordStepCost('reverse_anonymization', 'reverse_anonymization', translated);
+          const translatedTagged = translated.texts[0];
+          anonymizedResult.htmlText = toAnonymizedHtml(translatedTagged);
+          anonymizedDescription = translatedTagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
+        } catch (anonymizedTranslationError) {
+          recordStepCost('reverse_anonymization', 'reverse_anonymization', anonymizedTranslationError.translationResult);
+          console.error('Anonymized text translation error:', anonymizedTranslationError.message);
+          insights.error({
+            message: 'Anonymized text translation failed (gpt-6.1-terra and Azure Translator)',
+            error: anonymizedTranslationError.message,
+            phase: 'translation',
+            detectedLanguage
+          });
+          throw anonymizedTranslationError;
         }
-      }else if (hasPersonalInfo && detectedLanguage === 'en') {
+      } else if (hasPersonalInfo) {
         // Generar HTML y texto plano a partir del texto taggeado sin traducir
         const tagged = anonymizedResult.htmlText;
         anonymizedResult.htmlText = toAnonymizedHtml(tagged);
@@ -1511,7 +1473,7 @@ ${medicalQuestionForModel}
         name: 'anonymization',
         cost: costTracking.etapa2_anonimizacion.cost,
         tokens: costTracking.etapa2_anonimizacion.tokens,
-        model: model,
+        model: modelAnonymization,
         duration: costTracking.etapa2_anonimizacion.duration || 0,
         success: true
       });
@@ -1528,17 +1490,8 @@ ${medicalQuestionForModel}
         success: true
       });
     }
-    // Traducción a inglés (LLM)
-    if (costTracking.translation && costTracking.translation.cost > 0 && (costTracking.translation.model === 'gpt5mini' || costTracking.translation.model === 'gpt5nano')) {
-      stages.push({
-        name: 'translation',
-        cost: costTracking.translation.cost,
-        tokens: costTracking.translation.tokens,
-        model: costTracking.translation.model,
-        duration: costTracking.translation.duration || 0,
-        success: true
-      });
-    }
+    // Traducción a inglés (gpt61terra y, si hubo respaldo, Azure)
+    stages.push(...stepStages('translation'));
     // Detección (Azure)
     if (detectChars > 0) {
       const detectCost = (detectChars / 1000000) * 10;
@@ -1549,25 +1502,6 @@ ${medicalQuestionForModel}
         tokens: { input: detectChars, output: detectChars, total: detectChars },
         model: 'translation_service',
         duration: detectAzureDurationMs,
-        success: true
-      });
-    }
-    if (translationChars > 0) {
-      const translationCost = (translationChars / 1000000) * 10;
-      costTracking.translation = {
-        cost: translationCost,
-        tokens: { input: translationChars, output: translationChars, total: translationChars },
-        model: 'translation_service',
-        duration: forwardTranslationDurationMs,
-        success: true
-      };
-      costTracking.total.cost += translationCost;
-      stages.push({
-        name: 'translation',
-        cost: translationCost,
-        tokens: { input: translationChars, output: translationChars, total: translationChars },
-        model: 'translation_service',
-        duration: forwardTranslationDurationMs,
         success: true
       });
     }
@@ -1593,16 +1527,8 @@ ${medicalQuestionForModel}
     if (costTracking.reverse_diseases && costTracking.reverse_diseases.cost > 0) {
       stages.push(...costTracking.reverse_diseases.stages);
     }
-    if (costTracking.reverse_anonymization && costTracking.reverse_anonymization.cost > 0) {
-      stages.push({
-        name: 'reverse_anonymization',
-        cost: costTracking.reverse_anonymization.cost,
-        tokens: costTracking.reverse_anonymization.tokens,
-        model: costTracking.reverse_anonymization.model || modelTranslation,
-        duration: costTracking.reverse_anonymization.duration || 0,
-        success: true
-      });
-    }
+    // Traducción del inglés anonimizado, solo si el original no se pudo usar
+    stages.push(...stepStages('reverse_anonymization'));
     if (costTracking.profile_inference && costTracking.profile_inference.cost > 0) {
       stages.push({
         name: 'profile_inference',
@@ -1776,25 +1702,8 @@ ${medicalQuestionForModel}
         }
 
         // Etapas de traducción en caso de error
-        if (translationChars > 0) {
-          const translationCost = (translationChars / 1000000) * 10;
-          costTracking.translation = {
-            cost: translationCost,
-            tokens: { input: translationChars, output: translationChars, total: translationChars },
-            model: 'translation_service',
-            duration: forwardTranslationDurationMs,
-            success: false
-          };
-          costTracking.total.cost += translationCost;
-          stages.push({
-            name: 'translation',
-            cost: translationCost,
-            tokens: { input: translationChars, output: translationChars, total: translationChars },
-            model: 'translation_service',
-            duration: forwardTranslationDurationMs,
-            success: false
-          });
-        }
+        stages.push(...stepStages('translation', false));
+        stages.push(...stepStages('reverse_anonymization', false));
         if (reverseTranslationChars > 0) {
           const reverseCost = (reverseTranslationChars / 1000000) * 10;
           costTracking.reverse_translation = {

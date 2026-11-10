@@ -1,5 +1,5 @@
 const { translateTextWithRetry, callAiWithFailover, sanitizeAiData, suspiciousContentErrors } = require('./aiUtils');
-const { translateTexts, costStages } = require('./llmTranslation');
+const { translateTexts, translateToEnglish, costStages, syncBudget, SYNC_TO_ENGLISH_TIMEOUT_MS } = require('./llmTranslation');
 const { detectLanguageSmart } = require('./languageDetect');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
@@ -9,6 +9,9 @@ const modelTranslation = 'gpt54mini';
 const modelSummarize = 'gpt54mini';
 const MAX_SUMMARY_INPUT_CHARS = 400000;
 const AZURE_TRANSLATOR_MAX_CHARS = 50000;
+// Hasta aquí la traducción a inglés va con gpt-6.1-terra (ver llmTranslation.js):
+// un documento más largo tardaría demasiado en generarse y sigue yendo a Azure.
+const LLM_TRANSLATION_MAX_CHARS = 8000;
 
 function getHeader(req, name) {
   return req.headers[name.toLowerCase()];
@@ -56,6 +59,8 @@ function validateSummarizeRequest(data) {
   }
 
 async function summarize(req, res) {
+  // Responde en la misma petición HTTP: las traducciones cuentan su plazo desde aquí
+  const requestStartedAt = Date.now();
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
@@ -122,6 +127,7 @@ async function summarize(req, res) {
       iframeParams: req.body.iframeParams || {}
     };
   let translationChars = 0;
+  let forwardStages = [];
   let reverseStages = [];
   let detectChars = 0;
 
@@ -186,10 +192,18 @@ async function summarize(req, res) {
           englishDescription = await translateTextWithRetry(description, detectedLanguage);
           forwardAzureDuration = Date.now() - fwdAzStart;
         }*/
-        // Usar Azure Translator directamente para reducir latencia y coste.
-        // Azure Translator rechaza textos de más de 50 000 caracteres con 400;
-        // por encima de ese tamaño gpt54mini resume directamente el texto original en inglés.
-        if (description && description.length <= AZURE_TRANSLATOR_MAX_CHARS) {
+        // Hasta LLM_TRANSLATION_MAX_CHARS con gpt-6.1-terra y Azure de respaldo; si
+        // fallan los dos se resume el original (catch de abajo). Más largo, Azure:
+        // rechaza textos de más de 50 000 caracteres con 400, y por encima de ese
+        // tamaño gpt54mini resume directamente el texto original en inglés.
+        if (description && description.length <= LLM_TRANSLATION_MAX_CHARS) {
+          const forward = await translateToEnglish([description], detectedLanguage, {
+            timezone,
+            requestData: { tenantId, subscriptionId, myuuid: req.body.myuuid }
+          }, syncBudget(requestStartedAt, SYNC_TO_ENGLISH_TIMEOUT_MS));
+          englishDescription = forward.texts[0];
+          forwardStages = costStages(forward, 'translation');
+        } else if (description && description.length <= AZURE_TRANSLATOR_MAX_CHARS) {
           translationChars += description.length;
           const fwdAzStart = Date.now();
           englishDescription = await translateTextWithRetry(description, detectedLanguage);
@@ -211,6 +225,10 @@ async function summarize(req, res) {
       // Mantener el texto original para el resumen
       detectedLanguage = lang || 'en';
       englishDescription = description;
+      // Si fallaron gpt-6.1-terra y Azure, se guarda lo que costó el intento
+      if (translationError.translationResult) {
+        forwardStages = costStages(translationError.translationResult, 'translation');
+      }
     }
 
     // 2. Construir el prompt para el resumen (único prompt genérico)
@@ -282,7 +300,7 @@ async function summarize(req, res) {
       const translated = await translateTexts([summary], detectedLanguage, {
         timezone: req.body.timezone,
         requestData: dataRequest
-      });
+      }, syncBudget(requestStartedAt));
       summary = translated.texts[0];
       reverseStages = costStages(translated, 'reverse_translation');
     }
@@ -330,6 +348,8 @@ async function summarize(req, res) {
         });
       }
 
+      // Traducción a inglés con gpt61terra (y Azure si hubo respaldo)
+      stages.push(...forwardStages);
       if (translationChars > 0) {
         console.log('translationChars:', translationChars);
         const translationCost = (translationChars / 1000000) * 10;

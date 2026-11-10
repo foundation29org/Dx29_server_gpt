@@ -1,5 +1,5 @@
-const { translateTextWithRetry, sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
-const { translateTexts, costStages } = require('./llmTranslation');
+const { sanitizeInput, suspiciousContentErrors, callAiWithFailover, parseJsonWithFixes } = require('./aiUtils');
+const { translateTexts, translateToEnglish, translateAnswersToEnglish, costStages, syncBudget, SYNC_TO_ENGLISH_TIMEOUT_MS } = require('./llmTranslation');
 const { detectLanguageLocalOrAzure } = require('./languageDetect');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
@@ -7,6 +7,52 @@ const serviceEmail = require('./email');
 const insights = require('./insights');
 const { isValidUploadId } = require('./multimodalUploadService');
 const { locationContextText, resolveCountryCode } = require('./locationContext');
+
+// Estas rutas responden en la misma petición HTTP y el proxy de la web corta a los
+// 45 s: las traducciones tienen un plazo que cuenta desde que llegó la petición
+// (syncBudget en llmTranslation.js)
+
+// Si fallan gpt-6.1-terra y Azure al traducir al inglés, la petición acaba en
+// error, pero lo ya gastado (la detección de idioma y el intento de traducción) se
+// guarda igual, con estado de error
+function saveTranslationErrorCost(operation, costTrackingData, { detectChars, detectDurationMs, detectedLanguage }, translationError) {
+  const stages = [];
+  if (detectChars > 0) {
+    stages.push({
+      name: 'detect_language',
+      cost: (detectChars / 1000000) * 10,
+      tokens: { input: detectChars, output: detectChars, total: detectChars },
+      model: 'translation_service',
+      duration: detectDurationMs,
+      success: true
+    });
+  }
+  const partial = translationError?.translationResult;
+  stages.push(...(translationError?.translationStages || (partial ? costStages(partial, 'translation') : [])));
+  if (!stages.length) return;
+  const sumTokens = (key) => stages.reduce((total, stage) => total + (stage.tokens?.[key] || 0), 0);
+  void CostTrackingService.saveCostRecordBestEffort({
+    myuuid: costTrackingData.myuuid,
+    tenantId: costTrackingData.tenantId,
+    subscriptionId: costTrackingData.subscriptionId,
+    operation,
+    model: partial?.model || 'gpt61terra',
+    lang: costTrackingData.lang,
+    timezone: costTrackingData.timezone,
+    stages,
+    totalCost: stages.reduce((total, stage) => total + (stage.cost || 0), 0),
+    totalTokens: { input: sumTokens('input'), output: sumTokens('output'), total: sumTokens('total') },
+    description: costTrackingData.description,
+    status: 'error',
+    error: {
+      message: translationError?.message,
+      code: translationError?.code || 'TRANSLATION_ERROR',
+      stage: 'translation'
+    },
+    iframeParams: costTrackingData.iframeParams,
+    operationData: { detectedLanguage }
+  }, { context: `${operation} translation error` });
+}
 
 // Un caso de solo imagen no tiene texto: la evidencia está en la subida, que
 // Diagnose vuelve a leer al recalcular con las respuestas.
@@ -125,6 +171,7 @@ function sanitizeFollowUpQuestionsData(data) {
 }
 
 async function generateFollowUpQuestions(req, res) {
+  const requestStartedAt = Date.now();
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
@@ -189,11 +236,10 @@ async function generateFollowUpQuestions(req, res) {
       description: `${description} - Follow-up questions`,
       iframeParams: req.body.iframeParams || {}
     };
-  let translationChars = 0;
+  let forwardStages = [];
   let reverseStages = [];
   let detectChars = 0;
   let detectDurationMs = 0;
-  let forwardDurationMs = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -215,23 +261,27 @@ async function generateFollowUpQuestions(req, res) {
         detectDurationMs = Date.now() - detStart;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Traducción de descripción y lista de enfermedades
-        if (description) {
-          translationChars += description.length;
-          const fwdStart1 = Date.now();
-          englishDescription = await translateTextWithRetry(description, detectedLanguage);
-          forwardDurationMs += (Date.now() - fwdStart1);
-        }
-        // diseases_en: el cliente ya manda los nombres en inglés (diagnosis_en)
-        if (englishDiseases && sanitizedData.diseases_en !== true) {
-          translationChars += (diseases ? diseases.length : 0);
-          const fwdStart2 = Date.now();
-          englishDiseases = await translateTextWithRetry(diseases, detectedLanguage);
-          forwardDurationMs += (Date.now() - fwdStart2);
+        // Descripción y lista de enfermedades en una llamada a gpt-6.1-terra, con
+        // Azure de respaldo. diseases_en: el cliente ya manda los nombres en inglés
+        // (diagnosis_en).
+        const translateDiseases = Boolean(englishDiseases) && sanitizedData.diseases_en !== true;
+        const sources = [];
+        if (description) sources.push(description);
+        if (translateDiseases) sources.push(diseases);
+        if (sources.length) {
+          const forward = await translateToEnglish(sources, detectedLanguage, {
+            timezone,
+            requestData: { tenantId, subscriptionId, myuuid: req.body.myuuid }
+          }, syncBudget(requestStartedAt, SYNC_TO_ENGLISH_TIMEOUT_MS));
+          forwardStages = costStages(forward, 'translation');
+          const texts = [...forward.texts];
+          if (description) englishDescription = texts.shift();
+          if (translateDiseases) englishDiseases = texts.shift();
         }
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
+      saveTranslationErrorCost('follow_up_questions', costTrackingData, { detectChars, detectDurationMs, detectedLanguage }, translationError);
       let infoErrorlang = {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
@@ -470,7 +520,7 @@ async function generateFollowUpQuestions(req, res) {
         const translated = await translateTexts(questions, detectedLanguage, {
           timezone: sanitizedData.timezone,
           requestData: dataRequest
-        });
+        }, syncBudget(requestStartedAt));
         questions = translated.texts;
         reverseStages = costStages(translated, 'reverse_translation');
       } catch (translationError) {
@@ -493,17 +543,8 @@ async function generateFollowUpQuestions(req, res) {
           success: true
         });
       }
-      if (translationChars > 0) {
-        const translationCost = (translationChars / 1000000) * 10;
-        stages.push({
-          name: 'translation',
-          cost: translationCost,
-          tokens: { input: translationChars, output: translationChars, total: translationChars },
-          model: 'translation_service',
-          duration: forwardDurationMs,
-          success: true
-        });
-      }
+      // Traducción a inglés (gpt61terra y, si hubo respaldo, Azure)
+      stages.push(...forwardStages);
       stages.push({
         name: 'ai_call',
         cost: costData.totalCost,
@@ -675,6 +716,7 @@ function sanitizeProcessFollowUpData(data) {
 }
 
 async function processFollowUpAnswers(req, res) {
+  const requestStartedAt = Date.now();
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
@@ -739,11 +781,10 @@ async function processFollowUpAnswers(req, res) {
       description: `${description} - Process follow-up answers`,
       iframeParams: req.body.iframeParams || {}
     };
-  let translationChars = 0;
+  let forwardStages = [];
   let reverseStages = [];
   let detectChars = 0;
   let detectDurationMs = 0;
-  let forwardDurationMs = 0;
 
     // 1. Detectar idioma y traducir a inglés si es necesario
     let englishDescription = description;
@@ -764,30 +805,41 @@ async function processFollowUpAnswers(req, res) {
         detectDurationMs = Date.now() - detStart;
       }
       if (detectedLanguage && detectedLanguage !== 'en') {
-        // Traducción de descripción y Q/A
-        if (description) {
-          translationChars += description.length;
-          const fwdStart1 = Date.now();
-          englishDescription = await translateTextWithRetry(description, detectedLanguage);
-          forwardDurationMs += (Date.now() - fwdStart1);
+        // La descripción y las respuestas, a la vez, con gpt-6.1-terra y Azure de
+        // respaldo. Las respuestas van todas en una llamada y cada una con su
+        // pregunta: Azure, campo a campo, dejó algún error crítico en el 29 % de los
+        // juegos de respuestas de la prueba del 6-nov («pierna» → «hombre»).
+        const ctx = { timezone, requestData: { tenantId, subscriptionId, myuuid: req.body.myuuid } };
+        const budget = syncBudget(requestStartedAt, SYNC_TO_ENGLISH_TIMEOUT_MS);
+        const settled = await Promise.allSettled([
+          description ? translateToEnglish([description], detectedLanguage, ctx, budget) : null,
+          translateAnswersToEnglish(answers, detectedLanguage, ctx, budget)
+        ]);
+        const failed = settled.find((outcome) => outcome.status === 'rejected');
+        if (failed) {
+          // Lo que gastaron las dos, también la que terminó bien, viaja en el error
+          failed.reason.translationStages = settled.flatMap((outcome) => {
+            const result = outcome.status === 'fulfilled' ? outcome.value : outcome.reason?.translationResult;
+            return result ? costStages(result, 'translation') : [];
+          });
+          throw failed.reason;
         }
-        let qaChars = 0;
-        const fwdStart2 = Date.now();
-        englishAnswers = await Promise.all(
-          answers.map(async (item) => {
-            qaChars += (item.question ? item.question.length : 0);
-            qaChars += (item.answer ? item.answer.length : 0);
-            return {
-              question: await translateTextWithRetry(item.question, detectedLanguage),
-              answer: await translateTextWithRetry(item.answer, detectedLanguage)
-            };
-          })
-        );
-        forwardDurationMs += (Date.now() - fwdStart2);
-        translationChars += qaChars;
+        const [forwardDescription, forwardAnswers] = settled.map((outcome) => outcome.value);
+        if (forwardDescription) {
+          englishDescription = forwardDescription.texts[0];
+          forwardStages.push(...costStages(forwardDescription, 'translation'));
+        }
+        englishAnswers = forwardAnswers.answers;
+        // Corren a la vez: las respuestas solo cuentan la espera que añaden a la
+        // de la descripción
+        const answersWaitMs = Math.max(0, forwardAnswers.durationMs - (forwardDescription?.durationMs || 0));
+        const answersScale = forwardAnswers.durationMs > 0 ? answersWaitMs / forwardAnswers.durationMs : 0;
+        forwardStages.push(...costStages(forwardAnswers, 'translation')
+          .map((stage) => ({ ...stage, duration: Math.round(stage.duration * answersScale) })));
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
+      saveTranslationErrorCost('process-follow-up', costTrackingData, { detectChars, detectDurationMs, detectedLanguage }, translationError);
       let infoErrorlang = {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
@@ -936,17 +988,8 @@ async function processFollowUpAnswers(req, res) {
           success: true
         });
       }
-      if (translationChars > 0) {
-        const translationCost = (translationChars / 1000000) * 10;
-        stages.push({
-          name: 'translation',
-          cost: translationCost,
-          tokens: { input: translationChars, output: translationChars, total: translationChars },
-          model: 'translation_service',
-          duration: forwardDurationMs,
-          success: true
-        });
-      }
+      // Traducción a inglés (gpt61terra y, si hubo respaldo, Azure)
+      stages.push(...forwardStages);
       stages.push({
         name: 'ai_call',
         cost: costData.totalCost,
@@ -987,7 +1030,7 @@ async function processFollowUpAnswers(req, res) {
         const translated = await translateTexts([updatedDescription], detectedLanguage, {
           timezone: sanitizedData.timezone,
           requestData: dataRequest
-        });
+        }, syncBudget(requestStartedAt));
         updatedDescription = translated.texts[0];
         reverseStages = costStages(translated, 'reverse_translation');
       } catch (translationError) {
@@ -1131,6 +1174,7 @@ function sanitizeERQuestionsData(data) {
   };
 }
 async function generateERQuestions(req, res) {
+  const requestStartedAt = Date.now();
   const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const origin = req.get('origin');
   const header_language = req.headers['accept-language'];
@@ -1195,11 +1239,10 @@ async function generateERQuestions(req, res) {
       description: `${description} - ER questions`,
       iframeParams: req.body.iframeParams || {}
     };
-  let translationChars = 0;
+  let forwardStages = [];
   let reverseStages = [];
   let detectChars = 0;
   let detectDurationMs = 0;
-  let forwardDurationMs = 0;
 
   
 
@@ -1216,15 +1259,18 @@ async function generateERQuestions(req, res) {
         detectChars += detection.azureCharsBilled;
         detectDurationMs = Date.now() - detStart;
         if (detectedLanguage && detectedLanguage !== 'en') {
-          // Traducción a inglés
-          translationChars += description.length;
-          const fwdStart = Date.now();
-          englishDescription = await translateTextWithRetry(description, detectedLanguage);
-          forwardDurationMs = Date.now() - fwdStart;
+          // Traducción a inglés con gpt-6.1-terra y Azure de respaldo
+          const forward = await translateToEnglish([description], detectedLanguage, {
+            timezone,
+            requestData: { tenantId, subscriptionId, myuuid: req.body.myuuid }
+          }, syncBudget(requestStartedAt, SYNC_TO_ENGLISH_TIMEOUT_MS));
+          englishDescription = forward.texts[0];
+          forwardStages = costStages(forward, 'translation');
         }
       }
     } catch (translationError) {
       console.error('Translation error:', translationError.message);
+      saveTranslationErrorCost('emergency_questions', costTrackingData, { detectChars, detectDurationMs, detectedLanguage }, translationError);
       let infoErrorlang = {
         error: translationError.message,
         type: translationError.code || 'TRANSLATION_ERROR',
@@ -1373,17 +1419,8 @@ async function generateERQuestions(req, res) {
           success: true
         });
       }
-      if (translationChars > 0) {
-        const translationCost = (translationChars / 1000000) * 10;
-        stages.push({
-          name: 'translation',
-          cost: translationCost,
-          tokens: { input: translationChars, output: translationChars, total: translationChars },
-          model: 'translation_service',
-          duration: forwardDurationMs,
-          success: true
-        });
-      }
+      // Traducción a inglés (gpt61terra y, si hubo respaldo, Azure)
+      stages.push(...forwardStages);
       stages.push({
         name: 'ai_call',
         cost: costData.totalCost,
@@ -1461,7 +1498,7 @@ async function generateERQuestions(req, res) {
         const translated = await translateTexts(questions, detectedLanguage, {
           timezone: sanitizedData.timezone,
           requestData: dataRequest
-        });
+        }, syncBudget(requestStartedAt));
         questions = translated.texts;
         reverseStages = costStages(translated, 'reverse_translation');
       } catch (translationError) {

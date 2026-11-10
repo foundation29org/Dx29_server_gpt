@@ -39,6 +39,11 @@ stubModule('../services/aiUtils', {
     if (state.azureFails) throw new Error('Azure Translator down');
     return `[azure:${lang}] ${text}`;
   },
+  translateTextWithRetry: async (text, lang) => {
+    state.azureCalls += 1;
+    if (state.azureFails) throw new Error('Azure Translator down');
+    return `[azure-en:${lang}] ${text}`;
+  },
   extractProviderError: (error) => (error.response?.data?.error
     ? { providerErrorCode: String(error.response.data.error.code) }
     : {})
@@ -51,6 +56,9 @@ stubModule('../services/insights', {
 const {
   translateDiagnoses,
   translateTexts,
+  translateToEnglish,
+  translateAnswersToEnglish,
+  syncBudget,
   costStages,
   showsEnglishName,
   needsTranslation,
@@ -312,6 +320,132 @@ test('the prompt names the language as Azure would translate it', () => {
   assert.equal(languageName('ku'), 'Central Kurdish (Sorani)');
   assert.equal(hasForeignLetters(['هەوکردنی ئاپێندیکس'], 'ku'), false);
   assert.equal(languageName('kmr'), 'Northern Kurdish (Kurmanji)');
+});
+
+test('what the user wrote goes to English in one call, quietly, and an echo is accepted', async () => {
+  reset([{ 1: 'No fever. Has taken ibuprofen.', 2: 'Migraine, Tension headache' }]);
+  const result = await translateToEnglish(['Sin fiebre. Ha tomado ibuprofeno.', 'Migraña, Cefalea tensional'], 'es');
+  assert.deepEqual(result.texts, ['No fever. Has taken ibuprofen.', 'Migraine, Tension headache']);
+  assert.equal(state.calls, 1);
+  assert.equal(state.lastOptions.quiet, true);
+  assert.match(state.lastRequest.messages[0].content, /from Spanish into English/);
+  assert.deepEqual(costStages(result, 'translation').map((stage) => stage.model), ['gpt61terra']);
+
+  // Detectado como castellano pero ya venía en inglés: se queda igual, sin respaldo,
+  // y se cuenta por si fuera el idioma original sin traducir
+  reset(['echo']);
+  const echo = await translateToEnglish(['Headache for three weeks, no fever.'], 'es');
+  assert.deepEqual(echo.texts, ['Headache for three weeks, no fever.']);
+  assert.equal(echo.fallbacks, 0);
+  assert.deepEqual(state.events.map((event) => [event.name, event.properties.kind]), [['LlmTranslationUnchanged', 'to_english']]);
+});
+
+test('the translation to English has a shorter deadline, because it comes before the diagnosis', async () => {
+  // El plazo se fija al empezar la llamada, entre «antes» y «después»: comparar con
+  // el momento correcto evita fallos de un milisegundo con el equipo cargado
+  async function budget(texts, options) {
+    const before = Date.now();
+    await translateToEnglish(texts, 'es', {}, options);
+    const after = Date.now();
+    return { atLeast: state.lastOptions.deadline - after, atMost: state.lastOptions.deadline - before };
+  }
+  reset([{ 1: 'Short case.' }]);
+  assert.ok((await budget(['Caso corto.'])).atLeast <= 10000);
+  const long = await budget(['palabra '.repeat(1500)]);
+  assert.ok(long.atMost > 20000);
+  assert.ok(long.atLeast <= 30000);
+  // El resumen y «mejorar», que responden en la misma llamada HTTP, lo acortan
+  assert.ok((await budget(['palabra '.repeat(1500)], { maxBudgetMs: 20000 })).atLeast <= 20000);
+});
+
+test('an English translation left in another script goes to Azure', async () => {
+  reset([{ 1: 'Головная боль три недели.' }]);
+  const result = await translateToEnglish(['Головная боль три недели.'], 'ru');
+  assert.deepEqual(result.texts, ['[azure-en:ru] Головная боль три недели.']);
+  assert.equal(state.events[0].properties.kind, 'to_english');
+  assert.equal(state.events[0].properties.problem, 'foreign_script,foreign_script');
+});
+
+test('Greek left untranslated is another script too, but loose Greek letters are not', async () => {
+  // Antes valía cualquier letra griega (por α, β), también un texto entero en griego
+  reset([{ 1: 'Ο ασθενής έχει πονοκέφαλο.' }]);
+  const result = await translateToEnglish(['Ο ασθενής έχει πονοκέφαλο.'], 'el');
+  assert.deepEqual(result.texts, ['[azure-en:el] Ο ασθενής έχει πονοκέφαλο.']);
+  assert.equal(state.events[0].properties.problem, 'foreign_script,foreign_script');
+
+  assert.equal(hasForeignLetters(['Linfocitos T γδ y receptores β'], 'es'), false);
+  assert.equal(hasForeignLetters(['Ο ασθενής'], 'el'), false);
+});
+
+test('a synchronous route without time left for the model goes straight to Azure', async () => {
+  reset([{ 1: 'Pregunta.' }]);
+  const result = await translateTexts(['Question.'], 'es', {}, { maxBudgetMs: 2000 });
+  assert.deepEqual(result.texts, ['[azure:es] Question.']);
+  assert.equal(state.calls, 0);
+  assert.equal(state.events[0].properties.reason, 'no_time');
+
+  // syncBudget: lo que le queda a la petición de sus 40 s, y como mucho el tope
+  assert.equal(syncBudget(Date.now(), 20000).maxBudgetMs, 20000);
+  const late = syncBudget(Date.now() - 38000).maxBudgetMs;
+  assert.ok(late <= 2000 && late > 1000, String(late));
+});
+
+test('English is not sent to translate, and a source Azure cannot target is still named', async () => {
+  reset([{ 1: 'Fever for two days.' }]);
+  const english = await translateToEnglish(['Fever for two days.'], 'en-US');
+  assert.equal(state.calls, 0);
+  assert.deepEqual(english.texts, ['Fever for two days.']);
+
+  await translateToEnglish(['Do din se bukhar hai.'], 'hi-Latn');
+  assert.match(state.lastRequest.messages[0].content, /from Hindi \(Latin\) into English/);
+  // Un código con guion bajo, como los del cliente
+  await translateToEnglish(['Febre há dois dias.'], 'pt_br');
+  assert.match(state.lastRequest.messages[0].content, /from Brazilian Portuguese into English/);
+});
+
+test('follow-up answers go to English together, each with its question, and keep their other fields', async () => {
+  const answers = [
+    { question: '¿Le duele?', answer: 'Solo el izquierdo', id: 1 },
+    { question: '¿Ha tenido fiebre?', answer: 'No, nunca', id: 2 }
+  ];
+  reset([{ answers: [
+    { question: 'Does it hurt?', answer: 'Only the left one' },
+    { question: 'Have you had a fever?', answer: 'No, never' }
+  ] }]);
+  const result = await translateAnswersToEnglish(answers, 'es');
+  assert.deepEqual(result.answers, [
+    { question: 'Does it hurt?', answer: 'Only the left one', id: 1 },
+    { question: 'Have you had a fever?', answer: 'No, never', id: 2 }
+  ]);
+  assert.equal(state.calls, 1);
+  assert.match(state.lastRequest.messages[0].content, /in the context of its question/);
+
+  // Una respuesta perdida: a Azure, campo a campo como antes
+  reset([{ answers: [{ question: 'Does it hurt?', answer: 'Only the left one' }] }]);
+  const short = await translateAnswersToEnglish(answers, 'es');
+  assert.equal(short.answers[1].answer, '[azure-en:es] No, nunca');
+  assert.equal(short.answers[1].id, 2);
+  assert.equal(state.azureCalls, 4);
+  assert.equal(state.events[0].properties.kind, 'answers');
+  assert.equal(state.events[0].properties.problem, 'list_length,list_length');
+
+  // Devueltas tal cual: se aceptan, como hacia el inglés, pero se cuentan
+  reset([{ answers: answers.map(({ question, answer }) => ({ question, answer })) }]);
+  const echo = await translateAnswersToEnglish(answers, 'es');
+  assert.equal(echo.answers[1].answer, 'No, nunca');
+  assert.deepEqual(state.events.map((event) => [event.name, event.properties.kind]), [['LlmTranslationUnchanged', 'answers']]);
+});
+
+test('if Azure also fails going to English, the error carries what the model already cost', async () => {
+  reset([{ 1: 'Головная боль.' }]);
+  state.azureFails = true;
+  await assert.rejects(translateToEnglish(['Головная боль.'], 'ru'), (error) => {
+    assert.equal(error.message, 'Azure Translator down');
+    assert.equal(error.translationResult.promptTokens, 200);
+    // Azure no cobra una traducción que falla: no aparece como etapa
+    assert.equal(error.translationResult.azureChars, 0);
+    return true;
+  });
 });
 
 test('the cost record accepts gpt61terra as the model of a stage', () => {
