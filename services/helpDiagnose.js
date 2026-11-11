@@ -84,14 +84,25 @@ function buildVisionDiagnoseRequest(deploymentModel, prompt, imageUrls) {
   };
 }
 
-// Solo el modelo por defecto (Terra) diagnostica con imágenes. En local se puede pedir
-// nano, mini o gpt4o, y esos siguen yendo solo con el texto.
+// Modelos que diagnostican con imágenes y su despliegue en Azure. En producción solo
+// se usa el de por defecto (Sol); Terra queda para comparar en local. Si se pide nano,
+// mini o gpt4o en local, siguen yendo solo con el texto.
+const VISION_DIAGNOSE_DEPLOYMENTS = {
+  gpt61sol: 'gpt-6.1-sol',
+  gpt56terra: 'gpt-5.6-terra'
+};
+
 function isVisionDiagnoseModel(model) {
-  return model === defaultModel;
+  return Object.prototype.hasOwnProperty.call(VISION_DIAGNOSE_DEPLOYMENTS, model);
 }
 
+// Los modelos largos responden «processing» y el resultado llega por WebSocket: así
+// no les afecta el corte de 45 s de SWA. El modelo por defecto va siempre por aquí;
+// Sol tarda más que Terra (mediana de unos 28 s con imágenes, p95 38 s, máximo 73 s
+// en la evaluación del 3-nov).
 function isLongDiagnoseModel(model) {
   return (
+    model === defaultModel ||
     model === 'gpt5nano' ||
     model === 'gpt5mini' ||
     model === 'gpt54mini' ||
@@ -1006,7 +1017,7 @@ ${medicalQuestionForModel}
       // Los bytes se leen aquí, no antes: data.imageUrls viaja por cola,
       // tracking y logs y solo debe llevar referencias.
       requestBody = buildVisionDiagnoseRequest(
-        'gpt-5.6-terra',
+        VISION_DIAGNOSE_DEPLOYMENTS[model],
         helpDiagnosePrompt,
         await loadImageDataUrls(data.imageUrls, {
           myuuid: data.myuuid,
@@ -1424,8 +1435,8 @@ ${medicalQuestionForModel}
       } else {
         if (model == 'gpt4o') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-        } else if (model == 'gpt56terra') {
-          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt56terra');
+        } else if (model == 'gpt56terra' || model == 'gpt61sol') {
+          await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, model);
         } else if (model == 'gpt5mini') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
         } else if (model == 'gpt54mini') {

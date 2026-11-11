@@ -1,4 +1,4 @@
-const { sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError, DEFAULT_AI_MODEL } = require('./aiUtils');
+const { sanitizeInput, suspiciousContentErrors, callAiWithFailover, extractProviderError } = require('./aiUtils');
 const { translateTexts, costStages, syncBudget } = require('./llmTranslation');
 const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
@@ -12,14 +12,21 @@ const {
 } = require('./multimodalUploadService');
 
 const CALL_INFO_DISEASE_MODEL = 'gpt54mini';
-// Con imágenes se usa el mismo modelo que el resto del flujo multimodal (clasificador y
-// diagnóstico). Se quedó en gpt-5 desde abril, cuando el resto aún no había migrado.
-const CALL_INFO_DISEASE_IMAGE_MODEL = DEFAULT_AI_MODEL;
+// Con imágenes, «más información» sigue con Terra 5.6 aunque el diagnóstico pase a Sol
+// (noviembre de 2026): es una ruta síncrona, con el corte de 45 s de SWA, Sol tarda unos 6 s
+// más con imágenes y aquí no se ha evaluado. El clasificador de imágenes también
+// sigue con Terra (multimodalImageRoutingConfig.js).
+const CALL_INFO_DISEASE_IMAGE_MODEL = 'gpt56terra';
 const CALL_INFO_DISEASE_IMAGE_API_MODEL = 'gpt-5.6-terra';
 // La respuesta general (questionType 1) tiene unos 2.000 tokens de mediana: traducida
 // en una llamada, Terra tardaba unos 10 s más que Azure. Se traduce por trozos de este
 // tamaño a la vez, como los diagnósticos, y tarda lo que el trozo más largo.
 const INFO_TRANSLATION_CHUNK_CHARS = 1500;
+const ANSWER_IN_ENGLISH = 'Write the whole answer in English, even if the medical description is in another language.';
+
+function answerIsTranslated(lang) {
+  return String(lang || 'en').trim().toLowerCase().split('-')[0] !== 'en';
+}
 
 // Junta bloques seguidos (separados por separator) en trozos de hasta maxChars; un
 // bloque más largo va solo
@@ -275,7 +282,16 @@ async function callInfoDisease(req, res) {
         default:
           return res.status(400).send({ result: "error", message: "Invalid question type" });
       }
-  
+
+      // El cliente manda la descripción en el idioma del usuario, y sin esta frase el
+      // modelo puede contestar en ese idioma: la traducción de vuelta recibe el texto
+      // ya traducido, lo rechaza como «sin traducir» y acaba en Azure (11-nov-2026: 14
+      // de 19 respuestas traducidas del tipo 3). Solo cuando se va a traducir: un
+      // cliente que no manda detectedLang sigue recibiendo lo mismo que antes.
+      if (answerIsTranslated(sanitizedData.detectedLang)) {
+        prompt += `\n\n${ANSWER_IN_ENGLISH}`;
+      }
+
       let model = CALL_INFO_DISEASE_MODEL;
       const messages = [{ role: "user", content: prompt }];
       let requestBody = {
