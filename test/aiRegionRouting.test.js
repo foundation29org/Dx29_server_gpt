@@ -18,8 +18,14 @@ const { getEndpointsByTimezone, DEFAULT_AI_MODEL } = require('../services/aiUtil
 const regionsFor = (timezone, model) =>
   getEndpointsByTimezone(timezone, model).map((endpoint) => endpoint.region);
 
+test('Sol is the default diagnosis model, in the region closest to the user', () => {
+  assert.equal(DEFAULT_AI_MODEL, 'gpt61sol');
+  assert.deepEqual(regionsFor('Europe/Madrid', DEFAULT_AI_MODEL), ['eu1', 'us2']);
+  assert.deepEqual(regionsFor('America/Mexico_City', DEFAULT_AI_MODEL), ['us2', 'us1', 'eu1']);
+  assert.deepEqual(regionsFor('Asia/Kolkata', DEFAULT_AI_MODEL), ['as1', 'us1', 'eu1']);
+});
+
 test('Terra goes to the region closest to the user, with a failover in another region', () => {
-  assert.equal(DEFAULT_AI_MODEL, 'gpt56terra');
   assert.deepEqual(regionsFor('Europe/Madrid', 'gpt56terra'), ['eu1', 'us2']);
   assert.deepEqual(regionsFor('Africa/Lagos', 'gpt56terra'), ['eu1', 'us2']);
   assert.deepEqual(regionsFor('America/Mexico_City', 'gpt56terra'), ['us2', 'us1']);

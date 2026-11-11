@@ -23,12 +23,15 @@ const state = { aiContent: '', translations: [], translateFails: false, costReco
 stubModule('../services/aiUtils', {
   sanitizeInput: (input) => input.trim(),
   suspiciousContentErrors: () => [],
-  callAiWithFailover: async () => ({
+  callAiWithFailover: async (requestBody) => {
+    state.prompts.push(requestBody.messages[0].content);
+    return {
     data: {
       usage: { prompt_tokens: 100, completion_tokens: 200 },
       choices: [{ message: { content: state.aiContent } }]
     }
-  }),
+    };
+  },
   extractProviderError: () => ({}),
   DEFAULT_AI_MODEL: 'gpt56terra'
 });
@@ -105,6 +108,7 @@ async function call(body) {
 }
 
 test.beforeEach(() => {
+  state.prompts = [];
   state.translations = [];
   state.translationOptions = [];
   state.order = [];
@@ -123,6 +127,24 @@ test('the differential list is translated name by name, without empty lines', as
     { name: '[es] Blurred near vision', checked: false },
     { name: '[es] Eye strain', checked: false }
   ]);
+});
+
+test('when the answer will be translated, the model is asked to answer in English', async () => {
+  state.aiContent = '1. Visión borrosa de cerca';
+  for (const questionType of [0, 1, 2, 3, 4, 5, 6]) {
+    state.prompts = [];
+    await call({ ...baseBody, questionType, medicalDescription: 'Dolor de cabeza al leer mucho rato.' });
+    assert.match(state.prompts[0], /Write the whole answer in English/, `questionType ${questionType}`);
+  }
+});
+
+test('an English answer keeps the prompt as before', async () => {
+  state.aiContent = '1. Blurred near vision';
+  for (const detectedLang of ['en', 'en-GB', undefined]) {
+    state.prompts = [];
+    await call({ ...baseBody, detectedLang, questionType: 3, medicalDescription: 'Headache when reading.' });
+    assert.doesNotMatch(state.prompts[0], /in English/, String(detectedLang));
+  }
 });
 
 test('a long answer is translated in chunks at the same time and joined in order', async () => {

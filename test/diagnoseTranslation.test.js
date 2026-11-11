@@ -48,6 +48,8 @@ function reset({ lang = 'es', translate, anonymize, forwardFails = false } = {})
   state.textCalls = [];
   state.anonymizeCalls = [];
   state.prompts = [];
+  state.aiCalls = [];
+  state.blobs = [];
   state.costSaves = [];
   state.errors = [];
   state.events = [];
@@ -73,7 +75,9 @@ stubModule('../services/anonymizeService', {
     return result;
   }
 });
-stubModule('../services/blobOpenDx29', { createBlobOpenDx29: async () => {} });
+stubModule('../services/blobOpenDx29', {
+  createBlobOpenDx29: async (body, version) => { state.blobs.push(version); }
+});
 stubModule('../services/email', { sendMailErrorGPTIP: async () => {} });
 stubModule('../assets/prompts', {
   diagnosis: { withDiseases: '{{description}} {{previous_diagnoses}}', withoutDiseases: '{{description}}' }
@@ -94,9 +98,10 @@ stubModule('../services/intentClassifier', {
   shouldSuggestDiagnosisPage: () => false
 });
 stubModule('../services/aiUtils', {
-  DEFAULT_AI_MODEL: 'gpt56terra',
-  callAiWithFailover: async (requestBody) => {
+  DEFAULT_AI_MODEL: 'gpt61sol',
+  callAiWithFailover: async (requestBody, timezone, model) => {
     state.order.push('diagnose');
+    state.aiCalls.push({ model, requestBody });
     // Con el modelo por defecto la petición es la de visión: el texto va en una parte
     const content = requestBody.messages[0].content;
     state.prompts.push(typeof content === 'string' ? content : content.map((part) => part.text || '').join(''));
@@ -182,6 +187,27 @@ function request(extra = {}) {
 function stagesNamed(save, name) {
   return save.stages.filter((stage) => stage.name === name);
 }
+
+test('Sol diagnoses with its own deployment, reasoning low, and the case is saved to the blob', async () => {
+  reset();
+  await processAIRequestInternal(request(), { header_language: 'es' }, 'gpt61sol');
+
+  assert.equal(state.aiCalls.length, 1);
+  assert.equal(state.aiCalls[0].model, 'gpt61sol');
+  assert.equal(state.aiCalls[0].requestBody.model, 'gpt-6.1-sol');
+  assert.equal(state.aiCalls[0].requestBody.reasoning_effort, 'low');
+  assert.deepEqual(state.blobs, ['gpt61sol']);
+  const [stage] = stagesNamed(state.costSaves[0], 'ai_call');
+  assert.equal(stage.model, 'gpt61sol');
+});
+
+test('Terra can still be asked for locally, with its own deployment', async () => {
+  reset();
+  await processAIRequestInternal(request(), { header_language: 'es' }, 'gpt56terra');
+
+  assert.equal(state.aiCalls[0].requestBody.model, 'gpt-5.6-terra');
+  assert.deepEqual(state.blobs, ['gpt56terra']);
+});
 
 test('the description goes to English before the diagnosis, with its cost', async () => {
   reset();

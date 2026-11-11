@@ -6,11 +6,14 @@ const { normalizeCountryCode } = require('./locationContext');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const { jsonrepair } = require('jsonrepair');
 
-const DEFAULT_AI_MODEL = 'gpt56terra';
+// Modelo de diagnóstico, con texto y con imágenes: gpt-6.1-sol desde noviembre de
+// 2026. Sustituye a gpt-5.6-terra porque Sol acierta más en raras y con imágenes y
+// cuesta algo menos por caso.
+const DEFAULT_AI_MODEL = 'gpt61sol';
 const ROUTING_MODEL_ALIASES = {
   gpt4o: 'gpt4o',
   // Compatibilidad durante el despliegue: clientes antiguos que aún envíen
-  // "o3" reciben Terra; ya no existe una ruta avanzada en el producto.
+  // "o3" reciben el modelo por defecto; ya no existe una ruta avanzada en el producto.
   o3: DEFAULT_AI_MODEL,
   gpt5nano: 'gpt5nano',
   'gpt-5-nano': 'gpt5nano',
@@ -19,7 +22,7 @@ const ROUTING_MODEL_ALIASES = {
   gpt54mini: 'gpt54mini',
   'gpt-5.4-mini': 'gpt54mini',
   // gpt-5 se retiró (su deployment aún tenía filtros de contenido): como "o3", cualquier
-  // cliente que lo pida recibe Terra.
+  // cliente que lo pida recibe el modelo por defecto.
   gpt5: DEFAULT_AI_MODEL,
   'gpt-5': DEFAULT_AI_MODEL,
   gpt56terra: 'gpt56terra',
