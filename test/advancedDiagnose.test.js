@@ -217,8 +217,11 @@ test('every web has the advanced mode, with or without images; the API does not'
   });
   assert.equal(check(), null);
   assert.equal(check({ uploadId: 'up-1' }), null);
-  assert.equal(check({}, { tenantId: 'salud-gpt-prod', productId: 'lemon-glacier-023c47f03' }), null);
   assert.equal(check({}, { tenantId: 'dxeugpt-prod', productId: 'delightful-moss-0b31d2b03' }), null);
+  // SaludGPT (Aragón) todavía no: ni por su tenant ni con otro tenant por su producto
+  assert.equal(check({}, { tenantId: 'salud-gpt-prod', productId: 'lemon-glacier-023c47f03' }), 'ADVANCED_NOT_AVAILABLE_FOR_TENANT');
+  assert.equal(check({}, { tenantId: 'salud-gpt-local', subscriptionId: undefined, productId: undefined, nodeEnv: 'local' }), 'ADVANCED_NOT_AVAILABLE_FOR_TENANT');
+  assert.equal(check({}, { tenantId: 'dxgpt-prod', productId: 'lemon-glacier-023c47f03' }), 'ADVANCED_NOT_AVAILABLE_FOR_API');
   // Un cliente de la API: sin tenant, o con un tenant puesto a mano pero con su producto de APIM
   assert.equal(check({}, { tenantId: undefined, productId: 'dxgpt-freemium' }), 'ADVANCED_NOT_AVAILABLE_FOR_API');
   assert.equal(check({}, { productId: 'dxgpt-freemium' }), 'ADVANCED_NOT_AVAILABLE_FOR_API');
