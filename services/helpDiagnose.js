@@ -29,6 +29,14 @@ const {
 } = require('./multimodalUploadService');
 const { locationContextText, resolveCountryCode, withLocationContext } = require('./locationContext');
 const { answerMedicalQuestion } = require('./medicalQuestionService');
+const { callClaudeDiagnosis } = require('./claudeFoundry');
+const {
+  ADVANCED_DIAGNOSE_MODEL,
+  isAdvancedRequest,
+  advancedFieldErrors,
+  advancedRequestRejection,
+  advancedMeta
+} = require('./advancedDiagnose');
 const defaultModel = DEFAULT_AI_MODEL;
 const modelIntencion = 'gpt54mini'; //'gpt4o';
 const modelQuestions = 'gpt61sol';
@@ -103,6 +111,7 @@ function isVisionDiagnoseModel(model) {
 function isLongDiagnoseModel(model) {
   return (
     model === defaultModel ||
+    model === ADVANCED_DIAGNOSE_MODEL ||
     model === 'gpt5nano' ||
     model === 'gpt5mini' ||
     model === 'gpt54mini' ||
@@ -118,6 +127,19 @@ const toAnonymizedHtml = (txt) => {
    .replace(/\[ANON-(\d+)\]/g, (m, p1) => `<span style="background-color: black; display: inline-block; width:${parseInt(p1, 10)}em;">&nbsp;</span>`)
    .replace(/\n/g, '<br>');
 };
+
+// Errores que el cliente muestra con su propio mensaje; el resto le llega como
+// PROCESSING_ERROR. Con el modo avanzado, el usuario conserva sus resultados anteriores.
+const PUBLIC_PROCESSING_ERROR_CODES = new Set([
+  'ADVANCED_MODEL_UNAVAILABLE', // se puede reintentar
+  'ADVANCED_MODEL_REFUSED', // el modelo se negó con este caso
+  'ADVANCED_MODEL_REJECTED', // petición que no va a pasar reintentando (400, configuración)
+  'ADVANCED_IMAGE_TOO_LARGE' // alguna imagen pasa del límite de Claude
+]);
+
+function processingErrorCode(error) {
+  return PUBLIC_PROCESSING_ERROR_CODES.has(error?.code) ? error.code : 'PROCESSING_ERROR';
+}
 
 // Función para sanitizar parámetros del iframe que pueden incluir información adicional
 // para tenants específicos como centro médico, ámbito, especialidad, etc.
@@ -146,7 +168,7 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel) 
     } catch (error) {
       // Enviar error via WebPubSub
       try {
-        await pubsubService.sendError(userId, error, 'PROCESSING_ERROR');
+        await pubsubService.sendError(userId, error, processingErrorCode(error));
       } catch (pubsubError) {
         console.error('Error sending WebPubSub error notification:', pubsubError);
       }
@@ -160,8 +182,14 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel) 
 
 // Función interna que contiene toda la lógica de procesamiento
 async function processAIRequestInternal(data, requestInfo = null, model = defaultModel, userId = null) {
-  model = resolveDiagnoseModel(model);
+  // Modo avanzado (Claude Fable 5.2): lo decide el servidor tras comprobar los límites
+  // en handleDiagnoseOrAsk; fuera de local el cliente no puede elegir otro modelo.
+  const advanced = isAdvancedRequest(data);
+  model = advanced ? ADVANCED_DIAGNOSE_MODEL : resolveDiagnoseModel(model);
   data.model = model;
+  if (advanced) {
+    data.advancedMeta = advancedMeta(data);
+  }
   const startTime = Date.now(); // Iniciar cronómetro para medir tiempo de procesamiento
 
   // Inicializar objeto para rastrear costos de cada etapa
@@ -359,7 +387,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       subscriptionId: data.subscriptionId,
       myuuid: data.myuuid
     };
-    const forceDiagnosis = flow === 'diagnose' && data.forceDiagnosis === true;
+    // El modo avanzado se pide sobre un caso que ya se diagnosticó: no se vuelve a clasificar
+    const forceDiagnosis = flow === 'diagnose' && (data.forceDiagnosis === true || advanced);
     if (forceDiagnosis) {
       intentDecision = {
         action: 'go',
@@ -401,6 +430,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       transportFallback: String(intentDecision.transportFallback || false),
       structuredOutputFallback: String(intentDecision.structuredOutputFallback || false),
       forceDiagnosis: String(forceDiagnosis),
+      advanced: String(advanced),
       descriptionLength: String(data.description?.length || 0)
     });
 
@@ -995,6 +1025,7 @@ ${medicalQuestionForModel}
         .replace("{{description}}", () => promptDescription);
     console.log('Calling IA for full diagnoses');
     let requestBody;
+    let advancedImages = [];
     if (model === 'gpt5nano') {
       requestBody = {
         model: "gpt-5-nano",
@@ -1013,6 +1044,16 @@ ${medicalQuestionForModel}
         messages: [{ role: "user", content: helpDiagnosePrompt }],
         reasoning_effort: "low" //minimal, low, medium, high
       };
+    } else if (model === ADVANCED_DIAGNOSE_MODEL) {
+      // Va por claudeFoundry con el mismo prompt y las mismas imágenes que recibiría Sol
+      requestBody = null;
+      advancedImages = hasImages
+        ? await loadImageDataUrls(data.imageUrls, {
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        })
+        : [];
     } else if (isVisionDiagnoseModel(model)) {
       // Los bytes se leen aquí, no antes: data.imageUrls viaja por cola,
       // tracking y logs y solo debe llevar referencias.
@@ -1039,13 +1080,15 @@ ${medicalQuestionForModel}
     }
 
     const aiStartMs = Date.now();
-    const aiResponse = await callAiWithFailover(
-      requestBody,
-      data.timezone,
-      model,
-      0,
-      dataRequest
-    );
+    const aiResponse = model === ADVANCED_DIAGNOSE_MODEL
+      ? await callClaudeDiagnosis(helpDiagnosePrompt, { images: advancedImages, dataRequest })
+      : await callAiWithFailover(
+        requestBody,
+        data.timezone,
+        model,
+        0,
+        dataRequest
+      );
     const aiElapsedMs = Date.now() - aiStartMs;
     let usage = null;
 
@@ -1171,6 +1214,14 @@ ${medicalQuestionForModel}
           console.log('Fail sending email');
           insights.error(emailError);
         }
+      }
+      // Análisis en profundidad: el usuario ya tiene la lista de Sol, así que es un error
+      // del análisis (se puede reintentar) y no una lista vacía. El catch final guarda su coste.
+      if (advanced) {
+        const unreadable = new Error(`Advanced model answer could not be parsed: ${parseError.message}`);
+        unreadable.code = 'ADVANCED_MODEL_UNAVAILABLE';
+        unreadable.phase = 'parsing';
+        throw unreadable;
       }
       //throw parseError;
       return {
@@ -1435,7 +1486,7 @@ ${medicalQuestionForModel}
       } else {
         if (model == 'gpt4o') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'v1');
-        } else if (model == 'gpt56terra' || model == 'gpt61sol') {
+        } else if (model == 'gpt56terra' || model == 'gpt61sol' || model === ADVANCED_DIAGNOSE_MODEL) {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, model);
         } else if (model == 'gpt5mini') {
           await blobOpenDx29Ctrl.createBlobOpenDx29(infoTrack, 'gpt5mini');
@@ -1637,6 +1688,8 @@ ${medicalQuestionForModel}
       data: diseasesList,
       // Si el cliente debe mostrar diagnosis_en bajo el nombre traducido (hindi, árabe...)
       showEnglishName: showsEnglishName(detectedLanguage),
+      // Solo en el modo avanzado, para no cambiar la respuesta de la API
+      ...(advanced ? { advanced: true } : {}),
       anonymization: {
         hasPersonalInfo,
         anonymizedText: anonymizedDescription,
@@ -1842,6 +1895,9 @@ function validateDiagnoseRequest(data) {
 
   validateUploadReferenceFields(data, errors);
 
+  // Modo avanzado: advanced, advancedReason y advancedSource
+  errors.push(...advancedFieldErrors(data));
+
   // Verificar patrones sospechosos
   const iframeEntries = data.iframeParams && typeof data.iframeParams === 'object'
     ? Object.entries(data.iframeParams).map(([field, value]) => [`iframeParams.${field}`, value])
@@ -2038,6 +2094,33 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     sanitizedData.flow = flow;
     sanitizedData.betaPage = flow === 'ask';
     sanitizedData.forceDiagnosis = flow === 'diagnose' && req.body.forceDiagnosis === true;
+
+    // Modo avanzado: solo la web y solo el diagnóstico. Se comprueba antes de responder
+    // «processing», para que el cliente pueda avisar a la vez
+    const advanced = isAdvancedRequest(sanitizedData);
+    if (advanced) {
+      const rejection = advancedRequestRejection({
+        flow,
+        tenantId,
+        subscriptionId,
+        productId: getHeader(req, 'x-product-id'),
+        data: sanitizedData
+      });
+      const advancedProperties = {
+        tenantId: String(tenantId || ''),
+        myuuid: String(sanitizedData.myuuid || ''),
+        reason: String(sanitizedData.advancedReason || ''),
+        source: String(sanitizedData.advancedSource || '')
+      };
+      if (rejection) {
+        insights.trackEvent('AdvancedDiagnosisRejected', { ...advancedProperties, code: rejection });
+        return res.status(200).send({ result: 'advanced_unavailable', code: rejection });
+      }
+      insights.trackEvent('AdvancedDiagnosisRequested', advancedProperties);
+    }
+    const effectiveModel = advanced ? ADVANCED_DIAGNOSE_MODEL : model;
+    sanitizedData.model = effectiveModel;
+
     try {
       sanitizedData.imageUrls = await resolveDiagnosticImages(req.body, {
         myuuid: sanitizedData.myuuid,
@@ -2061,12 +2144,13 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     }
 
     // 1. Si es modelo largo, responde rápido y procesa en background
-    const isLongModel = isLongDiagnoseModel(model);
+    const isLongModel = isLongDiagnoseModel(effectiveModel);
 
     // Si response_mode es 'direct', procesar síncronamente incluso para modelos largos
+    // (el modo avanzado no llega aquí: advancedRequestRejection lo rechaza)
     if (sanitizedData.response_mode === 'direct') {
       try {
-        const result = await processAIRequestInternal(sanitizedData, requestInfo, model, null);
+        const result = await processAIRequestInternal(sanitizedData, requestInfo, effectiveModel, null);
         return res.status(200).send(result);
       } catch (error) {
         throw error;
@@ -2075,7 +2159,7 @@ async function handleDiagnoseOrAsk(req, res, flow) {
 
     if (isLongModel) {
       res.status(200).send({ result: 'processing' });
-      processAIRequest(sanitizedData, requestInfo, model)
+      processAIRequest(sanitizedData, requestInfo, effectiveModel)
         .catch(error => {
           console.error('Error in background processing:', error);
         });
@@ -2083,7 +2167,7 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     }
 
     // 2. Modelos rápidos: espera el resultado y responde por HTTP
-    const result = await processAIRequest(sanitizedData, requestInfo, model);
+    const result = await processAIRequest(sanitizedData, requestInfo, effectiveModel);
     return res.status(200).send(result);
   } catch (error) {
     console.error('Error:', error);

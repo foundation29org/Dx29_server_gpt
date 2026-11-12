@@ -2,6 +2,7 @@ const insights = require('./insights');
 const OpinionStats = require('../models/opinionstats');
 const serviceEmail = require('./email');
 const { resolveDiagnoseModel } = require('./aiUtils');
+const { ADVANCED_DIAGNOSE_MODEL } = require('./advancedDiagnose');
 
 const OPINION_VALUE_MAX_LENGTH = 10000;
 
@@ -138,7 +139,11 @@ async function opinion(req, res) {
 
     // Sanitizar los datos
     const sanitizedData = sanitizeOpinionData(req.body);
-    sanitizedData.versionModel = resolveDiagnoseModel(sanitizedData.versionModel);
+    // Un voto sobre resultados del modo avanzado se guarda con su modelo, para medir si
+    // convence más que Sol; cualquier otro valor queda en el modelo por defecto
+    sanitizedData.versionModel = sanitizedData.versionModel === ADVANCED_DIAGNOSE_MODEL
+      ? ADVANCED_DIAGNOSE_MODEL
+      : resolveDiagnoseModel(sanitizedData.versionModel);
     sanitizedData.version = req.body.version || 'unknown';
     sanitizedData.tenantId = tenantId;
     sanitizedData.subscriptionId = subscriptionId;
