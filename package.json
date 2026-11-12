@@ -30,7 +30,7 @@
     "express-rate-limit": "^7.5.0",
     "js-tiktoken": "^1.0.20",
     "jsonrepair": "^3.13.1",
-    "mongoose": "^8.24.3",
+    "mongoose": "^8.24.8",
     "multer": "^2.2.0",
     "nodemailer": "^10.2.1",
     "nodemailer-express-handlebars": "^6.1.2",
@@ -54,5 +54,10 @@
       ".env"
     ],
     "delay": "2500"
+  },
+  "overrides": {
+    "express-handlebars": {
+      "glob": "^14.0.5"
+    }
   }
 }
