@@ -146,10 +146,11 @@ class CostTrackingService {
         detectedLanguage: data.detectedLanguage,
         queryType: queryType,
         intentAction: options.intentAction || data.intentAction,
-        intentReason: options.intentReason || data.intentReason
+        intentReason: options.intentReason || data.intentReason,
+        ...(data.advancedMeta ? { advanced: data.advancedMeta } : {})
       }
     };
-    
+
     return this.saveCostRecord(costData);
   }
 
@@ -184,7 +185,9 @@ class CostTrackingService {
         detectedLanguage: data.detectedLanguage,
         queryType: queryType,
         intentAction: options.intentAction || data.intentAction,
-        intentReason: options.intentReason || data.intentReason
+        intentReason: options.intentReason || data.intentReason,
+        // Modo avanzado: por qué lo pidió el usuario y desde dónde (solo códigos)
+        ...(data.advancedMeta ? { advanced: data.advancedMeta } : {})
       }
     };
 

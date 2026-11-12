@@ -39,7 +39,7 @@ const CostTrackingSchema = new Schema({
   model: {
     type: String,
     required: true,
-    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'gpt56luna', 'gpt61terra', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe'],
+    enum: ['gpt4o', 'o3', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'claudefable52', 'gpt56luna', 'gpt61terra', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe'],
     index: true
   },
   
@@ -93,7 +93,7 @@ const CostTrackingSchema = new Schema({
     },
     model: {
       type: String,
-      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'gpt56luna', 'gpt61terra', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe']
+      enum: ['gpt4o', 'o3', 'translation_service', 'sonar', 'gpt5nano', 'gpt5mini', 'gpt54mini', 'gpt5', 'gpt56terra', 'gpt61sol', 'claudefable52', 'gpt56luna', 'gpt61terra', 'perplexity_search', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-pro', 'sonar-reasoning-pro', 'sonar-pro', 'document_intelligence', 'gpt4o-transcribe']
     },
     duration: {
       type: Number,  // Duración en milisegundos

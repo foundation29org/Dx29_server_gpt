@@ -50,6 +50,11 @@ const PRICING = {
     input: 0.002,     // $2.00 per 1M tokens
     output: 0.010     // $10.00 per 1M tokens
   },
+  // Modo avanzado del diagnóstico (Microsoft Foundry, precio de lista de Anthropic)
+  claudefable52: {
+    input: 0.008,     // $8.00 per 1M tokens
+    output: 0.040     // $40.00 per 1M tokens
+  },
   gpt56luna: {
     input: 0.00075,   // Temporal: misma tarifa que gpt-5.4-mini hasta confirmar la de gpt-5.6-luna
     output: 0.0045    // Temporal: misma tarifa que gpt-5.4-mini hasta confirmar la de gpt-5.6-luna
@@ -86,6 +91,8 @@ const PRICING_ALIASES = {
   'gpt-5.6-terra': 'gpt56terra',
   gpt61sol: 'gpt61sol',
   'gpt-6.1-sol': 'gpt61sol',
+  claudefable52: 'claudefable52',
+  'claude-fable-5-2': 'claudefable52',
   gpt56luna: 'gpt56luna',
   'gpt-5.6-luna': 'gpt56luna',
   gpt61terra: 'gpt61terra',
