@@ -9,8 +9,9 @@
 // guarda para analizarlo, pero no se pasa al modelo: Fable se evaluó con el mismo
 // prompt que Sol y sin ese contexto.
 //
-// Siempre activo en la web. Los clientes de la API no lo tienen (no está en la página
-// de precios): se distinguen por el producto de APIM. Una vez por caso: lo controla el cliente.
+// Activo en la web de DxGPT (también la versión EU); de momento no en SaludGPT. Los
+// clientes de la API no lo tienen (no está en la página de precios): se distinguen por
+// el producto de APIM. Una vez por caso: lo controla el cliente.
 
 const ADVANCED_DIAGNOSE_MODEL = 'claudefable52';
 
@@ -51,14 +52,24 @@ function advancedFieldErrors(data) {
 // productos de la API (Freemium, Pro, Research, Marketplace...) no están aquí.
 const WEB_APIM_PRODUCTS = new Set([
   'brave-water-0ce6c5a03',
-  'delightful-moss-0b31d2b03',
-  'lemon-glacier-023c47f03'
+  'delightful-moss-0b31d2b03'
+  // 'lemon-glacier-023c47f03' (SaludGPT): ver ADVANCED_EXCLUDED_TENANT_PREFIXES
 ]);
+
+// Webs que aún no lo tienen. SaludGPT (Aragón), hasta que apruebe que los casos se
+// procesen con Claude Fable, que hoy corre en infraestructura de Anthropic y puede
+// procesarse fuera de la UE (12-nov-2026). Para activarlo: quitarlo de aquí, volver a
+// poner su producto en WEB_APIM_PRODUCTS y quitarlo también en el cliente
+// (ADVANCED_EXCLUDED_TENANT_PREFIXES en undiagnosed-page.component.ts).
+const ADVANCED_EXCLUDED_TENANT_PREFIXES = ['salud-gpt'];
 
 // Por qué no se puede usar el modo avanzado en esta petición, o null si se puede.
 function advancedRequestRejection({ flow, tenantId, subscriptionId, productId, data, nodeEnv = process.env.NODE_ENV }) {
   // Solo la web. X-Tenant-Id no basta: la API pública lo admite como cabecera opcional.
   if (!tenantId) return 'ADVANCED_NOT_AVAILABLE_FOR_API';
+  if (ADVANCED_EXCLUDED_TENANT_PREFIXES.some((prefix) => String(tenantId).startsWith(prefix))) {
+    return 'ADVANCED_NOT_AVAILABLE_FOR_TENANT';
+  }
   if (subscriptionId) {
     // Por APIM: solo los productos de las webs
     if (!WEB_APIM_PRODUCTS.has(String(productId || ''))) return 'ADVANCED_NOT_AVAILABLE_FOR_API';
@@ -84,6 +95,7 @@ function advancedMeta(data) {
 module.exports = {
   ADVANCED_DIAGNOSE_MODEL,
   WEB_APIM_PRODUCTS,
+  ADVANCED_EXCLUDED_TENANT_PREFIXES,
   ADVANCED_REASONS,
   ADVANCED_SOURCES,
   isAdvancedRequest,
