@@ -7,8 +7,6 @@ const Support = require('../../models/support')
 const serviceEmail = require('../../services/email')
 const insights = require('../../services/insights')
 const { suspiciousContentErrors } = require('../../services/aiUtils')
-const axios = require('axios');
-const config = require('../../config')
 
 function getHeader(req, name) {
 	return req.headers[name.toLowerCase()];
@@ -107,11 +105,8 @@ function isValidSupportData(data) {
 		lang: sanitizedData.lang
 	  });
   
-	  // Enviar al flujo (sin esperar respuesta)
-	  sendFlow(support, sanitizedData.lang, tenantId, subscriptionId);
-  
-	  // Guardar en base de datos. El mensaje queda guardado aquí y en el flujo;
-	  // el email a soporte es solo un aviso.
+	  // Guardar en base de datos. Mongo es la única copia del mensaje (ya no se
+	  // copia a SharePoint con Power Automate); el email a soporte es solo un aviso.
 	  let saved = false;
 	  try {
 		await support.save();
@@ -171,45 +166,6 @@ function isValidSupportData(data) {
 	}
   }
 
-
-async function sendFlow(support, lang, tenantId, subscriptionId){
-	let requestBody = {
-		subject: support.subject,
-		subscribe: support.subscribe.toString(),
-		email: support.email,
-		description: support.description,
-		date: support.date,
-		lang: lang,
-		tenantId: tenantId,
-		subscriptionId: subscriptionId
-	}
-	const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
-    ? 'https://default163d001a45914200a300b9062d2e31.ec.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/9dae9a0707e5452abbc7173b05277df6/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=cRgHcLdpOU-xp-adfPhGBvIK79RG4PTEdV0Q9EqTKEc'
-    : 'https://default163d001a45914200a300b9062d2e31.ec.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/2e5021f1e8764cacb7a60a58bfe1f1db/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=r8C_SUbMLGg2juwT5h3IdH00-xkaIyGYIeFpBI609TM';
-
-
-	try {
-        await axios.post(endpointUrl, requestBody, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-    } catch (error) {
-		console.log(error)
-        console.error('Error al enviar datos:', error.message);
-		let infoError = {
-			body: requestBody,
-			error: error.message,
-			type: error.code || 'SUPPORT_ERROR',
-			tenantId: tenantId,
-			subscriptionId: subscriptionId
-		};
-		insights.error(infoError);
-    }
-
-}
-
 module.exports = {
-	sendMsgLogoutSupport,
-	sendFlow
+	sendMsgLogoutSupport
 }
