@@ -52,6 +52,19 @@ const INTENT_RESPONSE_SCHEMA = {
   }
 };
 
+// Con imágenes clínicas el modelo además dice si el texto da la edad, el sexo y algún síntoma
+// del paciente; la decisión final la toma applyImageRule, no el modelo.
+const IMAGE_INTENT_RESPONSE_SCHEMA = {
+  ...INTENT_RESPONSE_SCHEMA,
+  required: [...INTENT_RESPONSE_SCHEMA.required, 'patient_age_stated', 'patient_sex_stated', 'patient_symptoms_stated'],
+  properties: {
+    ...INTENT_RESPONSE_SCHEMA.properties,
+    patient_age_stated: { type: 'boolean' },
+    patient_sex_stated: { type: 'boolean' },
+    patient_symptoms_stated: { type: 'boolean' }
+  }
+};
+
 function fallbackDecision(flow) {
   const action = flow === 'ask' ? 'explain' : 'go';
   return {
@@ -101,13 +114,45 @@ function normalizeDecision(parsedDecision) {
     throw new RangeError(`Unsupported intent action: ${action || '(empty)'}`);
   }
 
-  return {
+  const decision = {
     action,
     reason: REASONS_BY_ACTION[action].has(reason)
       ? reason
       : DEFAULT_REASON_BY_ACTION[action],
     queryType: ACTION_TO_QUERY_TYPE[action],
     usedFallback: false
+  };
+  if (typeof parsedDecision?.patient_age_stated === 'boolean') {
+    decision.ageStated = parsedDecision.patient_age_stated;
+  }
+  if (typeof parsedDecision?.patient_sex_stated === 'boolean') {
+    decision.sexStated = parsedDecision.patient_sex_stated;
+  }
+  if (typeof parsedDecision?.patient_symptoms_stated === 'boolean') {
+    decision.symptomsStated = parsedDecision.patient_symptoms_stated;
+  }
+  return decision;
+}
+
+// Con imágenes clínicas adjuntas deciden la edad, el sexo y los síntomas: con los tres se
+// analizan las imágenes directamente; si falta alguno, se piden (el cliente muestra el aviso
+// de imágenes, que también permite continuar). Sin esos datos del modelo, la decisión no cambia.
+function applyImageRule(decision, imageCount) {
+  if (normalizeImageCount(imageCount) === 0 || decision.usedFallback) {
+    return decision;
+  }
+  const flags = [decision.ageStated, decision.sexStated, decision.symptomsStated];
+  if (flags.some((flag) => typeof flag !== 'boolean')) {
+    return decision;
+  }
+  const action = flags.every(Boolean) ? 'go' : 'enrich';
+  return {
+    ...decision,
+    modelAction: decision.action,
+    action,
+    reason: action === 'go' ? 'patient_case_ready' : 'missing_patient_data',
+    queryType: ACTION_TO_QUERY_TYPE[action],
+    imageRule: action === 'go' ? 'patient_data_present' : 'ask_patient_data'
   };
 }
 
@@ -122,23 +167,42 @@ function parseIntentDecision(rawContent, flow = 'diagnose') {
   }
 }
 
-function buildIntentRequest(description, useStructuredOutput = true) {
+function normalizeImageCount(imageCount) {
+  const count = Number(imageCount);
+  return Number.isInteger(count) && count > 0 ? count : 0;
+}
+
+// Con imágenes clínicas adjuntas, el enrutado las cuenta como datos del paciente y pide
+// más datos si faltan la edad, el sexo o los síntomas (afectan a la interpretación).
+function buildIntentPrompt(description, imageCount = 0) {
+  const count = normalizeImageCount(imageCount);
+  const imageContext = count > 0
+    ? PROMPTS.diagnosis.intentRoutingImages.replace('{{imageCount}}', String(count))
+    : '';
+  // Función de reemplazo: un «$» del texto del usuario no debe interpretarse como patrón.
+  return PROMPTS.diagnosis.intentRouting
+    .replace('{{imageContext}}', () => imageContext)
+    .replace('{{description}}', () => description);
+}
+
+function buildIntentRequest(description, useStructuredOutput = true, { imageCount = 0 } = {}) {
   const request = {
     model: 'gpt-5.4-mini',
     messages: [{
       role: 'user',
-      content: PROMPTS.diagnosis.intentRouting.replace('{{description}}', description)
+      content: buildIntentPrompt(description, imageCount)
     }],
     reasoning_effort: 'low'
   };
 
   if (useStructuredOutput) {
+    const withImages = normalizeImageCount(imageCount) > 0;
     request.response_format = {
       type: 'json_schema',
       json_schema: {
-        name: 'diagnose_intent_routing',
+        name: withImages ? 'diagnose_intent_routing_images' : 'diagnose_intent_routing',
         strict: true,
-        schema: INTENT_RESPONSE_SCHEMA
+        schema: withImages ? IMAGE_INTENT_RESPONSE_SCHEMA : INTENT_RESPONSE_SCHEMA
       }
     };
   }
@@ -151,7 +215,8 @@ async function classifyIntent({
   flow = 'diagnose',
   timezone,
   model = 'gpt54mini',
-  requestData = null
+  requestData = null,
+  imageCount = 0
 }) {
   // Lazy import keeps the pure parser/test path independent from runtime
   // endpoint configuration.
@@ -163,7 +228,7 @@ async function classifyIntent({
     let response;
     try {
       response = await callAiWithFailover(
-        buildIntentRequest(description, true),
+        buildIntentRequest(description, true, { imageCount }),
         timezone,
         model,
         0,
@@ -177,7 +242,7 @@ async function classifyIntent({
 
       structuredOutputFallback = true;
       response = await callAiWithFailover(
-        buildIntentRequest(description, false),
+        buildIntentRequest(description, false, { imageCount }),
         timezone,
         model,
         0,
@@ -186,7 +251,7 @@ async function classifyIntent({
     }
 
     const rawContent = response?.data?.choices?.[0]?.message?.content;
-    const decision = parseIntentDecision(rawContent, flow);
+    const decision = applyImageRule(parseIntentDecision(rawContent, flow), imageCount);
 
     return {
       ...decision,
@@ -215,6 +280,8 @@ function shouldSuggestDiagnosisPage(decision) {
 
 module.exports = {
   ACTION_TO_QUERY_TYPE,
+  applyImageRule,
+  buildIntentPrompt,
   buildIntentRequest,
   classifyIntent,
   failOpenDecision,

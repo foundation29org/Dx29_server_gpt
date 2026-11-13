@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  applyImageRule,
+  buildIntentPrompt,
   buildIntentRequest,
   failOpenDecision,
   parseIntentDecision,
@@ -87,4 +89,91 @@ test('builds a strict structured-output request', () => {
   assert.equal(request.response_format.type, 'json_schema');
   assert.equal(request.response_format.json_schema.strict, true);
   assert.match(request.messages[0].content, /Patient with headache/);
+});
+
+test('without images the routing prompt has no image section and no placeholders', () => {
+  const prompt = buildIntentPrompt('Analyze this x-ray');
+
+  assert.doesNotMatch(prompt, /ATTACHED IMAGES/);
+  assert.doesNotMatch(prompt, /\{\{\w+\}\}/);
+  assert.match(prompt, /INPUT:\nAnalyze this x-ray$/);
+});
+
+test('with clinical images the routing prompt asks for age, sex and symptoms', () => {
+  const prompt = buildIntentPrompt('Analyze this x-ray', 2);
+
+  assert.match(prompt, /ATTACHED IMAGES/);
+  assert.match(prompt, /attached 2 medical image\(s\)/);
+  assert.match(prompt, /patient_age_stated/);
+  assert.match(prompt, /patient_sex_stated/);
+  assert.match(prompt, /patient_symptoms_stated/);
+  assert.doesNotMatch(prompt, /\{\{\w+\}\}/);
+  assert.ok(prompt.indexOf('ATTACHED IMAGES') < prompt.indexOf('INPUT:'));
+});
+
+test('ignores invalid image counts', () => {
+  for (const count of [0, -1, 1.5, '2', null, undefined, NaN]) {
+    const expectImages = count === '2';
+    assert.equal(/ATTACHED IMAGES/.test(buildIntentPrompt('Rash', count)), expectImages, String(count));
+  }
+});
+
+test('inserts the user text literally, even with replacement patterns', () => {
+  const prompt = buildIntentPrompt('Costs $& and $1 {{imageContext}}', 1);
+
+  assert.match(prompt, /INPUT:\nCosts \$& and \$1 \{\{imageContext\}\}$/);
+  assert.equal(prompt.match(/ATTACHED IMAGES/g).length, 1);
+});
+
+test('the request carries the image section in both structured and plain modes', () => {
+  for (const structured of [true, false]) {
+    const request = buildIntentRequest('What is this?', structured, { imageCount: 1 });
+    assert.match(request.messages[0].content, /ATTACHED IMAGES/);
+  }
+});
+
+test('with images the structured output also asks whether age, sex and symptoms are stated', () => {
+  const plain = buildIntentRequest('Rash', true);
+  const withImages = buildIntentRequest('Rash', true, { imageCount: 1 });
+
+  assert.deepEqual(plain.response_format.json_schema.schema.required, ['action', 'reason']);
+  assert.deepEqual(
+    withImages.response_format.json_schema.schema.required,
+    ['action', 'reason', 'patient_age_stated', 'patient_sex_stated', 'patient_symptoms_stated']
+  );
+  assert.equal(withImages.response_format.json_schema.strict, true);
+});
+
+test('with images, age, sex and symptoms decide between analyzing directly and asking for them', () => {
+  const parse = (age, sex, symptoms, action = 'explain', reason = 'medical_education') => parseIntentDecision(
+    JSON.stringify({ action, reason, patient_age_stated: age, patient_sex_stated: sex, patient_symptoms_stated: symptoms })
+  );
+
+  const go = applyImageRule(parse(true, true, true), 1);
+  assert.equal(go.action, 'go');
+  assert.equal(go.reason, 'patient_case_ready');
+  assert.equal(go.queryType, 'diagnostic');
+  assert.equal(go.modelAction, 'explain');
+  assert.equal(go.imageRule, 'patient_data_present');
+
+  for (const flags of [[true, true, false], [true, false, true], [false, true, true], [false, false, false]]) {
+    const ask = applyImageRule(parse(...flags, 'go', 'patient_case_ready'), 2);
+    assert.equal(ask.action, 'enrich', String(flags));
+    assert.equal(ask.reason, 'missing_patient_data');
+    assert.equal(ask.imageRule, 'ask_patient_data');
+  }
+});
+
+test('the image rule leaves the decision alone without images or without the booleans', () => {
+  const withFlags = parseIntentDecision('{"action":"enrich","reason":"non_medical","patient_age_stated":true,"patient_sex_stated":true,"patient_symptoms_stated":true}');
+  assert.deepEqual(applyImageRule(withFlags, 0), withFlags);
+
+  const noFlags = parseIntentDecision('{"action":"enrich","reason":"missing_patient_data"}');
+  assert.deepEqual(applyImageRule(noFlags, 1), noFlags);
+
+  const partialFlags = parseIntentDecision('{"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true}');
+  assert.deepEqual(applyImageRule(partialFlags, 1), partialFlags);
+
+  const fallback = parseIntentDecision('not json', 'diagnose');
+  assert.deepEqual(applyImageRule(fallback, 1), fallback);
 });

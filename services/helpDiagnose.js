@@ -389,6 +389,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     };
     // El modo avanzado se pide sobre un caso que ya se diagnosticó: no se vuelve a clasificar
     const forceDiagnosis = flow === 'diagnose' && (data.forceDiagnosis === true || advanced);
+    // Las imágenes clínicas ya resueltas cuentan como datos del paciente para el enrutado.
+    const routingImageCount = flow === 'diagnose' && Array.isArray(data.imageUrls) ? data.imageUrls.length : 0;
     if (forceDiagnosis) {
       intentDecision = {
         action: 'go',
@@ -403,7 +405,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         flow,
         timezone: data.timezone,
         model: modelIntencion,
-        requestData: dataRequest
+        requestData: dataRequest,
+        imageCount: routingImageCount
       });
     }
     queryType = intentDecision.queryType;
@@ -431,7 +434,10 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       structuredOutputFallback: String(intentDecision.structuredOutputFallback || false),
       forceDiagnosis: String(forceDiagnosis),
       advanced: String(advanced),
-      descriptionLength: String(data.description?.length || 0)
+      descriptionLength: String(data.description?.length || 0),
+      imageCount: String(routingImageCount),
+      imageRule: String(intentDecision.imageRule || 'none'),
+      modelAction: String(intentDecision.modelAction || intentDecision.action)
     });
 
     if (intentDecision.transportFallback) {
