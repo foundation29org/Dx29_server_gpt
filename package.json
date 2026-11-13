@@ -7,7 +7,7 @@
     "start": "node index.js",
     "serve": "nodemon index.js",
     "dev": "nodemon --ignore '*.log' --ignore 'logs/*' --ignore 'node_modules/*' index.js",
-    "test": "node --test test/intentClassifier.test.js test/multimodalInput.test.js test/multimodalUploadService.test.js test/multimodalImageClassifierService.test.js test/multimodalImageRoutingConfig.test.js test/blobFiles.test.js test/documentIntelligenceService.test.js test/requestCorrelation.test.js test/insights.test.js test/telemetryInstrumentation.test.js test/rateLimiter.test.js test/routesLimiter.test.js test/languageDetect.test.js test/localLanguageDetect.test.js test/followUpService.test.js test/sanitizeInput.test.js test/locationContext.test.js test/speechTranscribe.test.js test/permalink.test.js test/medicalQuestionService.test.js test/citationSupportService.test.js test/aiRegionRouting.test.js test/llmTranslation.test.js test/aiFailoverDeadline.test.js test/callInfoDisease.test.js test/diagnoseTranslation.test.js test/advancedDiagnose.test.js test/claudeFoundry.test.js",
+    "test": "node --test test/intentClassifier.test.js test/multimodalInput.test.js test/multimodalUploadService.test.js test/multimodalImageClassifierService.test.js test/multimodalImageRoutingConfig.test.js test/blobFiles.test.js test/documentIntelligenceService.test.js test/requestCorrelation.test.js test/insights.test.js test/telemetryInstrumentation.test.js test/rateLimiter.test.js test/routesLimiter.test.js test/languageDetect.test.js test/localLanguageDetect.test.js test/followUpService.test.js test/sanitizeInput.test.js test/locationContext.test.js test/speechTranscribe.test.js test/permalink.test.js test/medicalQuestionService.test.js test/citationSupportService.test.js test/aiRegionRouting.test.js test/llmTranslation.test.js test/aiFailoverDeadline.test.js test/callInfoDisease.test.js test/diagnoseTranslation.test.js test/advancedDiagnose.test.js test/claudeFoundry.test.js test/email.test.js test/support.test.js",
     "validate-openapi": "swagger-cli validate docs/apim/dxgptapi-dev-yaml && swagger-cli validate docs/apim/dxgptapi-prod.yaml && swagger-cli validate docs/apim/internal-api.yaml",
     "swagger-ui": "node scripts/serve-swagger-ui.js",
     "cost:daily-durations": "node scripts/daily-operation-durations.js"
@@ -19,6 +19,7 @@
     "@azure-rest/ai-document-intelligence": "^1.0.0",
     "@azure/storage-blob": "^12.16.0",
     "@azure/web-pubsub": "^1.2.0",
+    "@sendgrid/mail": "^8.1.6",
     "applicationinsights": "^3.17.0",
     "async": "^2.6.4",
     "axios": "^1.19.0",
@@ -33,8 +34,6 @@
     "jsonrepair": "^3.13.1",
     "mongoose": "^8.24.8",
     "multer": "^2.2.0",
-    "nodemailer": "^10.2.1",
-    "nodemailer-express-handlebars": "^6.1.2",
     "openai": "^4.104.0",
     "swagger-ui-express": "^5.0.1",
     "tinyld": "^1.3.4"
