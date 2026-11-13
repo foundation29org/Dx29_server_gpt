@@ -52,15 +52,16 @@ const INTENT_RESPONSE_SCHEMA = {
   }
 };
 
-// Con imágenes clínicas el modelo además dice si el texto da la edad y el sexo del paciente;
-// la decisión final la toma applyImageRule, no el modelo.
+// Con imágenes clínicas el modelo además dice si el texto da la edad, el sexo y algún síntoma
+// del paciente; la decisión final la toma applyImageRule, no el modelo.
 const IMAGE_INTENT_RESPONSE_SCHEMA = {
   ...INTENT_RESPONSE_SCHEMA,
-  required: [...INTENT_RESPONSE_SCHEMA.required, 'patient_age_stated', 'patient_sex_stated'],
+  required: [...INTENT_RESPONSE_SCHEMA.required, 'patient_age_stated', 'patient_sex_stated', 'patient_symptoms_stated'],
   properties: {
     ...INTENT_RESPONSE_SCHEMA.properties,
     patient_age_stated: { type: 'boolean' },
-    patient_sex_stated: { type: 'boolean' }
+    patient_sex_stated: { type: 'boolean' },
+    patient_symptoms_stated: { type: 'boolean' }
   }
 };
 
@@ -127,27 +128,31 @@ function normalizeDecision(parsedDecision) {
   if (typeof parsedDecision?.patient_sex_stated === 'boolean') {
     decision.sexStated = parsedDecision.patient_sex_stated;
   }
+  if (typeof parsedDecision?.patient_symptoms_stated === 'boolean') {
+    decision.symptomsStated = parsedDecision.patient_symptoms_stated;
+  }
   return decision;
 }
 
-// Con imágenes clínicas adjuntas, la edad y el sexo deciden: con los dos se analizan las
-// imágenes directamente; si falta alguno, se piden (el cliente muestra el aviso de imágenes,
-// que también permite continuar). Sin esos datos del modelo, la decisión no cambia.
+// Con imágenes clínicas adjuntas deciden la edad, el sexo y los síntomas: con los tres se
+// analizan las imágenes directamente; si falta alguno, se piden (el cliente muestra el aviso
+// de imágenes, que también permite continuar). Sin esos datos del modelo, la decisión no cambia.
 function applyImageRule(decision, imageCount) {
   if (normalizeImageCount(imageCount) === 0 || decision.usedFallback) {
     return decision;
   }
-  if (typeof decision.ageStated !== 'boolean' || typeof decision.sexStated !== 'boolean') {
+  const flags = [decision.ageStated, decision.sexStated, decision.symptomsStated];
+  if (flags.some((flag) => typeof flag !== 'boolean')) {
     return decision;
   }
-  const action = decision.ageStated && decision.sexStated ? 'go' : 'enrich';
+  const action = flags.every(Boolean) ? 'go' : 'enrich';
   return {
     ...decision,
     modelAction: decision.action,
     action,
     reason: action === 'go' ? 'patient_case_ready' : 'missing_patient_data',
     queryType: ACTION_TO_QUERY_TYPE[action],
-    imageRule: action === 'go' ? 'age_sex_present' : 'ask_age_sex'
+    imageRule: action === 'go' ? 'patient_data_present' : 'ask_patient_data'
   };
 }
 
@@ -167,8 +172,8 @@ function normalizeImageCount(imageCount) {
   return Number.isInteger(count) && count > 0 ? count : 0;
 }
 
-// Con imágenes clínicas adjuntas, el enrutado las cuenta como datos del paciente y solo
-// pide más datos si faltan la edad o el sexo (afectan a la interpretación de la imagen).
+// Con imágenes clínicas adjuntas, el enrutado las cuenta como datos del paciente y pide
+// más datos si faltan la edad, el sexo o los síntomas (afectan a la interpretación).
 function buildIntentPrompt(description, imageCount = 0) {
   const count = normalizeImageCount(imageCount);
   const imageContext = count > 0

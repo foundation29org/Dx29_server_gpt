@@ -111,18 +111,22 @@ ATTACHED IMAGES
 
 The user attached {{imageCount}} medical image(s), such as a radiograph, ECG, scan, ultrasound, or clinical photo. The differential-diagnosis tool will analyze them together with the text, so the images are patient clinical data: a request to analyze "this" or "these images" is a request about a patient, never "non_medical".
 
-Also return two booleans. The system uses them to decide whether to analyze the images directly or first ask the user for the patient's age and sex, which matter to interpret medical images:
+Also return three booleans. The system uses them to decide whether to analyze the images directly or first ask the user for the patient's age, sex, and symptoms, which matter to interpret medical images:
 - "patient_age_stated": true if the text states the patient's age or age group in any form ("63F", "aged 40", "my 3-year-old son", "a newborn", "elderly woman", "in her 40s"); otherwise false
 - "patient_sex_stated": true if the text states the patient's sex in any form ("male", "63F", "my son", "she", "pregnant woman"); otherwise false
+- "patient_symptoms_stated": true if the text describes at least one symptom, sign, complaint, or relevant clinical history of the patient (for example pain, fever, itching, a lump that has grown, a fall, or how long a problem has lasted); otherwise false. A question about the image alone ("is this X?", "what is this?", "any issues?"), the name of the study, or age and sex alone do not count
 
 Input: "Look at this scan, 40-year-old man"
-Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true}
+Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true,"patient_symptoms_stated":false}
+
+Input: "Chest x-ray, 45-year-old man with cough and fever for 5 days"
+Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true,"patient_symptoms_stated":true}
 
 Input: "Painful red bump on the leg since Monday"
-Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":false,"patient_sex_stated":false}
+Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":false,"patient_sex_stated":false,"patient_symptoms_stated":true}
 
 Input: "What do you see in this photo? My son"
-Output: {"action":"enrich","reason":"missing_patient_data","patient_age_stated":false,"patient_sex_stated":true}
+Output: {"action":"enrich","reason":"missing_patient_data","patient_age_stated":false,"patient_sex_stated":true,"patient_symptoms_stated":false}
 `,
         withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate 5 possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
         Output format:
