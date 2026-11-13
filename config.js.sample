@@ -3,15 +3,10 @@ module.exports = {
  client_server: process.env.CLIENT_SERVER, // If you are developing, add a second parameter with "||" and the url for localhost, in prod the first
  port: process.env.PORT,
  dbaccounts: process.env.MONGODBACCOUNTS, // If you are developing, add a second parameter with "||" and mongodb data, in prod the first
- TRANSPORTER_OPTIONS : { // configure the secret keys fot the transporter options, we use nodemailer as transporter
-   host: undefined,
-   port: undefined,
-   secureConnection: undefined,
-    tls: { ciphers: undefined },
-    auth: {
-        user: undefined,
-        pass: undefined
-    }
+ EMAIL: { // internal notifications to support, sent through the SendGrid API
+   sendgridApiKey: process.env.SENDGRID_API_KEY, // restricted key, Mail Send only
+   to: process.env.EMAIL_USER, // recipient (support@)
+   from: process.env.SENDGRID_FROM_EMAIL || process.env.EMAIL_USER // must be a verified sender in SendGrid
  },
  openDxAccessToken:{ // Blob access information: {sasToken:<token>,blobAccountUrl: 'https://<blob_name>.blob.core.windows.net/'}
     key: undefined,

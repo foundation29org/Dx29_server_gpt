@@ -110,27 +110,53 @@ function isValidSupportData(data) {
 	  // Enviar al flujo (sin esperar respuesta)
 	  sendFlow(support, sanitizedData.lang, tenantId, subscriptionId);
   
-	  // Guardar en base de datos (sin esperar respuesta)
-	  support.save()
-		.then(supportStored => {
-		  // Aquí puedes manejar el caso exitoso si es necesario
-		})
-		.catch(err => {
-		  console.log('Error saving support:', err);
+	  // Guardar en base de datos. El mensaje queda guardado aquí y en el flujo;
+	  // el email a soporte es solo un aviso.
+	  let saved = false;
+	  try {
+		await support.save();
+		saved = true;
+	  } catch (saveError) {
+		console.log('Error saving support:', saveError);
+		insights.error({
+		  message: 'Error saving support message',
+		  error: saveError && saveError.message,
+		  operation: 'sendMsgLogoutSupport',
+		  type: 'SUPPORT_SAVE_ERROR',
+		  tenantId: tenantId,
+		  subscriptionId: subscriptionId,
+		  myuuid: sanitizedData.myuuid
 		});
-  
-	  // Enviar email
+	  }
+
+	  // Enviar email. Si falla con el mensaje ya guardado, el usuario no lo ha
+	  // perdido: se responde bien y el fallo queda en App Insights.
+	  let emailed = false;
 	  try {
 		await serviceEmail.sendMailSupport(
 		  sanitizedData.email,
-		  sanitizedData.lang, 
+		  sanitizedData.lang,
 		  support
 		);
-		return res.status(200).send({ message: 'Email sent' });
+		emailed = true;
 	  } catch (emailError) {
-		insights.error(emailError);
-		return res.status(500).send({ message: 'Fail sending email' });
+		insights.error({
+		  message: 'Email to support failed',
+		  error: emailError && emailError.message,
+		  operation: 'sendMsgLogoutSupport',
+		  type: 'SUPPORT_EMAIL_ERROR',
+		  tenantId: tenantId,
+		  subscriptionId: subscriptionId,
+		  myuuid: sanitizedData.myuuid
+		}, { messageSaved: String(saved) });
+		console.log('Fail sending email');
 	  }
+
+	  // Solo es un fallo para el usuario si no ha quedado ni en Mongo ni en el email
+	  if (!saved && !emailed) {
+		return res.status(500).send({ message: 'Internal server error' });
+	  }
+	  return res.status(200).send({ message: saved ? 'Support message saved' : 'Email sent' });
   
 	} catch (e) {
 		let infoError = {
