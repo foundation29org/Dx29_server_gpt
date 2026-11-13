@@ -38,7 +38,7 @@ class FakeSupport {
   }
 }
 
-stubModule('../config', { client_server: 'http://localhost:4200' });
+// Sin stub de ../config: el controlador ya no lo necesita (solo lo usaba el flujo)
 stubModule('../models/support', FakeSupport);
 stubModule('../services/email', {
   sendMailSupport: async (email, lang, support) => {
@@ -51,6 +51,7 @@ stubModule('../services/insights', {
   trackEvent: () => {}
 });
 stubModule('../services/aiUtils', { suspiciousContentErrors: () => [] });
+// Ya no hay flujo de Power Automate: si alguien vuelve a llamar a axios, la prueba lo ve
 stubModule('axios', {
   post: async (url, body) => {
     state.flows.push(body);
@@ -58,7 +59,8 @@ stubModule('axios', {
   }
 });
 
-const { sendMsgLogoutSupport } = require('../controllers/all/support');
+const supportController = require('../controllers/all/support');
+const { sendMsgLogoutSupport } = supportController;
 
 function reset() {
   state.saved = [];
@@ -98,14 +100,17 @@ function response() {
   };
 }
 
-test('guarda el mensaje, lo manda al flujo y avisa a soporte', async () => {
+test('guarda el mensaje en Mongo y avisa a soporte, sin copiarlo a Power Automate', async () => {
   reset();
   const res = response();
   await sendMsgLogoutSupport(request(), res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(state.saved.length, 1);
-  assert.equal(state.flows.length, 1);
+  assert.equal(state.flows.length, 0);
+  assert.equal(state.saved[0].email, 'ana@example.com');
+  assert.equal(state.saved[0].lang, 'es');
+  assert.equal(state.saved[0].subscribe, false);
   assert.equal(state.emails.length, 1);
   assert.equal(state.emails[0].email, 'ana@example.com');
   assert.equal(state.insightErrors.length, 0);
@@ -169,4 +174,22 @@ test('sin X-Tenant-Id ni suscripción sigue respondiendo 400', async () => {
   assert.equal(res.statusCode, 400);
   assert.equal(state.saved.length, 0);
   assert.equal(state.emails.length, 0);
+});
+
+test('el controlador ya no exporta sendFlow ni lleva URLs de Power Automate', () => {
+  assert.deepEqual(Object.keys(supportController), ['sendMsgLogoutSupport']);
+  const source = require('node:fs').readFileSync(require.resolve('../controllers/all/support'), 'utf8');
+  assert.doesNotMatch(source, /logic\.azure\.com|powerplatform|environment\.api|sendFlow/);
+});
+
+test('si el usuario pide novedades, queda subscribe = true en Mongo', async () => {
+  reset();
+  const req = request();
+  req.body.subscribe = true;
+  const res = response();
+  await sendMsgLogoutSupport(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.saved[0].subscribe, true);
+  assert.equal(state.flows.length, 0);
 });
