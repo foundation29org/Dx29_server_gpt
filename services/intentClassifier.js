@@ -156,6 +156,22 @@ function applyImageRule(decision, imageCount) {
   };
 }
 
+// Los datos del paciente para las imágenes se piden una sola vez por caso: si el aviso ya
+// salió y el usuario vuelve sin alguno de los tres (se saltó una pregunta guiada, reenvía
+// el mismo texto), se analizan las imágenes con lo que haya. modelAction no cambia.
+function applyAskOnce(decision) {
+  if (decision.imageRule !== 'ask_patient_data') {
+    return decision;
+  }
+  return {
+    ...decision,
+    action: 'go',
+    reason: 'patient_case_ready',
+    queryType: ACTION_TO_QUERY_TYPE.go,
+    imageRule: 'already_asked'
+  };
+}
+
 function parseIntentDecision(rawContent, flow = 'diagnose') {
   try {
     return normalizeDecision(extractJsonObject(rawContent));
@@ -216,7 +232,10 @@ async function classifyIntent({
   timezone,
   model = 'gpt54mini',
   requestData = null,
-  imageCount = 0
+  imageCount = 0,
+  // async () => boolean: si a este usuario ya se le pidieron los datos de sus imágenes
+  // en este caso. Solo se consulta cuando la regla de imágenes iba a pedirlos.
+  wasAskedForImageData = null
 }) {
   // Lazy import keeps the pure parser/test path independent from runtime
   // endpoint configuration.
@@ -251,7 +270,17 @@ async function classifyIntent({
     }
 
     const rawContent = response?.data?.choices?.[0]?.message?.content;
-    const decision = applyImageRule(parseIntentDecision(rawContent, flow), imageCount);
+    let decision = applyImageRule(parseIntentDecision(rawContent, flow), imageCount);
+    if (decision.imageRule === 'ask_patient_data' && typeof wasAskedForImageData === 'function') {
+      try {
+        if (await wasAskedForImageData()) {
+          decision = applyAskOnce(decision);
+        }
+      } catch (error) {
+        // Sin poder comprobarlo, se pide (es lo que haría la regla sola).
+        decision = { ...decision, askOnceError: error?.message || 'lookup failed' };
+      }
+    }
 
     return {
       ...decision,
@@ -280,6 +309,7 @@ function shouldSuggestDiagnosisPage(decision) {
 
 module.exports = {
   ACTION_TO_QUERY_TYPE,
+  applyAskOnce,
   applyImageRule,
   buildIntentPrompt,
   buildIntentRequest,

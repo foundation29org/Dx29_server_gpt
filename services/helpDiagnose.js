@@ -406,7 +406,13 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         timezone: data.timezone,
         model: modelIntencion,
         requestData: dataRequest,
-        imageCount: routingImageCount
+        imageCount: routingImageCount,
+        // Los datos de las imágenes se piden una sola vez por caso (30 min por usuario).
+        wasAskedForImageData: () => DiagnoseSessionService.hasRecentImageAsk({
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        })
       });
     }
     queryType = intentDecision.queryType;
@@ -417,6 +423,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       `⏱ intentRouting (${modelIntencion}) ${intentDecision.duration}ms: ` +
       `${intentDecision.action}/${intentDecision.reason}` +
       `${forceDiagnosis ? ' [user continue]' : ''}` +
+      `${intentDecision.imageRule ? ` [images: ${intentDecision.imageRule}]` : ''}` +
       `${intentDecision.usedFallback ? ' [parse fallback]' : ''}` +
       `${intentDecision.transportFallback ? ' [transport fallback]' : ''}` +
       `${intentDecision.structuredOutputFallback ? ' [plain JSON fallback]' : ''}`
@@ -437,7 +444,12 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       descriptionLength: String(data.description?.length || 0),
       imageCount: String(routingImageCount),
       imageRule: String(intentDecision.imageRule || 'none'),
-      modelAction: String(intentDecision.modelAction || intentDecision.action)
+      modelAction: String(intentDecision.modelAction || intentDecision.action),
+      // Con imágenes: qué datos del paciente vio el modelo en el texto ('n/a' sin imágenes).
+      ageStated: String(intentDecision.ageStated ?? 'n/a'),
+      sexStated: String(intentDecision.sexStated ?? 'n/a'),
+      symptomsStated: String(intentDecision.symptomsStated ?? 'n/a'),
+      askOnceLookupFailed: String(Boolean(intentDecision.askOnceError))
     });
 
     if (intentDecision.transportFallback) {
@@ -894,7 +906,9 @@ ${medicalQuestionForModel}
                 queryType: queryType,
                 intentAction: intentDecision.action,
                 intentReason: intentDecision.reason,
-                model: model
+                model: model,
+                // Marca el aviso de imágenes para no repetirlo en este caso (hasRecentImageAsk).
+                imageRule: intentDecision.imageRule
               },
               timezone: data.timezone,
               lang: data.lang || 'en',

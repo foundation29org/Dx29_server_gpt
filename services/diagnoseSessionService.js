@@ -44,6 +44,37 @@ class DiagnoseSessionService {
     }
 
     /**
+     * Si la última consulta de este usuario en la ventana fue el aviso que pide edad, sexo y
+     * síntomas para sus imágenes (caja de diagnóstico). Usa el índice { myuuid, timestamp }.
+     * @param {Object} params - myuuid, tenantId y subscriptionId de la petición, y windowMs
+     * @returns {Promise<Boolean>}
+     */
+    async hasRecentImageAsk({ myuuid, tenantId, subscriptionId, windowMs = 30 * 60 * 1000, timeoutMs = 1500 }) {
+        if (!myuuid) {
+            return false;
+        }
+        const filter = { myuuid, timestamp: { $gte: new Date(Date.now() - windowMs) } };
+        if (tenantId) filter.tenantId = tenantId;
+        if (subscriptionId) filter.subscriptionId = subscriptionId;
+        const query = DiagnoseSession.findOne(filter, { 'answer.imageRule': 1, betaPage: 1 })
+            .sort({ timestamp: -1 })
+            .maxTimeMS(timeoutMs)
+            .lean();
+        // Va en el camino del diagnóstico: sin conexión, Mongoose retiene la consulta hasta 10 s.
+        // Pasado el tiempo se rechaza y el enrutado pide los datos como si no hubiera aviso previo.
+        let timer;
+        const timeout = new Promise((resolve, reject) => {
+            timer = setTimeout(() => reject(new Error('image ask lookup timed out')), timeoutMs);
+        });
+        try {
+            const latest = await Promise.race([query, timeout]);
+            return Boolean(latest && !latest.betaPage && latest.answer?.imageRule === 'ask_patient_data');
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
      * Obtiene todas las sesiones de un usuario específico
      * @param {String} myuuid - UUID del usuario
      * @param {Number} limit - Límite de resultados
