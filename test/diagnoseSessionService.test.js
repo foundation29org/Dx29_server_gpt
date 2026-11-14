@@ -13,11 +13,13 @@ require.cache[modelPath] = {
   loaded: true,
   exports: {
     findOne: (filter, projection) => {
-      const query = { filter, projection, sort: null };
+      const query = { filter, projection, sort: null, maxTimeMS: null };
       queries.push(query);
       return {
         sort(order) { query.sort = order; return this; },
-        lean: async () => latest
+        maxTimeMS(ms) { query.maxTimeMS = ms; return this; },
+        // 'hang' imita a Mongoose reteniendo la consulta sin conexión.
+        lean: () => (latest === 'hang' ? new Promise(() => {}) : Promise.resolve(latest))
       };
     }
   }
@@ -36,6 +38,7 @@ test('hasRecentImageAsk looks at the user\'s latest query in the window, newest 
   assert.ok(filter.timestamp.$gte.getTime() >= before - 60000 && filter.timestamp.$gte.getTime() <= Date.now() - 60000);
   assert.deepEqual(projection, { 'answer.imageRule': 1, betaPage: 1 });
   assert.deepEqual(sort, { timestamp: -1 });
+  assert.equal(queries.at(-1).maxTimeMS, 1500);
 });
 
 test('hasRecentImageAsk is false when the latest query was something else', async () => {
@@ -53,4 +56,15 @@ test('hasRecentImageAsk is false when the latest query was something else', asyn
   const count = queries.length;
   assert.equal(await DiagnoseSessionService.hasRecentImageAsk({ myuuid: '' }), false);
   assert.equal(queries.length, count);
+});
+
+test('hasRecentImageAsk gives up quickly when Mongo does not answer', async () => {
+  latest = 'hang';
+  const started = Date.now();
+  await assert.rejects(
+    DiagnoseSessionService.hasRecentImageAsk({ myuuid: 'u1', timeoutMs: 50 }),
+    /timed out/
+  );
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(queries.at(-1).maxTimeMS, 50);
 });
