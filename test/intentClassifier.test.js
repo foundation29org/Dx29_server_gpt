@@ -3,8 +3,26 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// classifyIntent carga aiUtils al llamarse: aquí se sustituye por una respuesta fija.
+const aiCalls = [];
+let aiContent = '{}';
+const aiUtilsPath = require.resolve('../services/aiUtils');
+require.cache[aiUtilsPath] = {
+  id: aiUtilsPath,
+  filename: aiUtilsPath,
+  loaded: true,
+  exports: {
+    callAiWithFailover: async (requestBody) => {
+      aiCalls.push(requestBody);
+      return { data: { choices: [{ message: { content: aiContent } }], usage: { prompt_tokens: 1, completion_tokens: 1 } } };
+    }
+  }
+};
+
 const {
+  applyAskOnce,
   applyImageRule,
+  classifyIntent,
   buildIntentPrompt,
   buildIntentRequest,
   failOpenDecision,
@@ -176,4 +194,68 @@ test('the image rule leaves the decision alone without images or without the boo
 
   const fallback = parseIntentDecision('not json', 'diagnose');
   assert.deepEqual(applyImageRule(fallback, 1), fallback);
+});
+
+test('ask once: a second image prompt in the same case analyzes the images instead', () => {
+  const ask = applyImageRule(parseIntentDecision(
+    '{"action":"go","reason":"patient_case_ready","patient_age_stated":false,"patient_sex_stated":true,"patient_symptoms_stated":true}'
+  ), 1);
+  const once = applyAskOnce(ask);
+  assert.equal(once.action, 'go');
+  assert.equal(once.reason, 'patient_case_ready');
+  assert.equal(once.queryType, 'diagnostic');
+  assert.equal(once.imageRule, 'already_asked');
+  assert.equal(once.modelAction, 'go');
+  assert.equal(once.ageStated, false);
+
+  const present = applyImageRule(parseIntentDecision(
+    '{"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true,"patient_symptoms_stated":true}'
+  ), 1);
+  assert.deepEqual(applyAskOnce(present), present);
+  const noImages = parseIntentDecision('{"action":"enrich","reason":"missing_patient_data"}');
+  assert.deepEqual(applyAskOnce(noImages), noImages);
+});
+
+test('classifyIntent checks for an earlier image prompt only when it would ask', async () => {
+  const flags = (age, sex, symptoms) => JSON.stringify({
+    action: 'go', reason: 'patient_case_ready',
+    patient_age_stated: age, patient_sex_stated: sex, patient_symptoms_stated: symptoms
+  });
+  let lookups = 0;
+  const askedBefore = (answer) => async () => { lookups += 1; if (answer instanceof Error) throw answer; return answer; };
+
+  aiContent = flags(false, true, true);
+  const first = await classifyIntent({ description: 'Is this HSV?', imageCount: 1, wasAskedForImageData: askedBefore(false) });
+  assert.equal(first.action, 'enrich');
+  assert.equal(first.imageRule, 'ask_patient_data');
+  assert.equal(lookups, 1);
+
+  const second = await classifyIntent({ description: 'Is this HSV?', imageCount: 1, wasAskedForImageData: askedBefore(true) });
+  assert.equal(second.action, 'go');
+  assert.equal(second.reason, 'patient_case_ready');
+  assert.equal(second.imageRule, 'already_asked');
+  assert.equal(second.modelAction, 'go');
+  assert.equal(lookups, 2);
+
+  const lookupFails = await classifyIntent({ description: 'Is this HSV?', imageCount: 1, wasAskedForImageData: askedBefore(new Error('mongo down')) });
+  assert.equal(lookupFails.action, 'enrich');
+  assert.equal(lookupFails.imageRule, 'ask_patient_data');
+  assert.equal(lookupFails.askOnceError, 'mongo down');
+  assert.equal(lookups, 3);
+
+  aiContent = flags(true, true, true);
+  const complete = await classifyIntent({ description: '63F, lump for 2 weeks', imageCount: 1, wasAskedForImageData: askedBefore(true) });
+  assert.equal(complete.imageRule, 'patient_data_present');
+  assert.equal(lookups, 3);
+
+  aiContent = '{"action":"enrich","reason":"missing_patient_data"}';
+  const textOnly = await classifyIntent({ description: 'Analyze this patient', imageCount: 0, wasAskedForImageData: askedBefore(true) });
+  assert.equal(textOnly.action, 'enrich');
+  assert.equal(textOnly.imageRule, undefined);
+  assert.equal(lookups, 3);
+
+  aiContent = flags(false, false, false);
+  const noLookup = await classifyIntent({ description: 'What is this?', imageCount: 2 });
+  assert.equal(noLookup.imageRule, 'ask_patient_data');
+  assert.ok(aiCalls.length >= 6);
 });

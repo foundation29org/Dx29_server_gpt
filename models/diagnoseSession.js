@@ -73,6 +73,11 @@ const DiagnoseSessionSchema = new Schema({
       type: String,
       required: true,
       default: 'gpt61sol'
+    },
+    // Regla de imágenes del enrutado (patient_data_present, ask_patient_data, already_asked).
+    // Sin enum: un valor nuevo no debe impedir guardar la sesión.
+    imageRule: {
+      type: String
     }
   },
   timezone: {
