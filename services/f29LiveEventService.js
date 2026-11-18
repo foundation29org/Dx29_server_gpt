@@ -29,7 +29,10 @@ async function notifyDiagnosisFinished(payload = {}) {
     },
     {
       headers: { 'x-api-key': API_KEY },
-      timeout: 3000,
+      // Nadie espera esta llamada: se lanza después de dar el diagnóstico. Con
+      // 3 s se perdían ~3 avisos al día (picos y reinicios de F29), cada uno
+      // registrado como excepción en App Insights.
+      timeout: 10000,
     },
   );
 }
