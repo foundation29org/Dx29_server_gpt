@@ -78,7 +78,7 @@ function transcriptionEndpoint() {
   }
 }
 
-function saveTranscriptionCost({ tenantId, body, usage, durationMs, success, error }) {
+function saveTranscriptionCost({ tenantId, subscriptionId, body, usage, durationMs, success, error }) {
   const price = calculateTranscriptionPrice(usage)
   const stage = {
     name: 'speech_transcription',
@@ -91,6 +91,8 @@ function saveTranscriptionCost({ tenantId, body, usage, durationMs, success, err
   const data = {
     myuuid: body?.myuuid || 'unknown',
     tenantId,
+    // Como en el resto de operaciones. Sin él, billing-fn veía estos costes como "sin suscripción".
+    subscriptionId,
     lang: languageHint(body?.language) || 'unknown',
     timezone: body?.timezone || 'unknown'
   }
@@ -101,6 +103,7 @@ function saveTranscriptionCost({ tenantId, body, usage, durationMs, success, err
 async function transcribe(req, res) {
   // Solo tenants. La barrera real es APIM: esta ruta no está en la API pública.
   const tenantId = req.headers['x-tenant-id']
+  const subscriptionId = req.headers['x-subscription-id']
   if (!tenantId) {
     return res.status(403).send({ message: 'Speech transcription is only available to tenants' })
   }
@@ -135,12 +138,12 @@ async function transcribe(req, res) {
       timeout: TRANSCRIBE_TIMEOUT_MS,
       maxBodyLength: MAX_AUDIO_BYTES * 2
     })
-    saveTranscriptionCost({ tenantId, body: req.body, usage: data?.usage, durationMs: Date.now() - startedAt, success: true })
+    saveTranscriptionCost({ tenantId, subscriptionId, body: req.body, usage: data?.usage, durationMs: Date.now() - startedAt, success: true })
     const text = (data?.text || '').trim()
     res.set('Cache-Control', 'no-store')
     return res.status(200).send({ text: hasSpeech(text) ? text : '' })
   } catch (error) {
-    saveTranscriptionCost({ tenantId, body: req.body, durationMs: Date.now() - startedAt, success: false, error })
+    saveTranscriptionCost({ tenantId, subscriptionId, body: req.body, durationMs: Date.now() - startedAt, success: false, error })
     // insights.error solo promueve unos pocos campos del objeto `message`; el resto
     // (uuid, estado, motivo del proveedor, tamaño) debe ir como `properties` o se pierde.
     const telemetry = {
