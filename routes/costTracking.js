@@ -50,7 +50,6 @@ router.get('/stats', validateTenant, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error obteniendo estadísticas de costos:', error);
     insights.error({
       message: 'Error obteniendo estadísticas de costos',
       error: error.message,
@@ -97,7 +96,6 @@ router.get('/stage-stats', validateTenant, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error obteniendo estadísticas por etapa:', error);
     insights.error({
       message: 'Error obteniendo estadísticas por etapa',
       error: error.message,
@@ -149,7 +147,6 @@ router.get('/total', validateTenant, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error obteniendo costo total:', error);
     insights.error({
       message: 'Error obteniendo costo total',
       error: error.message,
@@ -195,7 +192,6 @@ router.get('/recent', validateTenant, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error obteniendo costos recientes:', error);
     insights.error({
       message: 'Error obteniendo costos recientes',
       error: error.message,

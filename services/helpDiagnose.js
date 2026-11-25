@@ -119,7 +119,6 @@ function isLongDiagnoseModel(model) {
   );
 }
 
-
 // Regenerar HTML desde texto con marcadores [ANON-N]
 const toAnonymizedHtml = (txt) => {
  if (!txt || typeof txt !== 'string') return '';
@@ -166,12 +165,8 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel) 
       return { result: 'success', message: 'Sent via WebPubSub' };
 
     } catch (error) {
-      // Enviar error via WebPubSub
-      try {
-        await pubsubService.sendError(userId, error, processingErrorCode(error));
-      } catch (pubsubError) {
-        console.error('Error sending WebPubSub error notification:', pubsubError);
-      }
+      // Enviar error via WebPubSub (sendError no lanza: si falla, lo registra él)
+      await pubsubService.sendError(userId, error, processingErrorCode(error));
       throw error;
     }
   }
@@ -827,7 +822,6 @@ ${medicalQuestionForModel}
       } catch (generalMedicalError) {
         data.model = data.model || modelType;
         generalMedicalError.phase = generalMedicalError.phase || 'general_medical_response';
-        console.error('Error generating general medical response:', generalMedicalError);
         insights.error({
           message: 'Error generating general medical response',
           error: generalMedicalError.message,
@@ -887,8 +881,15 @@ ${medicalQuestionForModel}
                 costTracking.total.tokens.total += anonCostDescription.totalTokens;
               }
             } catch (anonymError) {
-              console.error('Error during anonymization in else block:', anonymError);
               // Continuar sin anonimización si falla
+              insights.error({
+                message: 'Error during anonymization of a non-diagnosis query',
+                error: anonymError.message,
+                operation: 'anonymization',
+                myuuid: data.myuuid,
+                tenantId: data.tenantId,
+                subscriptionId: data.subscriptionId
+              });
             }
             
             const questionData = {
@@ -1120,7 +1121,6 @@ ${medicalQuestionForModel}
     // Procesar la respuesta según el modelo
     usage = aiResponse.data?.usage;
     if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
-      console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
       insights.error({
         message: 'Invalid AI response format - no choices array',
         response: JSON.stringify(aiResponse.data),
@@ -2181,7 +2181,19 @@ async function handleDiagnoseOrAsk(req, res, flow) {
       res.status(200).send({ result: 'processing' });
       processAIRequest(sanitizedData, requestInfo, effectiveModel)
         .catch(error => {
-          console.error('Error in background processing:', error);
+          // Los códigos públicos (imagen demasiado grande, modelo avanzado no disponible...)
+          // ya quedan como evento y el cliente recibe el aviso: no son excepciones.
+          if (PUBLIC_PROCESSING_ERROR_CODES.has(error?.code)) return;
+          insights.error({
+            message: error?.message || 'Error in background processing',
+            stack: error?.stack,
+            code: error?.code,
+            phase: error?.phase,
+            operation: 'background-processing',
+            myuuid: sanitizedData.myuuid,
+            tenantId: sanitizedData.tenantId,
+            subscriptionId: sanitizedData.subscriptionId
+          });
         });
       return;
     }
@@ -2190,7 +2202,6 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     const result = await processAIRequest(sanitizedData, requestInfo, effectiveModel);
     return res.status(200).send(result);
   } catch (error) {
-    console.error('Error:', error);
     insights.error({
       message: error.message || `Unknown error in ${endpoint}`,
       stack: error.stack,

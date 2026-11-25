@@ -33,6 +33,7 @@ if(config.client_server!='http://localhost:4200'){
 
 const mongoose = require('mongoose');
 const app = require('./app')
+const { errorSummary } = require('./services/errorSummary')
 
 mongoose.Promise = global.Promise
 
@@ -53,7 +54,7 @@ async function handleShutdown() {
             process.exit(0);
         });
     } catch (error) {
-        console.error('Error durante el cierre:', error);
+        console.error('Error durante el cierre:', errorSummary(error));
         process.exit(1);
     }
 }
