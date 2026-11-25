@@ -506,6 +506,9 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         modelAnonymization
       );
       const anonymElapsedQuestion = Date.now() - anonymStartQuestion;
+      // Si el anonimizador no devolvió nada, la pregunta se contesta igual, pero la
+      // sesión se guarda sin el texto: no se sabe si llevaba datos personales.
+      const canStoreQuestionText = !tempQuestion?.anonymizationFailed;
 
       if (tempQuestion?.hasPersonalInfo) {
         const anonymizedQuestion = tempQuestion.anonymizedText || tempQuestion.markdownText;
@@ -769,9 +772,9 @@ ${medicalQuestionForModel}
             subscriptionId: data.subscriptionId,
             iframeParams: data.iframeParams || {},
             question: {
-              originalText: data.description,
+              originalText: canStoreQuestionText ? data.description : '',
               detectedLanguage: detectedLanguage,
-              translatedText: englishDescription
+              translatedText: canStoreQuestionText ? englishDescription : ''
             },
             answer: {
               medicalAnswer: medicalAnswer,
@@ -841,19 +844,25 @@ ${medicalQuestionForModel}
             // Anonimizar datos antes de guardar (GDPR compliance)
             // Usar variable local para no afectar el scope de función (IIFE asíncrono)
             let hasPersonalInfoLocal = false;
-            let anonymizedDescription = data.description;
+            // Solo se guarda el texto que ha pasado por el anonimizador: si falla o no
+            // devuelve nada, la sesión se guarda sin texto. Las llamadas sin
+            // X-Tenant-Id (las de la API) no se anonimizan: su coste se le facturaría
+            // al cliente sin devolverle nada. Antes guardaban el original; ahora, nada.
+            let anonymizedDescription = '';
             let anonymizedEnglishDescription = '';
             try {
               const anonymStartDescription = Date.now();
-              let anonymizedDescriptionResult = null;
-              // Anonimizar consultas no diagnósticas (preguntas, other, o caso clínico en página de preguntas)
-              if(data.tenantId && !shouldRunDiagnosis){
-                anonymizedDescriptionResult = await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization);
-              }
+              const shouldAnonymize = Boolean(data.tenantId) &&
+                typeof data.description === 'string' && data.description.trim() !== '';
+              const anonymizedDescriptionResult = shouldAnonymize
+                ? await anonymizeText(data.description, data.timezone, data.tenantId, data.subscriptionId, data.myuuid, modelAnonymization)
+                : null;
               const anonymElapsedDescription = Date.now() - anonymStartDescription;
-              if (anonymizedDescriptionResult && anonymizedDescriptionResult.hasPersonalInfo) {
+              if (anonymizedDescriptionResult?.hasPersonalInfo) {
                 anonymizedDescription = anonymizedDescriptionResult.anonymizedText || anonymizedDescriptionResult.markdownText;
                 hasPersonalInfoLocal = true;
+              } else if (anonymizedDescriptionResult && !anonymizedDescriptionResult.anonymizationFailed) {
+                anonymizedDescription = data.description;
               }
               // Registrar costos de anonimización de description
               if (anonymizedDescriptionResult && anonymizedDescriptionResult.usage) {
@@ -874,7 +883,7 @@ ${medicalQuestionForModel}
                 costTracking.total.tokens.total += anonCostDescription.totalTokens;
               }
             } catch (anonymError) {
-              // Continuar sin anonimización si falla
+              // La sesión se guarda igual, sin el texto
               insights.error({
                 message: 'Error during anonymization of a non-diagnosis query',
                 error: anonymError.message,
@@ -1450,8 +1459,10 @@ ${medicalQuestionForModel}
     // Guardar información de seguimiento si es una llamada directa
     if (requestInfo) {
       let infoTrack = {
-        value: anonymizedDescription || data.description || '',
-        valueEnglish: anonymizedDescriptionEnglish || englishDescription || '',
+        // Solo lo que devolvió el anonimizador (sin datos personales, el texto tal
+        // cual). Si no devolvió nada, el caso se guarda sin texto y no con el original.
+        value: anonymizedDescription,
+        valueEnglish: anonymizedDescriptionEnglish,
         myuuid: data.myuuid,
         operation: 'find disease',
         lang: data.lang,
