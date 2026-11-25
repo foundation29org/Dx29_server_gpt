@@ -1,5 +1,7 @@
 const { WebPubSubServiceClient } = require('@azure/web-pubsub');
 const config = require('../config');
+const insights = require('./insights');
+const { errorSummary } = require('./errorSummary');
 
 class PubSubService {
   constructor() {
@@ -11,17 +13,12 @@ class PubSubService {
 
   // Generar token de acceso para cliente
   async getClientAccessToken(userId, expirationTimeInMinutes = 60) {
-    try {
-      const token = await this.client.getClientAccessToken({
-        userId: userId,
-        roles: ['webpubsub.sendToGroup', 'webpubsub.joinLeaveGroup'],
-        expirationTimeInMinutes: expirationTimeInMinutes
-      });
-      return token;
-    } catch (error) {
-      console.error('Error generating client access token:', error);
-      throw error;
-    }
+    const token = await this.client.getClientAccessToken({
+      userId: userId,
+      roles: ['webpubsub.sendToGroup', 'webpubsub.joinLeaveGroup'],
+      expirationTimeInMinutes: expirationTimeInMinutes
+    });
+    return token;
   }
 
   // Enviar mensaje de progreso al cliente
@@ -35,7 +32,12 @@ class PubSubService {
         timestamp: new Date().toISOString()
       });
     } catch (error) {
-      console.error(`Error sending progress to user ${userId}:`, error);
+      insights.error({
+        message: 'Error sending PubSub progress',
+        error: error.message,
+        operation: 'pubsub.sendProgress',
+        myuuid: userId
+      });
       // No lanzar error para no interrumpir el proceso principal
     }
   }
@@ -51,23 +53,23 @@ class PubSubService {
         timestamp: new Date().toISOString()
       });
     } catch (error) {
-      console.error(`Error sending preprocessing to user ${userId}:`, error);
+      insights.error({
+        message: 'Error sending PubSub preprocessing',
+        error: error.message,
+        operation: 'pubsub.sendPreprocessing',
+        myuuid: userId
+      });
     }
   }
 
   // Enviar resultado final exitoso
   async sendResult(userId, result) {
-    try {
-      await this.client.sendToUser(userId, {
-        type: 'result',
-        status: 'success',
-        data: result,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error(`Error sending result to user ${userId}:`, error);
-      throw error;
-    }
+    await this.client.sendToUser(userId, {
+      type: 'result',
+      status: 'success',
+      data: result,
+      timestamp: new Date().toISOString()
+    });
   }
 
   // Enviar error al cliente
@@ -87,7 +89,12 @@ class PubSubService {
         timestamp: new Date().toISOString()
       });
     } catch (sendError) {
-      console.error(`Error sending error to user ${userId}:`, sendError);
+      insights.error({
+        message: 'Error sending PubSub error',
+        error: sendError.message,
+        operation: 'pubsub.sendError',
+        myuuid: userId
+      });
     }
   }
 
@@ -97,7 +104,7 @@ class PubSubService {
       const response = await this.client.userExists(userId);
       return response;
     } catch (error) {
-      console.error(`Error checking if user ${userId} is connected:`, error);
+      console.error(`Error checking if user ${userId} is connected:`, errorSummary(error));
       return false;
     }
   }
@@ -107,7 +114,7 @@ class PubSubService {
     try {
       await this.client.closeUserConnections(userId, reason);
     } catch (error) {
-      console.error(`Error closing connection for user ${userId}:`, error);
+      console.error(`Error closing connection for user ${userId}:`, errorSummary(error));
     }
   }
 }

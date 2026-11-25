@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pubsubService = require('../services/pubsubService');
 const insights = require('../services/insights');
+const { errorSummary } = require('../services/errorSummary');
 
 // Endpoint para negociación - generar token de acceso para cliente
 router.post('/negotiate', async (req, res) => {
@@ -31,7 +32,6 @@ router.post('/negotiate', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error in /negotiate:', error);
     insights.error({
       message: 'Error generating PubSub token',
       error: error.message,
@@ -57,7 +57,7 @@ router.get('/status/:userId', async (req, res) => {
       connected: isConnected
     });
   } catch (error) {
-    console.error('Error checking connection status:', error);
+    console.error('Error checking connection status:', errorSummary(error));
     res.status(500).json({
       error: 'Failed to check connection status'
     });

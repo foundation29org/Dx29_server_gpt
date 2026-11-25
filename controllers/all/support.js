@@ -112,7 +112,6 @@ function isValidSupportData(data) {
 		await support.save();
 		saved = true;
 	  } catch (saveError) {
-		console.log('Error saving support:', saveError);
 		insights.error({
 		  message: 'Error saving support message',
 		  error: saveError && saveError.message,

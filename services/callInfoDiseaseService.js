@@ -4,6 +4,7 @@ const { calculatePrice, formatCost } = require('./costUtils');
 const CostTrackingService = require('./costTrackingService');
 const serviceEmail = require('./email');
 const insights = require('./insights');
+const { errorSummary } = require('./errorSummary');
 const {
   loadImageDataUrls,
   resolveDiagnosticImages,
@@ -346,7 +347,6 @@ async function callInfoDisease(req, res) {
       
       // Validar que la respuesta tiene el formato esperado
       if (!result.data?.choices || !result.data.choices.length) {
-        console.error('❌ Invalid AI response format in callInfoDisease:', JSON.stringify(result.data));
         insights.error({
           message: 'Invalid AI response format - no choices array',
           response: JSON.stringify(result.data),
@@ -422,7 +422,12 @@ async function callInfoDisease(req, res) {
             { message: 'Empty AI response', code: 'EMPTY_RESPONSE' }
           );
         } catch (costError) {
-          console.error('Error guardando cost tracking:', costError);
+          insights.error({
+            message: 'Error guardando cost tracking en callInfoDisease',
+            error: costError.message,
+            tenantId: tenantId,
+            subscriptionId: subscriptionId
+          });
         }
         
         return res.status(200).send({ result: "error ai" });
@@ -473,7 +478,6 @@ async function callInfoDisease(req, res) {
             stages.push(...costStages(translationError.translationResult, 'reverse_translation')
               .map(stage => ({ ...stage, success: false })));
           }
-          console.error('Translation error:', translationError);
           insights.error({
             message: 'Disease info translation failed (gpt-6.1-terra and Azure Translator)',
             error: translationError.message,
@@ -509,7 +513,6 @@ async function callInfoDisease(req, res) {
         })));
         const failed = results.find((result) => result.status === 'rejected');
         if (!failed) return results.map((result) => result.value.texts[0]).join(separator);
-        console.error('Translation error:', failed.reason);
         insights.error({
           message: 'Disease info translation failed (gpt-6.1-terra and Azure Translator)',
           error: failed.reason?.message,
@@ -591,7 +594,6 @@ async function callInfoDisease(req, res) {
         console.log(`   ──────────────────────────`);
         console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens.total} tokens)`);
         } catch (costError) {
-          console.error('Error guardando cost tracking:', costError);
           insights.error({
             message: 'Error guardando cost tracking en callInfoDisease',
             error: costError.message,
@@ -626,7 +628,6 @@ async function callInfoDisease(req, res) {
           console.log(`   ──────────────────────────`);
           console.log(`   TOTAL: $${formatCost(totalCost)} (${totalTokens.total} tokens)`);
         } catch (costError) {
-          console.error('Error guardando cost tracking:', costError);
           insights.error({
             message: 'Error guardando cost tracking en callInfoDisease',
             error: costError.message,
@@ -646,8 +647,7 @@ async function callInfoDisease(req, res) {
   
     } catch (e) {
       insights.error(e);
-      console.log(e);
-      
+
       // Guardar cost tracking con error
       try {
         if (stages.length > 0) {
@@ -662,28 +662,25 @@ async function callInfoDisease(req, res) {
           );
         }
       } catch (costError) {
-        console.error('Error guardando cost tracking en catch:', costError);
+        insights.error({
+          message: 'Error guardando cost tracking en callInfoDisease',
+          error: costError.message,
+          tenantId: tenantId,
+          subscriptionId: subscriptionId
+        });
       }
       
+      // Sin req.body (lleva la descripción del caso) ni la traza (ya va con insights.error(e)).
+      // En producción insights.error no guarda `details`: solo se ve en local.
       const errorDetails = {
-        timestamp: new Date().toISOString(),
         endpoint: 'callInfoDisease',
-        myuuid: req.body.myuuid,
+        myuuid: req.body?.myuuid,
         tenantId: tenantId,
         subscriptionId: subscriptionId,
-        requestData: {
-          body: req.body,
-          questionType: req.body?.questionType,
-          disease: req.body?.disease,
-          lang: req.body?.detectedLang || 'en'
-        },
-        error: {
-          message: e.message,
-          stack: e.stack,
-          name: e.name
-        }
+        questionType: req.body?.questionType,
+        lang: req.body?.detectedLang || 'en',
+        error: errorSummary(e)
       };
-      console.error('Detailed API Error:', JSON.stringify(errorDetails, null, 2));
       insights.error({
         message: 'API Error in callInfoDisease',
         details: errorDetails,
@@ -702,10 +699,9 @@ async function callInfoDisease(req, res) {
             subscriptionId
           );
         } catch (emailError) {
-          console.log('Failed sending error email:', emailError);
           insights.error({
             message: 'Failed to send error email',
-            emailError: emailError
+            error: emailError?.message
           });
         }
         return res.status(400).send({
@@ -714,7 +710,6 @@ async function callInfoDisease(req, res) {
           details: e.response.data
         });
       } else {
-        console.error('Non-API Error:', JSON.stringify(errorDetails, null, 2));
         insights.error({
           message: 'Non-API Error in callInfoDisease',
           details: errorDetails
@@ -731,10 +726,9 @@ async function callInfoDisease(req, res) {
           subscriptionId
         );
       } catch (emailError) {
-        console.log('Failed sending error email:', emailError);
         insights.error({
           message: 'Failed to send error email',
-          emailError: emailError
+          error: emailError?.message
         });
       }
   

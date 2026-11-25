@@ -41,7 +41,6 @@ class CostTrackingService {
       
       return costRecord;
     } catch (error) {
-      console.error('Error guardando registro de costo:', error);
       insights.error({
         message: 'Error guardando registro de costo',
         error: error.message,
@@ -83,7 +82,6 @@ class CostTrackingService {
           continue;
         }
 
-        console.error(`Error guardando registro de costo (${context}):`, error);
         insights.error({
           message: 'Error guardando registro de costo',
           context,
@@ -360,7 +358,6 @@ class CostTrackingService {
       const stats = await CostTracking.getCostStats(tenantId, startDate, endDate);
       return stats;
     } catch (error) {
-      console.error('Error obteniendo estadísticas de costos:', error);
       insights.error({
         message: 'Error obteniendo estadísticas de costos',
         error: error.message,
@@ -384,7 +381,6 @@ class CostTrackingService {
       const stats = await CostTracking.getStageStats(tenantId, startDate, endDate);
       return stats;
     } catch (error) {
-      console.error('Error obteniendo estadísticas por etapa:', error);
       insights.error({
         message: 'Error obteniendo estadísticas por etapa',
         error: error.message,
@@ -433,7 +429,6 @@ class CostTrackingService {
         avgCostPerOperation: 0
       };
     } catch (error) {
-      console.error('Error obteniendo costo total:', error);
       insights.error({
         message: 'Error obteniendo costo total',
         error: error.message,
@@ -458,7 +453,6 @@ class CostTrackingService {
       
       return costs;
     } catch (error) {
-      console.error('Error obteniendo costos recientes:', error);
       insights.error({
         message: 'Error obteniendo costos recientes',
         error: error.message,
