@@ -30,6 +30,7 @@ const {
 const { locationContextText, resolveCountryCode, withLocationContext } = require('./locationContext');
 const { answerMedicalQuestion } = require('./medicalQuestionService');
 const { callClaudeDiagnosis } = require('./claudeFoundry');
+const { maskAnonMarkers, anonMarkersToHtml } = require('./anonMarkers');
 const {
   ADVANCED_DIAGNOSE_MODEL,
   isAdvancedRequest,
@@ -118,14 +119,6 @@ function isLongDiagnoseModel(model) {
     model === 'gpt56terra'
   );
 }
-
-// Regenerar HTML desde texto con marcadores [ANON-N]
-const toAnonymizedHtml = (txt) => {
- if (!txt || typeof txt !== 'string') return '';
- return txt
-   .replace(/\[ANON-(\d+)\]/g, (m, p1) => `<span style="background-color: black; display: inline-block; width:${parseInt(p1, 10)}em;">&nbsp;</span>`)
-   .replace(/\n/g, '<br>');
-};
 
 // Errores que el cliente muestra con su propio mensaje; el resto le llega como
 // PROCESSING_ERROR. Con el modo avanzado, el usuario conserva sus resultados anteriores.
@@ -1321,8 +1314,8 @@ ${medicalQuestionForModel}
           });
           recordStepCost('reverse_anonymization', 'reverse_anonymization', translated);
           const translatedTagged = translated.texts[0];
-          anonymizedResult.htmlText = toAnonymizedHtml(translatedTagged);
-          anonymizedDescription = translatedTagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
+          anonymizedResult.htmlText = anonMarkersToHtml(translatedTagged);
+          anonymizedDescription = maskAnonMarkers(translatedTagged, '*');
         } catch (anonymizedTranslationError) {
           recordStepCost('reverse_anonymization', 'reverse_anonymization', anonymizedTranslationError.translationResult);
           console.error('Anonymized text translation error:', anonymizedTranslationError.message);
@@ -1337,8 +1330,8 @@ ${medicalQuestionForModel}
       } else if (hasPersonalInfo) {
         // Generar HTML y texto plano a partir del texto taggeado sin traducir
         const tagged = anonymizedResult.htmlText;
-        anonymizedResult.htmlText = toAnonymizedHtml(tagged);
-        anonymizedDescription = tagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
+        anonymizedResult.htmlText = anonMarkersToHtml(tagged);
+        anonymizedDescription = maskAnonMarkers(tagged, '*');
       }
 
       if(shouldSaveAfterAnonymization){

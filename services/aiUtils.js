@@ -149,19 +149,29 @@ const ROLE_MARKER_SOURCE = '^[ \\t]*(?:prompt|system|assistant|user)[ \\t]*:';
 // significado si se borran. Solo se quita lo que rompe el prompt: las llaves
 // (los prompts usan {{placeholders}} y .replace() en cadena), las etiquetas
 // <tag> y los marcadores de rol.
+// Un solo borrado deja etiquetas anidadas: "<<b>img onerror=…>" queda en "<img onerror=…>".
+// Repetir hasta que no cambie es cuadrático con miles de niveles, así que tras el
+// borrado se separa del nombre cualquier "<" que aún abra una etiqueta ("< img"):
+// meter un espacio no crea otro "<", y "< img" ya no es HTML.
+// Las clases negadas excluyen también el carácter que abre ([^<>], [^{}]). Con [^>]*,
+// cada "<a" sin ">" detrás recorría el resto del texto: con los 400.000 caracteres de
+// /summarize una sola petición bloqueaba el proceso más de un minuto.
 function sanitizeInput(input) {
   return input
     .replace(/[{}]/g, '')
-    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(/<\/?[a-z][^<>]*>/gi, '')
+    .replace(/<(?=\/?[a-z])/gi, '< ')
     .replace(new RegExp(ROLE_MARKER_SOURCE, 'gim'), '')
     .trim();
 }
 
 // Sin flag /g: un RegExp global conserva lastIndex entre llamadas a test().
+// Todos lineales (ver sanitizeInput): para <script> basta la etiqueta de apertura;
+// exigir también el cierre obligaba a recorrer el texto entero por cada apertura.
 const SUSPICIOUS_PATTERNS = Object.freeze([
-  { pattern: /\{\{[^}]*\}\}/, reason: 'Contains Handlebars syntax' },
-  { pattern: /<script\b[^>]*>[\s\S]*?<\/script>/i, reason: 'Contains script tags' },
-  { pattern: /\$\{[^}]*\}/, reason: 'Contains template literals' },
+  { pattern: /\{\{[^{}]*\}\}/, reason: 'Contains Handlebars syntax' },
+  { pattern: /<script\b[^<>]*>/i, reason: 'Contains script tags' },
+  { pattern: /\$\{[^{}]*\}/, reason: 'Contains template literals' },
   { pattern: new RegExp(ROLE_MARKER_SOURCE, 'im'), reason: 'Contains OpenAI keywords' }
 ]);
 
