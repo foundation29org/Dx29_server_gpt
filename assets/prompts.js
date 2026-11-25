@@ -21,7 +21,7 @@ A single finding can be enough when it is clinically specific or localized. Exam
 3. "enrich" with one of:
 - "insufficient_patient_context": there is a real or implied patient problem, but the supplied clinical detail is too vague or nonspecific for a useful differential; guided questions could make it useful. Generic malaise ("I feel unwell/bad/ill"), unspecified pain, or isolated nonspecific fatigue/tiredness must use this route when no more discriminating clinical feature is supplied, even if a duration or demographic detail is present
 - "missing_patient_data": the user asks to analyze, summarize, or diagnose a patient but supplies no patient data
-- "non_medical": greetings, administrative requests, unrelated content, or content that neither presents a patient problem nor asks a medical knowledge question
+- "non_medical": only content with no health relevance at all: greetings or tests of the tool without a health question, questions about the service or an account, homework, games, entertainment, or other unrelated content. Questions about animals are also "non_medical", because this tool is for human patients
 
 PRIORITY RULES
 
@@ -34,6 +34,9 @@ PRIORITY RULES
 - Prefer "go" over "enrich" when a specific symptom, objective abnormality, test result, imaging report, or multi-feature case is present.
 - Localized or named findings are "go" even when the text is short: focal pain, numbness, itching with a body site, cough plus throat or chest symptoms, rash, bleeding, seizure, or similar. Do not use "enrich" just because age, associated symptoms, or duration are missing.
 - A disease name by itself is "explain" + "medical_education".
+- A general question about health, the body, sexuality, sleep, diet, supplements, skin care, medicines, or exposure to a substance is never "non_medical": use "explain" with the closest reason ("medication_safety" for choosing, dosing, or the safety of medicines and supplements; "medical_education" otherwise). If the text describes a patient's own symptoms or findings, the rules for "go" and "enrich" still apply.
+- A patient described only by age, sex, weight, habits, or location, with no symptom, finding, or question, is "enrich" + "insufficient_patient_context", never "non_medical".
+- A routine check-up or screening request without symptoms is "explain" + "medical_education".
 - Never answer the user's question and never provide medical advice. Only classify.
 
 EXAMPLES
@@ -86,8 +89,45 @@ Output: {"action":"explain","reason":"medical_education"}
 Input: "Hello, can you write an email?"
 Output: {"action":"enrich","reason":"non_medical"}
 
+Input: "Which vitamins are best for more energy?"
+Output: {"action":"explain","reason":"medication_safety"}
+
+Input: "Is it normal for breasts to be different sizes?"
+Output: {"action":"explain","reason":"medical_education"}
+
+Input: "35-year-old woman, 70 kg, non-smoker"
+Output: {"action":"enrich","reason":"insufficient_patient_context"}
+
+Input: "Annual health check, feeling fine, 48-year-old woman"
+Output: {"action":"explain","reason":"medical_education"}
+
+Input: "My cat keeps vomiting"
+Output: {"action":"enrich","reason":"non_medical"}
+{{imageContext}}
 INPUT:
 {{description}}`,
+        intentRoutingImages: `
+ATTACHED IMAGES
+
+The user attached {{imageCount}} medical image(s), such as a radiograph, ECG, scan, ultrasound, or clinical photo. The differential-diagnosis tool will analyze them together with the text, so the images are patient clinical data: a request to analyze "this" or "these images" is a request about a patient, never "non_medical".
+
+Also return three booleans. The system uses them to decide whether to analyze the images directly or first ask the user for the patient's age, sex, and symptoms, which matter to interpret medical images:
+- "patient_age_stated": true if the text states the patient's age or age group in any form ("63F", "aged 40", "my 3-year-old son", "a newborn", "elderly woman", "in her 40s"); otherwise false
+- "patient_sex_stated": true if the text states the patient's sex in any form ("male", "63F", "my son", "she", "pregnant woman"); otherwise false
+- "patient_symptoms_stated": true if the text describes at least one symptom, sign, complaint, or relevant clinical history of the patient (for example pain, fever, itching, a lump that has grown, a fall, or how long a problem has lasted); otherwise false. A question about the image alone ("is this X?", "what is this?", "any issues?"), the name of the study, or age and sex alone do not count
+
+Input: "Look at this scan, 40-year-old man"
+Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true,"patient_symptoms_stated":false}
+
+Input: "Chest x-ray, 45-year-old man with cough and fever for 5 days"
+Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":true,"patient_sex_stated":true,"patient_symptoms_stated":true}
+
+Input: "Painful red bump on the leg since Monday"
+Output: {"action":"go","reason":"patient_case_ready","patient_age_stated":false,"patient_sex_stated":false,"patient_symptoms_stated":true}
+
+Input: "What do you see in this photo? My son"
+Output: {"action":"enrich","reason":"missing_patient_data","patient_age_stated":false,"patient_sex_stated":true,"patient_symptoms_stated":false}
+`,
         withoutDiseases: `You are a diagnostic assistant. Given the patient case below, generate 5 possible diagnoses. For each:- Give a brief description of the disease- List symptoms the patient has that match the disease- List patient symptoms that are not typical for the disease
         Output format:
         Return a JSON array of 5 objects, each with the following keys:- "diagnosis": disease name- "description": brief summary of the disease- "symptoms_in_common": list of matching symptoms- "symptoms_not_in_common": list of patient symptoms not typical of that disease

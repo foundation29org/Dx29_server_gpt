@@ -7,9 +7,12 @@ const express = require('express');
 const compression = require('compression');
 const bodyParser = require('body-parser');
 const { correlationMiddleware } = require('./services/requestCorrelation');
+const { createApimGatewayGuard } = require('./services/apimGatewayGuard');
 const app = express();
 app.set('trust proxy', 1);
 app.use(correlationMiddleware);
+// Antes de leer el cuerpo: lo que no llega por el APIM se rechaza sin procesarlo
+app.use(createApimGatewayGuard());
 app.use(compression());
 const api = require('./routes');
 const cors = require('cors');

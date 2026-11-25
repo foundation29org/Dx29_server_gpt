@@ -2,6 +2,7 @@ const { getEndpointsByTimezone } = require('./aiUtils');
 const insights = require('./insights');
 const axios = require('axios');
 const { encodingForModel } = require("js-tiktoken");
+const { maskAnonMarkers } = require('./anonMarkers');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -152,24 +153,14 @@ Original text:
     const parts = response.split(/(\[ANON-\d+\])/g);
     resultResponse.hasPersonalInfo = parts.length > 1;
 
-    resultResponse.anonymizedText = parts.map(part => {
-      const match = part.match(/\[ANON-(\d+)\]/);
-      return match ? '*'.repeat(parseInt(match[1])) : part;
-    }).join('');
+    resultResponse.anonymizedText = maskAnonMarkers(response, '*');
 
     // Versión segura para Markdown: usar bloques negros Unicode (sin HTML)
-    resultResponse.markdownText = parts.map(part => {
-      const match = part.match(/\[ANON-(\d+)\]/);
-      return match ? '█'.repeat(parseInt(match[1])) : part;
-    }).join('');
+    resultResponse.markdownText = maskAnonMarkers(response, '█');
 
+    // Todavía con los marcadores: helpDiagnose lo traduce y lo pasa a HTML con
+    // anonMarkersToHtml
     resultResponse.htmlText = response;
-    /*resultResponse.htmlText = parts.map(part => {
-      const match = part.match(/\[ANON-(\d+)\]/);
-      return match
-        ? `<span style="background-color: black; display: inline-block; width:${parseInt(match[1])}em;">&nbsp;</span>`
-        : part;
-    }).join('').replace(/\n/g, '<br>');*/
   }
   return resultResponse;
 }

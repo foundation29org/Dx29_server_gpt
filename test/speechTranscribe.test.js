@@ -131,6 +131,23 @@ test('rate limiting stays 429 and a network failure stays 502', async () => {
   assert.equal(failureStatus(new Error('socket hang up')), 502);
 });
 
+test('the cost record carries the APIM subscription id, so billing does not see it as unowned', async () => {
+  state.azure = () => ({ data: { text: 'Hola', usage: {} } });
+  const res = {
+    set() { return this; },
+    status(code) { this.statusCode = code; return this; },
+    send(body) { this.body = body; return this; }
+  };
+  await transcribe({
+    headers: { 'x-tenant-id': 'dxgpt-prod', 'x-subscription-id': 'swa-sub-1' },
+    body: { myuuid: 'u-1', language: 'en' }
+  }, res);
+
+  assert.equal(state.costs.length, 1);
+  assert.equal(state.costs[0][0].subscriptionId, 'swa-sub-1');
+  assert.equal(state.costs[0][0].tenantId, 'dxgpt-prod');
+});
+
 test('a successful transcription is unchanged', async () => {
   state.azure = () => ({ data: { text: ' Hola doctor ', usage: {} } });
   const res = await call();

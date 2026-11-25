@@ -1,8 +1,6 @@
-const config = require('../config');
 const serviceEmail = require('./email');
 const insights = require('./insights');
 const Generalfeedback = require('../models/generalfeedback');
-const axios = require('axios');
 const { resolveDiagnoseModel } = require('./aiUtils');
 
 function getHeader(req, name) {
@@ -156,47 +154,6 @@ function sanitizeGeneralFeedbackData(data) {
   };
 }
 
-async function sendFlow(generalfeedback, lang, tenantId, subscriptionId) {
-  let requestBody = {
-    myuuid: generalfeedback.myuuid,
-    pregunta1: generalfeedback.pregunta1,
-    pregunta2: generalfeedback.pregunta2,
-    userType: generalfeedback.userType,
-    moreFunct: generalfeedback.moreFunct,
-    freeText: generalfeedback.freeText,
-    date: generalfeedback.date,
-    email: generalfeedback.email,
-    healthcareSpecialty: generalfeedback.healthcareSpecialty,
-    providedHealthcareSpecialty: generalfeedback.providedHealthcareSpecialty,
-    lang: lang,
-    tenantId: tenantId,
-    subscriptionId: subscriptionId
-  }
-
-  const endpointUrl = config.client_server.indexOf('dxgpt.app') === -1
-    ? 'https://default163d001a45914200a300b9062d2e31.ec.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/6b6ab71c5e514ce08788a3a0599e9f0e/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=X-kFUWvqV0tMlPuKvzuKDYcrlSr6OcWY13_egHaV85U'
-    : 'https://default163d001a45914200a300b9062d2e31.ec.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/28e2bf2fb424494f8f82890efb4fcbbf/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pqqiiqIKGD1-O7I0j3T8ZD5N_R87XQMaBCt2vFVdupM';
-
-  try {
-    await axios.post(endpointUrl, requestBody, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-  } catch (error) {
-    console.log(error)
-    console.error('Error al enviar datos:', error.message);
-    let infoError = {
-      error: error,
-      requestInfo: requestBody,
-      tenantId: tenantId,
-      operation: 'sendFlow',
-      subscriptionId: subscriptionId
-    }
-    insights.error(infoError);
-  }
-}
-
 async function sendGeneralFeedback(req, res) {
   // Obtener headers
   const subscriptionId = getHeader(req, 'x-subscription-id');
@@ -245,11 +202,14 @@ async function sendGeneralFeedback(req, res) {
       date: new Date(Date.now()).toString(),
       fileNames: sanitizedData.fileNames,
       model: sanitizedData.model,
+      // Idioma de la interfaz: las novedades se envían en español o en inglés según él.
+      // Antes solo quedaba en la lista de SharePoint que copiaba Power Automate.
+      lang: sanitizedData.lang,
       tenantId: tenantId,
       subscriptionId: subscriptionId,
       isBetaPage: isBetaPage
     });
-    sendFlow(generalfeedback, sanitizedData.lang, tenantId, subscriptionId)
+    // Mongo es la única copia (ya no se copia a SharePoint con Power Automate)
     await generalfeedback.save();
     try {
       const mailPayload = {
@@ -288,6 +248,5 @@ async function sendGeneralFeedback(req, res) {
 
 module.exports = {
   sendGeneralFeedback,
-  sendFlow,
   sanitizeGeneralFeedbackData
-}; 
+};

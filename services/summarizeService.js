@@ -426,7 +426,13 @@ async function summarize(req, res) {
         context: 'summarize final save'
       });
     } catch (costError) {
-      console.error('Error guardando cost tracking:', costError);
+      insights.error({
+        message: 'Error guardando cost tracking',
+        error: costError.message,
+        operation: 'summarize',
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      });
     }
 
     // 7. Preparar la respuesta final
@@ -439,11 +445,11 @@ async function summarize(req, res) {
     });
 
   } catch (error) {
-    console.error('Error:', error);
-
     let infoError = {
       body: req.body,
       error: error.message,
+      code: error.code,
+      statusCode: error.response?.status,
       model: 'summarize',
       myuuid: req.body.myuuid,
       tenantId: tenantId,

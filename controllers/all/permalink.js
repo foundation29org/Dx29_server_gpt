@@ -1,6 +1,7 @@
 'use strict';
 
 const permalinkService = require('../../services/permalinkService');
+const insights = require('../../services/insights');
 
 class PermalinkController {
   async createPermalink(req, res) {
@@ -35,7 +36,12 @@ class PermalinkController {
 
       res.status(201).json(result);
     } catch (error) {
-      console.error('Error en createPermalink:', error);
+      insights.error({
+        message: 'Error creating permalink',
+        error: error.message,
+        operation: 'createPermalink',
+        myuuid: req.body?.myuuid
+      });
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor al crear permalink'
@@ -62,7 +68,12 @@ class PermalinkController {
 
       res.status(200).json(result);
     } catch (error) {
-      console.error('Error en getPermalink:', error);
+      // Sin el id: quien lo tiene puede abrir el permalink
+      insights.error({
+        message: 'Error getting permalink',
+        error: error.message,
+        operation: 'getPermalink'
+      });
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor al obtener permalink'

@@ -17,7 +17,6 @@ const permalinkCtrl = require('../controllers/all/permalink')
 const speechTranscribeCtrl = require('../controllers/all/speechTranscribe')
 const citationSupportCtrl = require('../services/citationSupportService')
 const pubsubRoutes = require('./pubsub')
-const reprocesarErrores = require('../scripts/reprocesar_errores')
 const api = express.Router()
 const { smartLimiter, healthLimiter } = require('../services/rateLimiter')
 

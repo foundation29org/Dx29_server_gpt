@@ -28,22 +28,17 @@ function ensureContainer(containerClient) {
 }
 
 async function createBlob(blobName, data, contentType, metadata) {
-    try {
-        const containerClient = getContainerClient();
-        await ensureContainer(containerClient);
-        
-        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-        
-        await blockBlobClient.upload(data, data.length, {
-            blobHTTPHeaders: { blobContentType: contentType },
-            ...(metadata ? { metadata } : {})
-        });
-        
-        return blockBlobClient.url;
-    } catch (error) {
-        console.error('Error al crear blob:', error);
-        throw error;
-    }
+    const containerClient = getContainerClient();
+    await ensureContainer(containerClient);
+    
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    
+    await blockBlobClient.upload(data, data.length, {
+        blobHTTPHeaders: { blobContentType: contentType },
+        ...(metadata ? { metadata } : {})
+    });
+    
+    return blockBlobClient.url;
 }
 
 function safePathSegment(value) {

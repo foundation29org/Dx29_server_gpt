@@ -151,7 +151,13 @@ function startSlowAnalysisWatch(context) {
             context.tenantId,
             context.subscriptionId
         )).catch((error) => {
-            console.error('Error sending slow multimodal analysis email:', error);
+            insights.error({
+              message: 'Error sending slow multimodal analysis email',
+              error: error?.message,
+              correlationId: context.correlationId,
+              tenantId: context.tenantId,
+              subscriptionId: context.subscriptionId
+            });
         });
     }, SLOW_ANALYSIS_ALERT_MS);
     return () => clearTimeout(timer);
@@ -824,7 +830,13 @@ const processMultimodalInput = async (req, res) => {
                     subscriptionId
                 );
             } catch (emailError) {
-                console.error('Error sending error email:', emailError);
+                insights.error({
+                  message: 'Error sending multimodal error email',
+                  error: emailError?.message,
+                  correlationId,
+                  tenantId: tenantId,
+                  subscriptionId: subscriptionId
+                });
             }
         }
         

@@ -176,9 +176,10 @@ async function translateText(text, targetLang, endpoint) {
       endpoint: endpoint?.name || endpoint?.region || 'unknown',
       error: error.message,
       translatorError: error.response?.data,
+      statusCode: error.response?.status,
+      code: error.response?.data?.error?.code,
     };
     insights.error(infoError);
-    console.error('Translation error:', error.response?.data || error);
     
     if (error.response?.status === 401) {
       throw new Error('Authentication failed with translation service');
@@ -261,9 +262,10 @@ async function translateInvert(text, targetLang, endpoint) {
       endpoint: endpoint?.name || endpoint?.region || 'unknown',
       error: error.message,
       translatorError: error.response?.data,
+      statusCode: error.response?.status,
+      code: error.response?.data?.error?.code,
     };
     insights.error(infoError);
-    console.error('Translation invert error:', error.response?.data || error);
     
     if (error.response?.status === 401) {
       throw new Error('Authentication failed with translation service');

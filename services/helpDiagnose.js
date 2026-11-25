@@ -30,6 +30,7 @@ const {
 const { locationContextText, resolveCountryCode, withLocationContext } = require('./locationContext');
 const { answerMedicalQuestion } = require('./medicalQuestionService');
 const { callClaudeDiagnosis } = require('./claudeFoundry');
+const { maskAnonMarkers, anonMarkersToHtml } = require('./anonMarkers');
 const {
   ADVANCED_DIAGNOSE_MODEL,
   isAdvancedRequest,
@@ -119,15 +120,6 @@ function isLongDiagnoseModel(model) {
   );
 }
 
-
-// Regenerar HTML desde texto con marcadores [ANON-N]
-const toAnonymizedHtml = (txt) => {
- if (!txt || typeof txt !== 'string') return '';
- return txt
-   .replace(/\[ANON-(\d+)\]/g, (m, p1) => `<span style="background-color: black; display: inline-block; width:${parseInt(p1, 10)}em;">&nbsp;</span>`)
-   .replace(/\n/g, '<br>');
-};
-
 // Errores que el cliente muestra con su propio mensaje; el resto le llega como
 // PROCESSING_ERROR. Con el modo avanzado, el usuario conserva sus resultados anteriores.
 const PUBLIC_PROCESSING_ERROR_CODES = new Set([
@@ -166,12 +158,8 @@ async function processAIRequest(data, requestInfo = null, model = defaultModel) 
       return { result: 'success', message: 'Sent via WebPubSub' };
 
     } catch (error) {
-      // Enviar error via WebPubSub
-      try {
-        await pubsubService.sendError(userId, error, processingErrorCode(error));
-      } catch (pubsubError) {
-        console.error('Error sending WebPubSub error notification:', pubsubError);
-      }
+      // Enviar error via WebPubSub (sendError no lanza: si falla, lo registra él)
+      await pubsubService.sendError(userId, error, processingErrorCode(error));
       throw error;
     }
   }
@@ -389,6 +377,8 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
     };
     // El modo avanzado se pide sobre un caso que ya se diagnosticó: no se vuelve a clasificar
     const forceDiagnosis = flow === 'diagnose' && (data.forceDiagnosis === true || advanced);
+    // Las imágenes clínicas ya resueltas cuentan como datos del paciente para el enrutado.
+    const routingImageCount = flow === 'diagnose' && Array.isArray(data.imageUrls) ? data.imageUrls.length : 0;
     if (forceDiagnosis) {
       intentDecision = {
         action: 'go',
@@ -403,7 +393,14 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
         flow,
         timezone: data.timezone,
         model: modelIntencion,
-        requestData: dataRequest
+        requestData: dataRequest,
+        imageCount: routingImageCount,
+        // Los datos de las imágenes se piden una sola vez por caso (30 min por usuario).
+        wasAskedForImageData: () => DiagnoseSessionService.hasRecentImageAsk({
+          myuuid: data.myuuid,
+          tenantId: data.tenantId,
+          subscriptionId: data.subscriptionId
+        })
       });
     }
     queryType = intentDecision.queryType;
@@ -414,6 +411,7 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       `⏱ intentRouting (${modelIntencion}) ${intentDecision.duration}ms: ` +
       `${intentDecision.action}/${intentDecision.reason}` +
       `${forceDiagnosis ? ' [user continue]' : ''}` +
+      `${intentDecision.imageRule ? ` [images: ${intentDecision.imageRule}]` : ''}` +
       `${intentDecision.usedFallback ? ' [parse fallback]' : ''}` +
       `${intentDecision.transportFallback ? ' [transport fallback]' : ''}` +
       `${intentDecision.structuredOutputFallback ? ' [plain JSON fallback]' : ''}`
@@ -431,7 +429,15 @@ async function processAIRequestInternal(data, requestInfo = null, model = defaul
       structuredOutputFallback: String(intentDecision.structuredOutputFallback || false),
       forceDiagnosis: String(forceDiagnosis),
       advanced: String(advanced),
-      descriptionLength: String(data.description?.length || 0)
+      descriptionLength: String(data.description?.length || 0),
+      imageCount: String(routingImageCount),
+      imageRule: String(intentDecision.imageRule || 'none'),
+      modelAction: String(intentDecision.modelAction || intentDecision.action),
+      // Con imágenes: qué datos del paciente vio el modelo en el texto ('n/a' sin imágenes).
+      ageStated: String(intentDecision.ageStated ?? 'n/a'),
+      sexStated: String(intentDecision.sexStated ?? 'n/a'),
+      symptomsStated: String(intentDecision.symptomsStated ?? 'n/a'),
+      askOnceLookupFailed: String(Boolean(intentDecision.askOnceError))
     });
 
     if (intentDecision.transportFallback) {
@@ -809,7 +815,6 @@ ${medicalQuestionForModel}
       } catch (generalMedicalError) {
         data.model = data.model || modelType;
         generalMedicalError.phase = generalMedicalError.phase || 'general_medical_response';
-        console.error('Error generating general medical response:', generalMedicalError);
         insights.error({
           message: 'Error generating general medical response',
           error: generalMedicalError.message,
@@ -869,8 +874,15 @@ ${medicalQuestionForModel}
                 costTracking.total.tokens.total += anonCostDescription.totalTokens;
               }
             } catch (anonymError) {
-              console.error('Error during anonymization in else block:', anonymError);
               // Continuar sin anonimización si falla
+              insights.error({
+                message: 'Error during anonymization of a non-diagnosis query',
+                error: anonymError.message,
+                operation: 'anonymization',
+                myuuid: data.myuuid,
+                tenantId: data.tenantId,
+                subscriptionId: data.subscriptionId
+              });
             }
             
             const questionData = {
@@ -888,7 +900,9 @@ ${medicalQuestionForModel}
                 queryType: queryType,
                 intentAction: intentDecision.action,
                 intentReason: intentDecision.reason,
-                model: model
+                model: model,
+                // Marca el aviso de imágenes para no repetirlo en este caso (hasRecentImageAsk).
+                imageRule: intentDecision.imageRule
               },
               timezone: data.timezone,
               lang: data.lang || 'en',
@@ -1100,7 +1114,6 @@ ${medicalQuestionForModel}
     // Procesar la respuesta según el modelo
     usage = aiResponse.data?.usage;
     if (!aiResponse.data?.choices || !aiResponse.data.choices.length) {
-      console.error('❌ Invalid AI response format:', JSON.stringify(aiResponse.data));
       insights.error({
         message: 'Invalid AI response format - no choices array',
         response: JSON.stringify(aiResponse.data),
@@ -1301,8 +1314,8 @@ ${medicalQuestionForModel}
           });
           recordStepCost('reverse_anonymization', 'reverse_anonymization', translated);
           const translatedTagged = translated.texts[0];
-          anonymizedResult.htmlText = toAnonymizedHtml(translatedTagged);
-          anonymizedDescription = translatedTagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
+          anonymizedResult.htmlText = anonMarkersToHtml(translatedTagged);
+          anonymizedDescription = maskAnonMarkers(translatedTagged, '*');
         } catch (anonymizedTranslationError) {
           recordStepCost('reverse_anonymization', 'reverse_anonymization', anonymizedTranslationError.translationResult);
           console.error('Anonymized text translation error:', anonymizedTranslationError.message);
@@ -1317,8 +1330,8 @@ ${medicalQuestionForModel}
       } else if (hasPersonalInfo) {
         // Generar HTML y texto plano a partir del texto taggeado sin traducir
         const tagged = anonymizedResult.htmlText;
-        anonymizedResult.htmlText = toAnonymizedHtml(tagged);
-        anonymizedDescription = tagged.replace(/\[ANON-(\d+)\]/g, (m, p1) => '*'.repeat(parseInt(p1, 10)));
+        anonymizedResult.htmlText = anonMarkersToHtml(tagged);
+        anonymizedDescription = maskAnonMarkers(tagged, '*');
       }
 
       if(shouldSaveAfterAnonymization){
@@ -2161,7 +2174,19 @@ async function handleDiagnoseOrAsk(req, res, flow) {
       res.status(200).send({ result: 'processing' });
       processAIRequest(sanitizedData, requestInfo, effectiveModel)
         .catch(error => {
-          console.error('Error in background processing:', error);
+          // Los códigos públicos (imagen demasiado grande, modelo avanzado no disponible...)
+          // ya quedan como evento y el cliente recibe el aviso: no son excepciones.
+          if (PUBLIC_PROCESSING_ERROR_CODES.has(error?.code)) return;
+          insights.error({
+            message: error?.message || 'Error in background processing',
+            stack: error?.stack,
+            code: error?.code,
+            phase: error?.phase,
+            operation: 'background-processing',
+            myuuid: sanitizedData.myuuid,
+            tenantId: sanitizedData.tenantId,
+            subscriptionId: sanitizedData.subscriptionId
+          });
         });
       return;
     }
@@ -2170,7 +2195,6 @@ async function handleDiagnoseOrAsk(req, res, flow) {
     const result = await processAIRequest(sanitizedData, requestInfo, effectiveModel);
     return res.status(200).send(result);
   } catch (error) {
-    console.error('Error:', error);
     insights.error({
       message: error.message || `Unknown error in ${endpoint}`,
       stack: error.stack,

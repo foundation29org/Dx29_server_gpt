@@ -13,61 +13,51 @@ class PermalinkService {
   }
 
   async createPermalink(permalinkData, clientUuid) {
-    try {
-      // Generar ID único combinando UUID del cliente y fecha de creación
-      const permalinkId = this.generatePermalinkId(clientUuid, permalinkData.createdDate);
-      
-      // Guardar directamente en MongoDB
-      const permalink = new Permalink({
-        permalinkId,
-        medicalDescription: permalinkData.medicalDescription,
-        anonymizedDescription: permalinkData.anonymizedDescription,
-        diagnoses: permalinkData.diagnoses,
-        lang: permalinkData.lang,
-        createdDate: permalinkData.createdDate,
-        myuuid: clientUuid
-      });
-      
-      await permalink.save();
-      
-      return {
-        success: true,
-        permalinkId,
-        message: 'Permalink creado exitosamente'
-      };
-    } catch (error) {
-      console.error('Error al crear permalink:', error);
-      throw error;
-    }
+    // Generar ID único combinando UUID del cliente y fecha de creación
+    const permalinkId = this.generatePermalinkId(clientUuid, permalinkData.createdDate);
+    
+    // Guardar directamente en MongoDB
+    const permalink = new Permalink({
+      permalinkId,
+      medicalDescription: permalinkData.medicalDescription,
+      anonymizedDescription: permalinkData.anonymizedDescription,
+      diagnoses: permalinkData.diagnoses,
+      lang: permalinkData.lang,
+      createdDate: permalinkData.createdDate,
+      myuuid: clientUuid
+    });
+    
+    await permalink.save();
+    
+    return {
+      success: true,
+      permalinkId,
+      message: 'Permalink creado exitosamente'
+    };
   }
 
   async getPermalink(permalinkId) {
-    try {
-      // Buscar en MongoDB
-      const permalink = await Permalink.findOne({ permalinkId });
-      
-      if (!permalink) {
-        return {
-          success: false,
-          message: 'Permalink no encontrado'
-        };
-      }
-      
-      // Devolver los datos del permalink
+    // Buscar en MongoDB
+    const permalink = await Permalink.findOne({ permalinkId });
+    
+    if (!permalink) {
       return {
-        success: true,
-        data: {
-          medicalDescription: permalink.medicalDescription,
-          anonymizedDescription: permalink.anonymizedDescription,
-          diagnoses: permalink.diagnoses,
-          lang: permalink.lang,
-          createdDate: permalink.createdDate
-        }
+        success: false,
+        message: 'Permalink no encontrado'
       };
-    } catch (error) {
-      console.error('Error al obtener permalink:', error);
-      throw error;
     }
+    
+    // Devolver los datos del permalink
+    return {
+      success: true,
+      data: {
+        medicalDescription: permalink.medicalDescription,
+        anonymizedDescription: permalink.anonymizedDescription,
+        diagnoses: permalink.diagnoses,
+        lang: permalink.lang,
+        createdDate: permalink.createdDate
+      }
+    };
   }
 }
 

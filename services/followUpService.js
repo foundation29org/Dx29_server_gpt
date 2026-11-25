@@ -480,7 +480,6 @@ async function generateFollowUpQuestions(req, res) {
         }
       }
     } catch (parseError) {
-      console.error("Failed to parse questions:", parseError);
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
@@ -515,18 +514,13 @@ async function generateFollowUpQuestions(req, res) {
 
     // 4. Traducir las preguntas al idioma original si es necesario
     if (detectedLanguage !== 'en') {
-      try {
-        // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
-        const translated = await translateTexts(questions, detectedLanguage, {
-          timezone: sanitizedData.timezone,
-          requestData: dataRequest
-        }, syncBudget(requestStartedAt));
-        questions = translated.texts;
-        reverseStages = costStages(translated, 'reverse_translation');
-      } catch (translationError) {
-        console.error('Translation error:', translationError);
-        throw translationError;
-      }
+      // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
+      const translated = await translateTexts(questions, detectedLanguage, {
+        timezone: sanitizedData.timezone,
+        requestData: dataRequest
+      }, syncBudget(requestStartedAt));
+      questions = translated.texts;
+      reverseStages = costStages(translated, 'reverse_translation');
     }
 
     // Guardar cost tracking multi-etapa
@@ -599,7 +593,13 @@ async function generateFollowUpQuestions(req, res) {
       console.log(`   Reverse Translation (gpt-6.1-terra): $${formatCost(revLlm.cost)} (${revLlm.tokens} tokens)`);
       console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
-      console.error('Error guardando cost tracking:', costError);
+      insights.error({
+        message: 'Error guardando cost tracking',
+        error: costError.message,
+        operation: 'generateFollowUpQuestions',
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      });
     }
 
     // 6. Preparar la respuesta final
@@ -612,11 +612,11 @@ async function generateFollowUpQuestions(req, res) {
     });
 
   } catch (error) {
-    console.error('Error:', error);
-
     let infoError = {
       body: req.body,
       error: error.message,
+      code: error.code,
+      statusCode: error.response?.status,
       model: 'follow-up',
       myuuid: req.body.myuuid
     };
@@ -1006,7 +1006,13 @@ async function processFollowUpAnswers(req, res) {
       // Guardaremos al final, tras la traducción de vuelta
       var followUpStages = stages;
     } catch (costError) {
-      console.error('Error saving cost tracking (pre-reverse):', costError);
+      insights.error({
+        message: 'Error guardando cost tracking (pre-reverse)',
+        error: costError.message,
+        operation: 'processFollowUpAnswers',
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      });
     }
     if (!diagnoseResponse.data.choices[0].message.content) {
       insights.error({
@@ -1025,18 +1031,13 @@ async function processFollowUpAnswers(req, res) {
 
     // 4. Traducir la descripción actualizada al idioma original si es necesario
     if (detectedLanguage !== 'en') {
-      try {
-        // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
-        const translated = await translateTexts([updatedDescription], detectedLanguage, {
-          timezone: sanitizedData.timezone,
-          requestData: dataRequest
-        }, syncBudget(requestStartedAt));
-        updatedDescription = translated.texts[0];
-        reverseStages = costStages(translated, 'reverse_translation');
-      } catch (translationError) {
-        console.error('Translation error:', translationError);
-        throw translationError;
-      }
+      // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
+      const translated = await translateTexts([updatedDescription], detectedLanguage, {
+        timezone: sanitizedData.timezone,
+        requestData: dataRequest
+      }, syncBudget(requestStartedAt));
+      updatedDescription = translated.texts[0];
+      reverseStages = costStages(translated, 'reverse_translation');
     }
 
     // Añadir stage de reverse_translation y guardar definitivamente el cost tracking
@@ -1088,7 +1089,13 @@ async function processFollowUpAnswers(req, res) {
       console.log(`   Reverse Translation (gpt-6.1-terra): $${formatCost(revLlm.cost)} (${revLlm.tokens} tokens)`);
       console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
-      console.error('Error saving final cost tracking:', costError);
+      insights.error({
+        message: 'Error guardando cost tracking (final)',
+        error: costError.message,
+        operation: 'processFollowUpAnswers',
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      });
     }
 
     // 6. Preparar la respuesta final
@@ -1101,11 +1108,11 @@ async function processFollowUpAnswers(req, res) {
     });
 
   } catch (error) {
-    console.error('Error:', error);
-
     let infoError = {
       body: req.body,
       error: error.message,
+      code: error.code,
+      statusCode: error.response?.status,
       model: 'process-follow-up',
       myuuid: req.body.myuuid,
       tenantId: tenantId,
@@ -1432,7 +1439,13 @@ async function generateERQuestions(req, res) {
       // reverse_translation se añade tras traducir las preguntas
       var erStages = stages;
     } catch (costError) {
-      console.error('Error guardando cost tracking (pre-reverse):', costError);
+      insights.error({
+        message: 'Error guardando cost tracking (pre-reverse)',
+        error: costError.message,
+        operation: 'generateERQuestions',
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      });
     }
 
     if (!diagnoseResponse.data.choices[0].message.content) {
@@ -1457,7 +1470,6 @@ async function generateERQuestions(req, res) {
         throw new Error('Response is not an array');
       }
     } catch (parseError) {
-      console.error("Failed to parse questions:", parseError);
       insights.error({
         message: "Failed to parse follow-up questions",
         error: parseError.message,
@@ -1493,18 +1505,13 @@ async function generateERQuestions(req, res) {
 
     // 4. Traducir las preguntas al idioma original si es necesario
     if (detectedLanguage !== 'en') {
-      try {
-        // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
-        const translated = await translateTexts(questions, detectedLanguage, {
-          timezone: sanitizedData.timezone,
-          requestData: dataRequest
-        }, syncBudget(requestStartedAt));
-        questions = translated.texts;
-        reverseStages = costStages(translated, 'reverse_translation');
-      } catch (translationError) {
-        console.error('Translation error:', translationError);
-        throw translationError;
-      }
+      // gpt-6.1-terra con Azure de respaldo (ver llmTranslation.js)
+      const translated = await translateTexts(questions, detectedLanguage, {
+        timezone: sanitizedData.timezone,
+        requestData: dataRequest
+      }, syncBudget(requestStartedAt));
+      questions = translated.texts;
+      reverseStages = costStages(translated, 'reverse_translation');
     }
 
     // Añadir reverse_translation y guardar definitivamente
@@ -1555,7 +1562,13 @@ async function generateERQuestions(req, res) {
       console.log(`   Reverse Translation (gpt-6.1-terra): $${formatCost(revLlm.cost)} (${revLlm.tokens} tokens)`);
       console.log(`   Reverse Translation (Azure): $${formatCost(revAzure.cost)} (${revAzure.tokens} chars)`);
     } catch (costError) {
-      console.error('Error guardando cost tracking (final):', costError);
+      insights.error({
+        message: 'Error guardando cost tracking (final)',
+        error: costError.message,
+        operation: 'generateERQuestions',
+        tenantId: tenantId,
+        subscriptionId: subscriptionId
+      });
     }
 
     // 6. Preparar la respuesta final
@@ -1568,10 +1581,11 @@ async function generateERQuestions(req, res) {
     });
 
   } catch (error) {
-    console.error('Error:', error);
     let infoError = {
       body: req.body,
       error: error.message,
+      code: error.code,
+      statusCode: error.response?.status,
       model: 'follow-up',
       myuuid: req.body.myuuid,
       tenantId: tenantId,

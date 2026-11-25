@@ -16,8 +16,5 @@ env.prod
 azure*
 docker*
 APIM.MD
-docs*
-!docs/
-docs/*
-!docs/apim
+docs/
 deploy*
