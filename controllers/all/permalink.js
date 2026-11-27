@@ -3,38 +3,91 @@
 const permalinkService = require('../../services/permalinkService');
 const insights = require('../../services/insights');
 
+// /diagnose admite 8.000 caracteres; el margen es para el texto ya enmascarado.
+const MAX_DESCRIPTION_CHARS = 10000;
+const MAX_DIAGNOSES = 10;
+// Los diez diagnósticos ocupan unos 8.000 caracteres de mediana y 31.000 como máximo.
+const MAX_DIAGNOSES_JSON_CHARS = 100000;
+const MAX_TIMEZONE_CHARS = 64;
+const UUID_PATTERN = /^[0-9a-fA-F-]{36}$/;
+
+function getHeader(req, name) {
+  return req.headers?.[name.toLowerCase()];
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Sin zona horaria (clientes anteriores al 27-11-2026) se anonimiza en Europa,
+// la región más restrictiva.
+const DEFAULT_TIMEZONE = 'Europe/Madrid';
+
+// Los clientes anteriores no mandan `anonymized`: el aviso salía si anonymizedDescription
+// tenía algo y no era igual que el texto. Ninguno de los dos campos se guarda.
+function textWasAnonymized({ anonymized, anonymizedDescription, medicalDescription }) {
+  if (anonymized !== undefined) return anonymized === true;
+  return typeof anonymizedDescription === 'string' && anonymizedDescription !== '' &&
+    anonymizedDescription !== medicalDescription;
+}
+
+// anonymizedDescription y createdDate se ignoran: el servidor anonimiza el texto
+// y pone la fecha. Los clientes anteriores aún los envían.
+function validateCreateRequest(body) {
+  if (!isPlainObject(body)) return 'El cuerpo debe ser un objeto JSON';
+  const { medicalDescription, diagnoses, lang, myuuid, timezone, anonymized } = body;
+
+  // En análisis solo con imagen no hay texto del paciente: llega "" y es válido.
+  if (typeof medicalDescription !== 'string') return 'medicalDescription debe ser texto';
+  if (medicalDescription.length > MAX_DESCRIPTION_CHARS) {
+    return `medicalDescription no puede pasar de ${MAX_DESCRIPTION_CHARS} caracteres`;
+  }
+  if (!Array.isArray(diagnoses) || diagnoses.length === 0) return 'diagnoses debe ser una lista no vacía';
+  if (!diagnoses.slice(0, MAX_DIAGNOSES).every(isPlainObject)) return 'Cada diagnóstico debe ser un objeto';
+  if (JSON.stringify(diagnoses.slice(0, MAX_DIAGNOSES)).length > MAX_DIAGNOSES_JSON_CHARS) {
+    return 'diagnoses es demasiado grande';
+  }
+  if (typeof lang !== 'string' || lang.length < 2 || lang.length > 8) return 'lang debe tener entre 2 y 8 caracteres';
+  if (typeof myuuid !== 'string' || !UUID_PATTERN.test(myuuid)) return 'myuuid debe ser un UUID';
+  if (timezone !== undefined && (typeof timezone !== 'string' || timezone.length > MAX_TIMEZONE_CHARS)) {
+    return 'timezone no es válido';
+  }
+  if (anonymized !== undefined && typeof anonymized !== 'boolean') return 'anonymized debe ser true o false';
+  return null;
+}
+
 class PermalinkController {
   async createPermalink(req, res) {
     try {
-      const { medicalDescription, anonymizedDescription, diagnoses, lang, createdDate, myuuid } = req.body;
-
-      // En análisis solo con imagen no hay texto del paciente: medicalDescription
-      // y anonymizedDescription llegan como string vacío (""), lo cual es válido.
-      if (typeof medicalDescription !== 'string' || typeof anonymizedDescription !== 'string' || !diagnoses || !lang || !createdDate) {
-        return res.status(400).json({
-          success: false,
-          message: 'Faltan datos requeridos: medicalDescription, anonymizedDescription, diagnoses, lang, createdDate'
-        });
+      const invalidReason = validateCreateRequest(req.body);
+      if (invalidReason) {
+        return res.status(400).json({ success: false, message: invalidReason });
       }
 
-      if (!myuuid) {
-        return res.status(400).json({
-          success: false,
-          message: 'Se requiere myuuid en el body'
-        });
-      }
-
-      const permalinkData = {
-        medicalDescription,
-        anonymizedDescription,
-        diagnoses: Array.isArray(diagnoses) ? diagnoses.slice(0, 10) : diagnoses, // Limitar a top 10
+      const { medicalDescription, diagnoses, lang, myuuid, timezone } = req.body;
+      const result = await permalinkService.createPermalink({
+        diagnoses: diagnoses.slice(0, MAX_DIAGNOSES),
         lang,
-        createdDate
-      };
-
-      const result = await permalinkService.createPermalink(permalinkData, myuuid);
+        myuuid
+      });
 
       res.status(201).json(result);
+
+      // Después de responder: anonymizeText hace trabajo síncrono antes de su primer
+      // await, y el navegador solo deja compartir unos segundos después del clic.
+      if (medicalDescription.trim()) {
+        const context = {
+          timezone: timezone || DEFAULT_TIMEZONE,
+          tenantId: getHeader(req, 'x-tenant-id'),
+          subscriptionId: getHeader(req, 'x-subscription-id'),
+          myuuid,
+          lang
+        };
+        const alreadyAnonymized = textWasAnonymized(req.body);
+        setImmediate(() => {
+          void permalinkService.storeAnonymizedDescription(result.permalinkId, medicalDescription, context, { alreadyAnonymized });
+        });
+      }
     } catch (error) {
       insights.error({
         message: 'Error creating permalink',
@@ -51,16 +104,7 @@ class PermalinkController {
 
   async getPermalink(req, res) {
     try {
-      const { id } = req.params;
-
-      if (!id) {
-        return res.status(400).json({
-          success: false,
-          message: 'Se requiere el ID del permalink'
-        });
-      }
-
-      const result = await permalinkService.getPermalink(id);
+      const result = await permalinkService.getPermalink(req.params.id);
 
       if (!result.success) {
         return res.status(404).json(result);
@@ -82,4 +126,4 @@ class PermalinkController {
   }
 }
 
-module.exports = new PermalinkController(); 
+module.exports = new PermalinkController();
