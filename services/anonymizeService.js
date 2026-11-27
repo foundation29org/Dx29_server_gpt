@@ -6,9 +6,12 @@ const { maskAnonMarkers } = require('./anonMarkers');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Crear el codificador cuesta ~0,5 s de CPU y bloquea el proceso: se crea una sola vez.
+let anonEncoder = null;
+
 function calculateMaxTokensAnon(jsonText) {
-  const enc = encodingForModel("gpt-4o");
-  const patientDescriptionTokens = enc.encode(jsonText).length;
+  anonEncoder = anonEncoder || encodingForModel("gpt-4o");
+  const patientDescriptionTokens = anonEncoder.encode(jsonText).length;
   return patientDescriptionTokens + 100;
 }
 
@@ -127,7 +130,7 @@ Original text:
         error: error.message,
         retryCount: i,
         operation: 'anonymizeText',
-        requestData: text,
+        textLength: typeof text === 'string' ? text.length : 0,
         model: model,
         timezone: timezone,
         tenantId: tenantId,
