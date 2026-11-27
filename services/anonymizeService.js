@@ -6,9 +6,12 @@ const { maskAnonMarkers } = require('./anonMarkers');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Crear el codificador cuesta ~0,5 s de CPU y bloquea el proceso: se crea una sola vez.
+let anonEncoder = null;
+
 function calculateMaxTokensAnon(jsonText) {
-  const enc = encodingForModel("gpt-4o");
-  const patientDescriptionTokens = enc.encode(jsonText).length;
+  anonEncoder = anonEncoder || encodingForModel("gpt-4o");
+  const patientDescriptionTokens = anonEncoder.encode(jsonText).length;
   return patientDescriptionTokens + 100;
 }
 
@@ -127,7 +130,7 @@ Original text:
         error: error.message,
         retryCount: i,
         operation: 'anonymizeText',
-        requestData: text,
+        textLength: typeof text === 'string' ? text.length : 0,
         model: model,
         timezone: timezone,
         tenantId: tenantId,
@@ -138,18 +141,32 @@ Original text:
     }
   }
 
+  // anonymizationFailed: el modelo no devolvió texto (p. ej. lo cortó el filtro de
+  // contenido). No es lo mismo que «sin datos personales»: no se sabe qué había, así
+  // que quien llama no debe guardar el texto original.
   const resultResponse = {
     hasPersonalInfo: false,
+    anonymizationFailed: false,
     anonymizedText: '',
     markdownText: '',
     htmlText: '',
     usage: result?.data?.usage || null
   };
 
-  const content = result?.data?.choices?.[0]?.message?.content;
-  // Verificar si existe el contenido
-  if (content) {
-    const response = content.trim().replace(/^"""\s*|\s*"""$/g, '');
+  const choice = result?.data?.choices?.[0];
+  const content = choice?.message?.content;
+  const response = typeof content === 'string'
+    ? content.trim().replace(/^"""\s*|\s*"""$/g, '')
+    : '';
+  if (!response) {
+    resultResponse.anonymizationFailed = true;
+    insights.trackEvent('AnonymizationEmpty', {
+      finishReason: String(choice?.finish_reason || ''),
+      model: String(model),
+      tenantId: String(tenantId || ''),
+      myuuid: String(myuuid || '')
+    });
+  } else {
     const parts = response.split(/(\[ANON-\d+\])/g);
     resultResponse.hasPersonalInfo = parts.length > 1;
 

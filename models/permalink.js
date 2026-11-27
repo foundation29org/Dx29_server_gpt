@@ -12,9 +12,15 @@ const PermalinkSchema = new Schema({
     type: String,
     default: ''
   },
+  // Solo en los anteriores al 27-11-2026: la descripción en HTML con los datos tapados.
   anonymizedDescription: {
     type: String,
     default: ''
+  },
+  // Se taparon datos personales de medicalDescription (la vista lo avisa).
+  anonymized: {
+    type: Boolean,
+    default: false
   },
   diagnoses: {
     type: [Schema.Types.Mixed],
